@@ -13,10 +13,6 @@
   <img src="docs/screenshots/now-playing.jpg" alt="Geekify now playing screen" width="190" />
 </p>
 
-<p align="center">
-  <img src="docs/screenshots/account.jpg" alt="Geekify account menu" width="190" />
-</p>
-
 ## Features
 
 - Search songs, albums, artists, and playlists.
