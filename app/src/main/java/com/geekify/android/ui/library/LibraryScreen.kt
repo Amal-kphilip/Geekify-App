@@ -17,10 +17,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
 import com.geekify.android.ui.components.*
 import com.geekify.android.ui.theme.*
 
@@ -31,10 +33,12 @@ fun LibraryScreen(
     userName: String?,
     onAvatarClick: () -> Unit,
     onLikedClick: () -> Unit,
-    onPlaylistClick: (String, String) -> Unit
+    onPlaylistClick: (String, String) -> Unit,
+    onCollectionClick: (String, String) -> Unit = { _, _ -> }
 ) {
     val liked by viewModel.liked.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
+    val savedCollections by viewModel.savedCollections.collectAsState()
     var showCreateDialog by remember { mutableStateOf(false) }
 
     AuroraBackground {
@@ -67,7 +71,7 @@ fun LibraryScreen(
                     )
                 }
 
-                items(playlists, key = { it.id }) { playlist ->
+                items(playlists, key = { "playlist:" + it.id }) { playlist ->
                     LibraryRow(
                         title = playlist.name,
                         subtitle = "Playlist",
@@ -75,6 +79,30 @@ fun LibraryScreen(
                         art = {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Icon(Icons.Default.QueueMusic, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(30.dp))
+                            }
+                        }
+                    )
+                }
+
+                // Albums and playlists added from the collection page.
+                items(savedCollections, key = { "saved:" + it.id }) { saved ->
+                    val label = if (saved.kind == "ALBUM") "Album" else "Playlist"
+                    LibraryRow(
+                        title = saved.title,
+                        subtitle = listOfNotNull(label, saved.subtitle?.takeIf { it.isNotBlank() }).joinToString(" • "),
+                        onClick = { onCollectionClick(saved.id, saved.kind) },
+                        art = {
+                            if (saved.thumbnailUrl != null) {
+                                AsyncImage(
+                                    model = saved.thumbnailUrl,
+                                    contentDescription = saved.title,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.QueueMusic, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(30.dp))
+                                }
                             }
                         }
                     )

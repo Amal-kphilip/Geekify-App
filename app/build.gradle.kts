@@ -15,7 +15,7 @@ android {
         applicationId = "com.geekify.android"
         minSdk = 26
         targetSdk = 37
-        versionCode = providers.gradleProperty("appVersionCode").orNull?.toIntOrNull() ?: 1
+        versionCode = providers.gradleProperty("appVersionCode").orNull?.toIntOrNull() ?: 110
         versionName = providers.gradleProperty("appVersionName").orNull ?: "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

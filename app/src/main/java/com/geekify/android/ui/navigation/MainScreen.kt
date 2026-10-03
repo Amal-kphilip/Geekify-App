@@ -101,6 +101,7 @@ fun MainScreen(
     val playerState by playerViewModel.state.collectAsState()
     val likedTracks by libraryViewModel.liked.collectAsState()
     val playlists by libraryViewModel.playlists.collectAsState()
+    val savedCollections by libraryViewModel.savedCollections.collectAsState()
     val avatarUrl = accountState.user?.photoUrl
     val avatarName = accountState.user?.name
     val context = LocalContext.current
@@ -279,7 +280,8 @@ fun MainScreen(
                             userName = avatarName,
                             onAvatarClick = { showAccountSheet = true },
                             onLikedClick = { navController.navigate(Screen.Liked.route) },
-                            onPlaylistClick = { id, name -> navController.navigate(Screen.Playlist.createRoute(id, name)) }
+                            onPlaylistClick = { id, name -> navController.navigate(Screen.Playlist.createRoute(id, name)) },
+                            onCollectionClick = { id, kind -> navController.navigate(Screen.Collection.createRoute(id, kind)) }
                         )
                     }
 
@@ -347,7 +349,9 @@ fun MainScreen(
                             onBack = { navController.popBackStack() },
                             onPlayTrack = onTrackClick,
                             onTrackActions = onTrackActions,
-                            onShufflePlay = { playerViewModel.playShuffled(it) }
+                            onShufflePlay = { playerViewModel.playShuffled(it) },
+                            isSaved = savedCollections.any { it.id == id },
+                            onToggleSaved = { libraryViewModel.toggleSavedCollection(it) }
                         )
                     }
 

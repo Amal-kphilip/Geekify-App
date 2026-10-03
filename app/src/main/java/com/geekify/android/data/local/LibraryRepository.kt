@@ -1,14 +1,67 @@
 package com.geekify.android.data.local
 
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import com.geekify.android.data.model.Track
+import kotlinx.coroutines.flow.first
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** An album or playlist from YouTube Music that the person added to Your Library (a link, not a copy of the tracks). */
+@Serializable
+data class SavedCollection(
+    val id: String,
+    val kind: String,          // CollectionKind name: ALBUM or PLAYLIST
+    val title: String,
+    val subtitle: String? = null,
+    val thumbnailUrl: String? = null,
+    val savedAt: Long = System.currentTimeMillis()
+)
+
 @Singleton
-class LibraryRepository @Inject constructor(private val dao: PlaylistDao, private val likedDao: LikedDao) {
+class LibraryRepository @Inject constructor(
+    private val dao: PlaylistDao,
+    private val likedDao: LikedDao,
+    private val dataStore: DataStore<Preferences>
+) {
+    private val savedKey = stringPreferencesKey("saved_collections")
+    private val savedJson = Json { ignoreUnknownKeys = true }
+
+    private fun decodeSaved(prefs: Preferences): List<SavedCollection> =
+        prefs[savedKey]?.let { runCatching { savedJson.decodeFromString<List<SavedCollection>>(it) }.getOrNull() } ?: emptyList()
+
+    val savedCollections: Flow<List<SavedCollection>> = dataStore.data.map { decodeSaved(it).sortedByDescending { c -> c.savedAt } }
+
+    /** Adds the collection if it is not saved yet, removes it if it is. Returns true when it is now saved. */
+    suspend fun toggleSavedCollection(collection: SavedCollection): Boolean {
+        var nowSaved = false
+        dataStore.edit { prefs ->
+            val current = decodeSaved(prefs)
+            val updated = if (current.any { it.id == collection.id }) {
+                current.filterNot { it.id == collection.id }
+            } else {
+                nowSaved = true
+                current + collection.copy(savedAt = System.currentTimeMillis())
+            }
+            prefs[savedKey] = savedJson.encodeToString(updated)
+        }
+        return nowSaved
+    }
+
+    suspend fun savedCollectionsOnce(): List<SavedCollection> = decodeSaved(dataStore.data.first())
+    suspend fun replaceAllSavedCollections(list: List<SavedCollection>) {
+        dataStore.edit { it[savedKey] = savedJson.encodeToString(list) }
+    }
+
     val liked: Flow<List<Track>> = likedDao.all().map { it.map(LikedTrackEntity::toTrack) }
 
     val playlists: Flow<List<LocalPlaylist>> = dao.allPlaylists().map { pls ->

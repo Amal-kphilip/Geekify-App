@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.geekify.android.data.local.LibraryRepository
 import com.geekify.android.data.local.LocalPlaylist
+import com.geekify.android.data.local.SavedCollection
 import com.geekify.android.data.model.Track
 import com.geekify.android.data.sync.SyncRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -22,6 +23,16 @@ class LibraryViewModel @Inject constructor(
 
     val playlists: StateFlow<List<LocalPlaylist>> = library.playlists
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val savedCollections: StateFlow<List<SavedCollection>> = library.savedCollections
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun toggleSavedCollection(collection: SavedCollection) {
+        viewModelScope.launch {
+            library.toggleSavedCollection(collection)
+            sync.schedulePush()
+        }
+    }
 
     fun createPlaylist(name: String) {
         viewModelScope.launch {

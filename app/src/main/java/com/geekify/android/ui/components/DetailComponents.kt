@@ -6,6 +6,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AddCircleOutline
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Icon
@@ -45,6 +47,8 @@ fun DetailHeader(
     modifier: Modifier = Modifier,
     description: String? = null,
     onShuffle: (() -> Unit)? = null,
+    isSaved: Boolean = false,
+    onToggleSaved: (() -> Unit)? = null,
     trailing: @Composable RowScope.() -> Unit = {},
     art: @Composable BoxScope.() -> Unit
 ) {
@@ -131,6 +135,18 @@ fun DetailHeader(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (onToggleSaved != null) {
+                // Add to / remove from Your Library: outlined plus when not saved, green check when saved.
+                IconButton(onClick = onToggleSaved, modifier = Modifier.size(48.dp)) {
+                    Icon(
+                        imageVector = if (isSaved) Icons.Default.CheckCircle else Icons.Default.AddCircleOutline,
+                        contentDescription = if (isSaved) "Remove from Your Library" else "Add to Your Library",
+                        tint = if (isSaved) SpotifyGreen else TextSecondary,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+            }
             if (onShuffle != null) {
                 IconButton(onClick = onShuffle, modifier = Modifier.size(48.dp)) {
                     Icon(Icons.Default.Shuffle, contentDescription = "Shuffle play", tint = TextSecondary, modifier = Modifier.size(28.dp))

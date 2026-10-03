@@ -1,5 +1,6 @@
 package com.geekify.android.ui.details
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -12,8 +13,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.geekify.android.data.local.SavedCollection
 import com.geekify.android.data.model.CollectionKind
 import com.geekify.android.data.model.Track
 import com.geekify.android.ui.components.AuroraBackground
@@ -31,8 +34,11 @@ fun CollectionScreen(
     onBack: () -> Unit,
     onPlayTrack: (Track, List<Track>) -> Unit,
     onTrackActions: (Track) -> Unit,
-    onShufflePlay: ((List<Track>) -> Unit)? = null
+    onShufflePlay: ((List<Track>) -> Unit)? = null,
+    isSaved: Boolean = false,
+    onToggleSaved: ((SavedCollection) -> Unit)? = null
 ) {
+    val context = LocalContext.current
     val state by viewModel.collectionState.collectAsState()
 
     LaunchedEffect(id, kind) {
@@ -66,6 +72,23 @@ fun CollectionScreen(
                         ).joinToString(" • "),
                         onPlay = if (collection.tracks.isNotEmpty()) ({ onPlayTrack(collection.tracks.first(), collection.tracks) }) else null,
                         onShuffle = if (collection.tracks.isNotEmpty() && onShufflePlay != null) ({ onShufflePlay(collection.tracks) }) else null,
+                        isSaved = isSaved,
+                        onToggleSaved = if (onToggleSaved != null) ({
+                            onToggleSaved(
+                                SavedCollection(
+                                    id = id,
+                                    kind = kind.name,
+                                    title = collection.title,
+                                    subtitle = collection.artist,
+                                    thumbnailUrl = thumbUrl
+                                )
+                            )
+                            Toast.makeText(
+                                context,
+                                if (isSaved) "Removed from Your Library" else "Added to Your Library",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }) else null,
                         art = {
                             if (thumbUrl != null) {
                                 AsyncImage(
