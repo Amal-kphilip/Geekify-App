@@ -2,6 +2,9 @@ package com.geekify.android.ui.navigation
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -12,6 +15,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Search
@@ -20,6 +24,7 @@ import androidx.compose.material.icons.outlined.LibraryMusic
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -103,6 +108,8 @@ fun MainScreen(
     val updateScope = rememberCoroutineScope()
     var availableUpdate by remember { mutableStateOf<AvailableUpdate?>(null) }
     var isDownloadingUpdate by remember { mutableStateOf(false) }
+    // null = size unknown (indeterminate ring); otherwise the real 0f..1f download fraction.
+    var updateProgress by remember { mutableStateOf<Float?>(null) }
     var updateError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
@@ -433,9 +440,17 @@ fun MainScreen(
                 onDismissRequest = { if (!isDownloadingUpdate) availableUpdate = null },
                 title = { Text("Update available") },
                 text = {
-                    Text(
-                        updateError ?: "Geekify ${update.version} is ready to download and install."
-                    )
+                    Column {
+                        Text(
+                            updateError ?: "Geekify ${update.version} is ready to download and install."
+                        )
+                        AnimatedVisibility(visible = isDownloadingUpdate) {
+                            UpdateProgressRing(
+                                progress = updateProgress,
+                                modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+                            )
+                        }
+                    }
                 },
                 confirmButton = {
                     TextButton(
@@ -443,9 +458,10 @@ fun MainScreen(
                         onClick = {
                             isDownloadingUpdate = true
                             updateError = null
+                            updateProgress = null
                             updateScope.launch {
                                 runCatching {
-                                    updateManager.download(update)
+                                    updateManager.download(update) { updateProgress = it }
                                 }.onSuccess { apk ->
                                     isDownloadingUpdate = false
                                     updateManager.install(apk)
@@ -466,5 +482,37 @@ fun MainScreen(
             )
         }
     }
+    }
+}
+
+/** Circular download indicator: smooth real-percentage ring that turns into a check at 100%. */
+@Composable
+private fun UpdateProgressRing(progress: Float?, modifier: Modifier = Modifier) {
+    val animated by animateFloatAsState(
+        targetValue = progress ?: 0f,
+        animationSpec = tween(300, easing = LinearEasing),
+        label = "updateProgress"
+    )
+    val done = progress != null && progress >= 1f
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.size(64.dp), contentAlignment = Alignment.Center) {
+            if (progress == null) {
+                CircularProgressIndicator(modifier = Modifier.fillMaxSize(), strokeWidth = 5.dp)
+            } else {
+                CircularProgressIndicator(
+                    progress = { animated },
+                    modifier = Modifier.fillMaxSize(),
+                    strokeWidth = 5.dp,
+                    color = if (done) BrandMint else ProgressIndicatorDefaults.circularColor
+                )
+            }
+            Crossfade(targetState = done, animationSpec = tween(200), label = "updateDone") { finished ->
+                if (finished) {
+                    Icon(Icons.Filled.Check, contentDescription = "Download complete", tint = BrandMint)
+                } else if (progress != null) {
+                    Text("${(animated * 100).toInt()}%", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
     }
 }

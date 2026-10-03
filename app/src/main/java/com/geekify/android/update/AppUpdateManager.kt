@@ -61,13 +61,37 @@ class AppUpdateManager(private val context: Context) {
         }.getOrNull()
     }
 
-    suspend fun download(update: AvailableUpdate): File = withContext(Dispatchers.IO) {
+    /**
+     * [onProgress] is optional and purely informational: it receives 0f..1f as bytes arrive, or is
+     * never called when the server does not report a size. It does not affect the download itself.
+     */
+    suspend fun download(update: AvailableUpdate, onProgress: (Float) -> Unit = {}): File = withContext(Dispatchers.IO) {
         val updatesDir = File(context.cacheDir, "updates").apply { mkdirs() }
         val destination = File(updatesDir, "Geekify-${update.version}.apk")
         val request = Request.Builder().url(update.downloadUrl).build()
         client.newCall(request).execute().use { response ->
             check(response.isSuccessful) { "Download failed (${response.code})" }
-            response.body.byteStream().use { input -> destination.outputStream().use(input::copyTo) }
+            val total = response.body.contentLength()
+            response.body.byteStream().use { input ->
+                destination.outputStream().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var copied = 0L
+                    var lastPercent = -1
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                        copied += read
+                        if (total > 0L) {
+                            val percent = (copied * 100 / total).toInt()
+                            if (percent != lastPercent) {
+                                lastPercent = percent
+                                onProgress((copied.toFloat() / total).coerceIn(0f, 1f))
+                            }
+                        }
+                    }
+                }
+            }
         }
         destination
     }

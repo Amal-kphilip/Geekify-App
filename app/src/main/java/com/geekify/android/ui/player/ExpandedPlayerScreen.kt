@@ -239,7 +239,8 @@ fun ExpandedPlayerScreen(
                         viewModel.seek((dragFraction * totalDurationMs).toLong())
                         isDragging = false
                     },
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    isPlaying = state.isPlaying
                 )
                 Text(
                     formatMs(totalDurationMs),

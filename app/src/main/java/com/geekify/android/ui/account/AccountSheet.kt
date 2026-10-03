@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -16,6 +17,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
+import coil3.compose.AsyncImage
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -55,7 +60,7 @@ fun AccountSheet(
             Surface(
                 modifier = Modifier.fillMaxHeight().widthIn(max = 352.dp).fillMaxWidth(0.88f).clickable(onClick = {}),
                 color = InkPanel,
-                shape = RoundedCornerShape(topEnd = 28.dp, bottomEnd = 28.dp),
+                shape = RectangleShape,
                 tonalElevation = 12.dp
             ) {
                 if (showAuthForm) {
@@ -87,62 +92,59 @@ private fun ProfileHub(
     onRecentsClick: () -> Unit, onSettingsClick: () -> Unit, onHealthClick: () -> Unit, onSignOut: () -> Unit
 ) {
     val user = state.user
-    Column(
-        modifier = Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 14.dp)
-    ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Close profile menu", tint = TextSecondary) }
-        }
+    Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+        // Header: avatar, bold name, "View profile" — tapping opens the existing account screen.
         Row(
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(InkElevated)
-                .bouncyClickable(onClick = onAccountClick).padding(14.dp),
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onAccountClick).padding(horizontal = 16.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(Modifier.size(52.dp).clip(CircleShape).background(BrandGradient), contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.AccountCircle, null, tint = InkBackground, modifier = Modifier.size(38.dp))
+                if (user?.photoUrl != null) {
+                    AsyncImage(model = user.photoUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                } else {
+                    Icon(Icons.Default.AccountCircle, null, tint = InkBackground, modifier = Modifier.size(38.dp))
+                }
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text(user?.name ?: "Guest listener", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                Text(user?.email ?: "Sign in to back up your library", color = TextSecondary, fontSize = 12.sp, maxLines = 1)
-            }
-            Icon(if (user == null) Icons.Default.Add else Icons.Default.ChevronRight, null, tint = BrandMint)
-        }
-        Spacer(Modifier.height(16.dp))
-        Text("YOUR LIBRARY", color = BrandMint, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Spacer(Modifier.height(8.dp))
-        GlassSurface(modifier = Modifier.fillMaxWidth(), backgroundColor = InkElevated) {
-            Column {
-                AccountMenuRow(Icons.Default.History, "Recents", "Tracks you played recently", onRecentsClick)
-                HorizontalDivider(color = InkGlassBorder)
-                AccountMenuRow(Icons.Default.HealthAndSafety, "Extractor health", "Music and streaming connection checks", onHealthClick)
-                HorizontalDivider(color = InkGlassBorder)
-                AccountMenuRow(Icons.Default.Settings, "Settings", "Playback, downloads and app options", onSettingsClick)
+                Text(user?.name ?: "Guest listener", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 22.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(if (user == null) "Sign in to back up your library" else "View profile", color = TextSecondary, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        Spacer(Modifier.height(20.dp))
+        HorizontalDivider(color = InkGlassBorder)
+
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+            DrawerRow(Icons.Default.Add, "Add account", onAccountClick)
+            DrawerRow(Icons.Default.History, "Recents", onRecentsClick)
+            DrawerRow(Icons.Default.HealthAndSafety, "Extractor health", onHealthClick)
+            DrawerRow(Icons.Default.Settings, "Settings and privacy", onSettingsClick)
+            if (user != null) DrawerRow(Icons.AutoMirrored.Filled.Logout, "Sign out", onSignOut, tint = ErrorRed)
+        }
+
         val syncText = when (state.syncState) {
             SyncState.SYNCING -> "Syncing your library…"
             SyncState.SAVED -> "Your library is backed up"
             SyncState.ERROR -> "Cloud sync needs attention"
             SyncState.IDLE -> if (user == null) "Local library only" else "Library ready to sync"
         }
-        GlassSurface(modifier = Modifier.fillMaxWidth(), backgroundColor = InkElevated) {
-            Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(if (state.syncState == SyncState.ERROR) Icons.Default.ErrorOutline else Icons.Default.CloudDone, null, tint = if (state.syncState == SyncState.ERROR) ErrorRed else BrandMint)
-                Spacer(Modifier.width(10.dp))
-                Text(syncText, color = TextSecondary, fontSize = 13.sp)
-            }
+        Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(if (state.syncState == SyncState.ERROR) Icons.Default.ErrorOutline else Icons.Default.CloudDone, null, tint = if (state.syncState == SyncState.ERROR) ErrorRed else TextMuted, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(syncText, color = TextMuted, fontSize = 13.sp)
         }
-        Spacer(Modifier.height(16.dp))
-        if (user == null) {
-            Button(onClick = onAccountClick, colors = ButtonDefaults.buttonColors(containerColor = BrandViolet), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
-                Text("Sign in to sync", color = InkBackground, fontWeight = FontWeight.Bold)
-            }
-        } else {
-            TextButton(onClick = onSignOut, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Sign out", color = ErrorRed) }
-        }
-        Spacer(Modifier.height(20.dp))
+    }
+}
+
+/** Large, airy drawer row: outlined-weight white icon on the left, 20sp label, no chevron. */
+@Composable
+private fun DrawerRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, onClick: () -> Unit, tint: Color = TextPrimary) {
+    Row(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp).bouncyClickable(pressedScale = 0.98f, onClick = onClick).padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, null, tint = tint, modifier = Modifier.size(28.dp))
+        Spacer(Modifier.width(24.dp))
+        Text(title, color = tint, fontSize = 20.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
     }
 }
 
@@ -200,13 +202,3 @@ private fun AccountTextField(value: String, onValueChange: (String) -> Unit, lab
 
 @Composable
 private fun accountTextFieldColors() = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrandViolet, unfocusedBorderColor = InkGlassBorder, focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary)
-
-@Composable
-private fun AccountMenuRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().heightIn(min = 68.dp).padding(horizontal = 14.dp).bouncyClickable(onClick = onClick), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = BrandMint, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) { Text(title, color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 15.sp); Text(subtitle, color = TextMuted, fontSize = 12.sp) }
-        Icon(Icons.Default.ChevronRight, null, tint = TextMuted)
-    }
-}
