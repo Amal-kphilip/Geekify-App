@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.geekify.android.data.model.Card
 import com.geekify.android.data.model.Track
+import com.geekify.android.data.local.LocalPlaylist
 import com.geekify.android.ui.theme.*
 
 /** videoId of the track that is currently playing; lets every TrackRow highlight itself. */
@@ -229,6 +230,70 @@ fun TrackRow(
                 Icon(Icons.Default.MoreVert, contentDescription = "More", tint = TextSecondary)
             }
         }
+    }
+}
+
+/** Actions available for a song wherever it appears in the app. */
+@Composable
+fun TrackActionsDialog(
+    track: Track,
+    liked: Boolean,
+    playlists: List<LocalPlaylist>,
+    onDismiss: () -> Unit,
+    onToggleLike: () -> Unit,
+    onAddToPlaylist: (String) -> Unit,
+    onCreatePlaylist: (String) -> Unit
+) {
+    var showCreateDialog by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = InkElevated,
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Text(
+                track.title,
+                color = TextPrimary,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        text = {
+            Column {
+                TextButton(onClick = { onToggleLike(); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (liked) "Remove from Liked Songs" else "Add to Liked Songs", color = TextPrimary)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("Add to playlist", color = TextSecondary, fontSize = 14.sp)
+                if (playlists.isEmpty()) {
+                    Text("Create a playlist to save this song.", color = TextMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                } else {
+                    playlists.forEach { playlist ->
+                        TextButton(
+                            onClick = { onAddToPlaylist(playlist.id); onDismiss() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text(playlist.name, color = TextPrimary) }
+                    }
+                }
+                TextButton(onClick = { showCreateDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("New playlist", color = SpotifyGreen, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = TextSecondary) } }
+    )
+
+    if (showCreateDialog) {
+        CreatePlaylistDialog(
+            onDismiss = { showCreateDialog = false },
+            onCreate = { name ->
+                onCreatePlaylist(name)
+                showCreateDialog = false
+                onDismiss()
+            }
+        )
     }
 }
 

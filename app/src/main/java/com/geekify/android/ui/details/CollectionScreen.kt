@@ -28,7 +28,8 @@ fun CollectionScreen(
     kind: CollectionKind,
     viewModel: DetailsViewModel,
     onBack: () -> Unit,
-    onPlayTrack: (Track, List<Track>) -> Unit
+    onPlayTrack: (Track, List<Track>) -> Unit,
+    onTrackActions: (Track) -> Unit
 ) {
     val state by viewModel.collectionState.collectAsState()
 
@@ -76,7 +77,11 @@ fun CollectionScreen(
                 }
 
                 items(collection.tracks, key = { it.videoId }) { track ->
-                    TrackRow(track = track, onClick = { onPlayTrack(track, collection.tracks) })
+                    TrackRow(
+                        track = track,
+                        onClick = { onPlayTrack(track, collection.tracks) },
+                        onMoreClick = { onTrackActions(track) }
+                    )
                 }
 
                 item { Spacer(Modifier.height(24.dp)) }

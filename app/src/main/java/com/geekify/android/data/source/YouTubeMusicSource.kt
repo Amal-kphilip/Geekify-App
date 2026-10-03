@@ -5,6 +5,7 @@ import com.geekify.android.data.model.*
 import com.geekify.android.data.source.innertube.InnerTubeClient
 import com.geekify.android.data.source.innertube.Parsers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.JsonObject
 import javax.inject.Inject
@@ -88,7 +89,15 @@ class YouTubeMusicSource @Inject constructor(
         val title = Parsers.shelves(raw).firstOrNull()?.first ?: id; val tracks = Parsers.tracks(raw, 250); val thumbs = Parsers.findThumbnails(raw)
         return CollectionPage(id, title, type = if (kind == CollectionKind.ALBUM) "album" else "playlist", thumbnails = thumbs, tracks = tracks.map { if (it.thumbnails.isEmpty()) it.copy(thumbnails = thumbs) else it }.distinctBy { it.videoId })
     }
-    private suspend fun <T> guarded(block: suspend () -> T): MusicResult<T> = try { MusicResult.Success(block()) } catch (e: Throwable) { MusicResult.Failure(e.message ?: "Something went wrong. Please try again.", e is InnerTubeClient.InnerTubeException && e.retryable) }
+    private suspend fun <T> guarded(block: suspend () -> T): MusicResult<T> = try {
+        MusicResult.Success(block())
+    } catch (e: CancellationException) {
+        // Search and screen changes cancel in-flight calls. Never convert that normal control
+        // flow into a user-facing network error.
+        throw e
+    } catch (e: Throwable) {
+        MusicResult.Failure(e.message ?: "Something went wrong. Please try again.", e is InnerTubeClient.InnerTubeException && e.retryable)
+    }
     private fun formatDuration(s: Int): String = if (s >= 3600) "%d:%02d:%02d".format(s / 3600, (s % 3600) / 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
     private companion object {
         const val FIFTEEN_MINUTES = 15 * 60 * 1000L

@@ -1,7 +1,12 @@
 package com.geekify.android.player
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.Bundle
 import android.net.Uri
 import androidx.annotation.OptIn
@@ -14,6 +19,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -41,6 +47,11 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class PlaybackService : MediaSessionService() {
 
+    companion object {
+        private const val PLAYBACK_CHANNEL_ID = "playback"
+        private const val PLAYBACK_NOTIFICATION_ID = 1001
+    }
+
     @Inject lateinit var queueManager: QueueManager
     @Inject lateinit var streamResolver: StreamResolver
     @Inject lateinit var musicSource: MusicSource
@@ -59,6 +70,8 @@ class PlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
 
+        createPlaybackNotificationChannel()
+
         // On current Samsung/Android releases a concrete provider and app icon make
         // the foreground media notification reliable when playback leaves the app.
         setMediaNotificationProvider(
@@ -73,6 +86,11 @@ class PlaybackService : MediaSessionService() {
 
         player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(1_500, 30_000, 750, 1_500)
+                    .build()
+            )
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -147,6 +165,11 @@ class PlaybackService : MediaSessionService() {
         queueManager.state.onEach { state ->
             if (player.volume != state.volume) player.volume = state.volume
             val track = state.current ?: return@onEach
+            // Promote immediately when the user starts a song. Resolving a stream can take a
+            // few seconds, during which Media3's automatic notification has no prepared item
+            // yet. Without this, Android can keep the service background-only after the app is
+            // minimized and no media card reaches the notification drawer.
+            if (state.isPlaying || state.isBuffering) showForegroundPlaybackNotification(track)
             if (player.currentMediaItem?.mediaId != track.videoId) {
                 // After a restart the restored queue loads paused; only auto-play when the user asked to play.
                 loadAndPlay(track, autoPlay = state.isPlaying)
@@ -156,6 +179,51 @@ class PlaybackService : MediaSessionService() {
                 player.pause()
             }
         }.launchIn(scope)
+    }
+
+    private fun createPlaybackNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val channel = NotificationChannel(
+            PLAYBACK_CHANNEL_ID,
+            "Music playback",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Playback controls and current song"
+            setShowBadge(false)
+        }
+        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    }
+
+    private fun showForegroundPlaybackNotification(track: Track) {
+        val openAppIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val notification = Notification.Builder(this, PLAYBACK_CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(track.title)
+            .setContentText(track.artist)
+            .setContentIntent(openAppIntent)
+            .setCategory(Notification.CATEGORY_TRANSPORT)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setStyle(Notification.MediaStyle().setMediaSession(mediaSession.platformToken))
+            .build()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                PLAYBACK_NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            )
+        } else {
+            startForeground(PLAYBACK_NOTIFICATION_ID, notification)
+        }
     }
 
     private var loadJob: Job? = null

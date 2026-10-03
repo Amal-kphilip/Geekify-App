@@ -76,7 +76,9 @@ class StreamResolver @Inject constructor(
         val defaultTrack = audio.filter { f ->
             f["audioTrack"]?.jsonObject?.get("audioIsDefault")?.jsonPrimitive?.booleanOrNull != false
         }
-        val best = (defaultTrack.ifEmpty { audio }).maxByOrNull(::bitrate)
+        // A 128–160 kbps stream starts substantially faster on mobile data than the highest
+        // bitrate format, while still sounding transparent for music playback.
+        val best = (defaultTrack.ifEmpty { audio }).minByOrNull { kotlin.math.abs(bitrate(it) - 160_000) }
             // Last resort: a muxed audio+video file (the player has its video track disabled).
             ?: muxed.filter { it["url"] != null }.maxByOrNull(::bitrate)
             ?: throw StreamException("No playable audio format was returned for this track.")

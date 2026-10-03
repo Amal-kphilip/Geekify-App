@@ -39,6 +39,7 @@ fun HomeScreen(
     photoUrl: String?,
     userName: String?,
     onTrackClick: (Track, List<Track>) -> Unit,
+    onTrackActions: (Track) -> Unit,
     onCardClick: (Card) -> Unit,
     onAccountClick: () -> Unit,
     onLikedClick: () -> Unit
@@ -173,12 +174,14 @@ fun HomeScreen(
                                     is ShelfCard -> onCardClick(featured.value)
                                 }
                             }
+                            val actions = if (featured is ShelfTrack) ({ onTrackActions(featured.value) }) else null
                             FeaturedCard(
                                 label = label ?: "",
                                 title = title ?: "",
                                 subtitle = subtitle,
                                 thumb = thumb,
                                 onClick = open,
+                                onAddClick = actions,
                                 modifier = Modifier.padding(horizontal = 16.dp)
                             )
                         }
@@ -269,6 +272,7 @@ private fun FeaturedCard(
     subtitle: String?,
     thumb: String?,
     onClick: () -> Unit,
+    onAddClick: (() -> Unit)?,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -320,7 +324,9 @@ private fun FeaturedCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Icon(Icons.Default.AddCircleOutline, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(28.dp))
+                IconButton(onClick = { onAddClick?.invoke() }, enabled = onAddClick != null) {
+                    Icon(Icons.Default.AddCircleOutline, contentDescription = "Song actions", tint = TextSecondary, modifier = Modifier.size(28.dp))
+                }
                 Box(
                     modifier = Modifier
                         .size(44.dp)

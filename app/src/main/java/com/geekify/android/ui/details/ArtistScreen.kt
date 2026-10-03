@@ -38,6 +38,7 @@ fun ArtistScreen(
     viewModel: DetailsViewModel,
     onBack: () -> Unit,
     onTrackClick: (Track, List<Track>) -> Unit,
+    onTrackActions: (Track) -> Unit,
     onCardClick: (Card) -> Unit
 ) {
     val state by viewModel.artistState.collectAsState()
@@ -123,7 +124,11 @@ fun ArtistScreen(
                 if (artist.songs.isNotEmpty()) {
                     item { SectionTitle("Popular") }
                     items(artist.songs.take(10), key = { it.videoId }) { song ->
-                        TrackRow(track = song, onClick = { onTrackClick(song, artist.songs) })
+                        TrackRow(
+                            track = song,
+                            onClick = { onTrackClick(song, artist.songs) },
+                            onMoreClick = { onTrackActions(song) }
+                        )
                     }
                 }
 

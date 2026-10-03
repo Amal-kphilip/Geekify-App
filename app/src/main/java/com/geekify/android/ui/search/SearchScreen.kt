@@ -38,6 +38,7 @@ fun SearchScreen(
     userName: String?,
     onAvatarClick: () -> Unit,
     onTrackClick: (Track, List<Track>) -> Unit,
+    onTrackActions: (Track) -> Unit,
     onCardClick: (Card) -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -141,7 +142,11 @@ fun SearchScreen(
                                 if (response.songs.isNotEmpty() && (state.selectedTab == "All" || state.selectedTab == "Songs")) {
                                     item { SectionTitle("Songs") }
                                     items(response.songs, key = { it.videoId }) { song ->
-                                        TrackRow(track = song, onClick = { onTrackClick(song, response.songs) })
+                                        TrackRow(
+                                            track = song,
+                                            onClick = { onTrackClick(song, response.songs) },
+                                            onMoreClick = { onTrackActions(song) }
+                                        )
                                     }
                                 }
                                 if (response.albums.isNotEmpty() && (state.selectedTab == "All" || state.selectedTab == "Albums")) {

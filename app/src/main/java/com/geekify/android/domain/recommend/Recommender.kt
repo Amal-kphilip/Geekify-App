@@ -14,6 +14,7 @@ object Recommender {
     const val MAX_SEEDS = 6
     const val MAX_SEEDS_PER_ARTIST = 2
     const val MAX_TRACK_SECONDS = 15 * 60
+    private const val LANGUAGE_MATCH_BOOST = 1.35
 
     data class Signal(val videoId: String, val artist: String = "", val title: String = "")
 
@@ -34,6 +35,39 @@ object Recommender {
     data class MixResult(val id: String, val title: String, val subtitle: String, val videoIds: List<String>)
 
     private fun akey(name: String?) = (name ?: "").trim().lowercase()
+
+    /**
+     * Infers the language where titles or artists use a distinct Indic/Korean script. Latin
+     * titles are deliberately left unknown rather than guessed, so they don't distort a
+     * listener's actual preference.
+     */
+    fun languageOf(title: String?, artist: String?): String? {
+        val text = "${title.orEmpty()} ${artist.orEmpty()}"
+        return when {
+            text.any { it in '\u0D00'..'\u0D7F' } -> "Malayalam"
+            text.any { it in '\u0B80'..'\u0BFF' } -> "Tamil"
+            text.any { it in '\u0C00'..'\u0C7F' } -> "Telugu"
+            text.any { it in '\u0A00'..'\u0A7F' } -> "Punjabi"
+            text.any { it in '\u0900'..'\u097F' } -> "Hindi"
+            text.any { it in '\uAC00'..'\uD7AF' } -> "K-pop"
+            else -> null
+        }
+    }
+
+    fun dominantLanguage(liked: List<Signal>, recent: List<Signal>): String? {
+        val totals = mutableMapOf<String, Double>()
+        liked.forEachIndexed { index, signal ->
+            languageOf(signal.title, signal.artist)?.let { language ->
+                totals[language] = (totals[language] ?: 0.0) + LIKE_WEIGHT * Math.pow(LIKE_DECAY, index.toDouble())
+            }
+        }
+        recent.forEachIndexed { index, signal ->
+            languageOf(signal.title, signal.artist)?.let { language ->
+                totals[language] = (totals[language] ?: 0.0) + RECENT_WEIGHT * Math.pow(RECENT_DECAY, index.toDouble())
+            }
+        }
+        return totals.maxByOrNull { it.value }?.key
+    }
 
     data class WeightResult(
         val weights: Map<String, Double>,
@@ -114,6 +148,7 @@ object Recommender {
         type: (T) -> String
     ): Pair<List<MixResult>, List<String>> {
         val (weights, meta, affinity) = seedWeights(liked, recent)
+        val preferredLanguage = dominantLanguage(liked, recent)
         if (weights.isEmpty()) return Pair(emptyList(), emptyList())
         val seeds = pickSeeds(weights, meta)
         val topW = seeds.maxOfOrNull { weights[it] ?: 0.0 } ?: 1.0
@@ -142,13 +177,20 @@ object Recommender {
             c.score *= 1 + CO_OCCURRENCE_BOOST * (c.sources.size - 1)
             val share = (affinity[c.artist] ?: 0.0) / totalAff
             c.score *= 1 + minOf(0.6, share * 3)
+            if (preferredLanguage != null && languageOf(c.title, c.artistDisplay) == preferredLanguage) {
+                c.score *= LANGUAGE_MATCH_BOOST
+            }
         }
 
         val everything = cands.values.toList()
         val mixes = mutableListOf<MixResult>()
 
         val main = diversify(everything, 30)
-        if (main.size >= 8) mixes.add(MixResult("for-you", "Made for you", "Built from what you play and save", main.map { it.videoId }))
+        if (main.size >= 8) {
+            val subtitle = preferredLanguage?.let { "More $it music, based on what you play" }
+                ?: "Built from what you play and save"
+            mixes.add(MixResult("for-you", "Made for you", subtitle, main.map { it.videoId }))
+        }
 
         val fresh = diversify(everything.filter { it.artist.isNotEmpty() && it.artist !in knownArtists }, 25)
         if (fresh.size >= 8) mixes.add(MixResult("fresh", "Fresh finds", "Artists you haven't played yet", fresh.map { it.videoId }))

@@ -43,6 +43,7 @@ import com.geekify.android.ui.account.AccountSheet
 import com.geekify.android.ui.account.AccountViewModel
 import com.geekify.android.ui.components.CreatePlaylistDialog
 import com.geekify.android.ui.components.LocalNowPlayingId
+import com.geekify.android.ui.components.TrackActionsDialog
 import com.geekify.android.ui.details.ArtistScreen
 import com.geekify.android.ui.details.CollectionScreen
 import com.geekify.android.ui.details.DetailsViewModel
@@ -79,7 +80,8 @@ private data class NavTab(
 fun MainScreen(
     navController: NavHostController = rememberNavController(),
     playerViewModel: PlayerViewModel = hiltViewModel(),
-    accountViewModel: AccountViewModel = hiltViewModel()
+    accountViewModel: AccountViewModel = hiltViewModel(),
+    libraryViewModel: LibraryViewModel = hiltViewModel()
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -88,9 +90,12 @@ fun MainScreen(
     var showQueue by remember { mutableStateOf(false) }
     var showAccountSheet by remember { mutableStateOf(false) }
     var showCreatePlaylist by remember { mutableStateOf(false) }
+    var actionTrack by remember { mutableStateOf<Track?>(null) }
 
     val accountState by accountViewModel.uiState.collectAsState()
     val playerState by playerViewModel.state.collectAsState()
+    val likedTracks by libraryViewModel.liked.collectAsState()
+    val playlists by libraryViewModel.playlists.collectAsState()
     val avatarUrl = accountState.user?.photoUrl
     val avatarName = accountState.user?.name
     val context = LocalContext.current
@@ -111,6 +116,7 @@ fun MainScreen(
     val onTrackClick: (Track, List<Track>) -> Unit = { track, list ->
         playerViewModel.play(track, list)
     }
+    val onTrackActions: (Track) -> Unit = { track -> actionTrack = track }
 
     val onCardClick: (Card) -> Unit = { card ->
         when (card.type) {
@@ -239,6 +245,7 @@ fun MainScreen(
                             userName = avatarName,
                             onLikedClick = { navController.navigate(Screen.Liked.route) },
                             onTrackClick = onTrackClick,
+                            onTrackActions = onTrackActions,
                             onCardClick = onCardClick,
                             onAccountClick = { showAccountSheet = true }
                         )
@@ -252,6 +259,7 @@ fun MainScreen(
                             userName = avatarName,
                             onAvatarClick = { showAccountSheet = true },
                             onTrackClick = onTrackClick,
+                            onTrackActions = onTrackActions,
                             onCardClick = onCardClick
                         )
                     }
@@ -307,6 +315,7 @@ fun MainScreen(
                             viewModel = detailsVm,
                             onBack = { navController.popBackStack() },
                             onTrackClick = onTrackClick,
+                            onTrackActions = onTrackActions,
                             onCardClick = onCardClick
                         )
                     }
@@ -327,7 +336,8 @@ fun MainScreen(
                             kind = kind,
                             viewModel = detailsVm,
                             onBack = { navController.popBackStack() },
-                            onPlayTrack = onTrackClick
+                            onPlayTrack = onTrackClick,
+                            onTrackActions = onTrackActions
                         )
                     }
 
@@ -392,6 +402,18 @@ fun MainScreen(
                     createVm.createPlaylist(it)
                     showCreatePlaylist = false
                 }
+            )
+        }
+
+        actionTrack?.let { track ->
+            TrackActionsDialog(
+                track = track,
+                liked = likedTracks.any { it.videoId == track.videoId },
+                playlists = playlists,
+                onDismiss = { actionTrack = null },
+                onToggleLike = { libraryViewModel.toggleLike(track) },
+                onAddToPlaylist = { playlistId -> libraryViewModel.addToPlaylist(playlistId, track) },
+                onCreatePlaylist = { name -> libraryViewModel.createPlaylistWithTrack(name, track) }
             )
         }
 

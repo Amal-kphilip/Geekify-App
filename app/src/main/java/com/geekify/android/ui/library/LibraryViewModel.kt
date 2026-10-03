@@ -30,6 +30,28 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
+    fun toggleLike(track: Track) {
+        viewModelScope.launch {
+            library.toggleLike(track)
+            sync.schedulePush()
+        }
+    }
+
+    fun addToPlaylist(playlistId: String, track: Track) {
+        viewModelScope.launch {
+            library.addToPlaylist(playlistId, track)
+            sync.schedulePush()
+        }
+    }
+
+    fun createPlaylistWithTrack(name: String, track: Track) {
+        viewModelScope.launch {
+            val playlist = library.createPlaylist(name)
+            library.addToPlaylist(playlist.id, track)
+            sync.schedulePush()
+        }
+    }
+
     fun deletePlaylist(id: String) {
         viewModelScope.launch {
             library.deletePlaylist(id)

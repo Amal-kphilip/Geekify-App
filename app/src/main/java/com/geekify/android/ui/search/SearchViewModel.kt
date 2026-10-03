@@ -7,6 +7,7 @@ import com.geekify.android.data.source.MusicResult
 import com.geekify.android.data.source.MusicSource
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,35 +42,35 @@ class SearchViewModel @Inject constructor(
 
     fun onQueryChange(newQuery: String) {
         _uiState.update { it.copy(query = newQuery) }
-        searchJob?.cancel()
         if (newQuery.isBlank()) {
+            searchJob?.cancel()
             _uiState.update { it.copy(response = null, isLoading = false, error = null) }
             return
         }
-        searchJob = viewModelScope.launch {
-            delay(400) // Debounce
-            executeSearch()
-        }
+        startSearch(newQuery, debounce = true)
     }
 
     fun onTabSelected(tab: String) {
         _uiState.update { it.copy(selectedTab = tab) }
         if (_uiState.value.query.isNotBlank()) {
-            executeSearch()
+            startSearch(_uiState.value.query)
         }
     }
 
     fun onTagClick(tag: String) {
         _uiState.update { it.copy(query = tag) }
-        executeSearch()
+        startSearch(tag)
     }
 
-    private fun executeSearch() {
-        val q = _uiState.value.query.trim()
+    private fun startSearch(query: String, debounce: Boolean = false) {
+        val q = query.trim()
         if (q.isBlank()) return
 
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
+            if (debounce) delay(400)
+            // A later keystroke may have replaced this request while it was waiting.
+            if (_uiState.value.query.trim() != q) return@launch
             _uiState.update { it.copy(isLoading = true, error = null) }
 
             val type = when (_uiState.value.selectedTab) {
@@ -80,13 +81,17 @@ class SearchViewModel @Inject constructor(
                 else -> null
             }
 
-            when (val result = musicSource.search(q, type)) {
-                is MusicResult.Success -> {
-                    _uiState.update { it.copy(response = result.value, isLoading = false) }
+            try {
+                when (val result = musicSource.search(q, type)) {
+                    is MusicResult.Success -> {
+                        _uiState.update { it.copy(response = result.value, isLoading = false) }
+                    }
+                    is MusicResult.Failure -> {
+                        _uiState.update { it.copy(error = result.message, isLoading = false) }
+                    }
                 }
-                is MusicResult.Failure -> {
-                    _uiState.update { it.copy(error = result.message, isLoading = false) }
-                }
+            } catch (_: CancellationException) {
+                // A newer query superseded this one; it is not an error to show the user.
             }
         }
     }
