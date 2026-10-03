@@ -1,15 +1,18 @@
 package com.geekify.android.ui.player
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -49,6 +52,10 @@ fun ExpandedPlayerScreen(
         return
     }
 
+    // This handler is declared inside the full-screen destination, giving it precedence
+    // over NavHost back handling. One system-back gesture now always collapses the player.
+    BackHandler(onBack = onDismiss)
+
     var isDragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableStateOf(0f) }
 
@@ -70,7 +77,19 @@ fun ExpandedPlayerScreen(
         label = "artScale"
     )
 
-    AuroraBackground(tint = artColor) {
+    // The no-op click target is intentional: it makes the entire full-screen surface a
+    // pointer target, so blank areas cannot send taps through to cards behind this overlay.
+    val overlayInteraction = remember { MutableInteractionSource() }
+    AuroraBackground(
+        tint = artColor,
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(
+                interactionSource = overlayInteraction,
+                indication = null,
+                onClick = {}
+            )
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()

@@ -104,9 +104,9 @@ fun MainScreen(
         availableUpdate = updateManager.findAvailableUpdate()
     }
 
-    // System back closes the player / queue overlays first.
+    // System back closes the queue first. The expanded player owns its own back handler
+    // so a predictive-back gesture never falls through to the destination underneath it.
     BackHandler(enabled = showQueue) { showQueue = false }
-    BackHandler(enabled = showExpandedPlayer && !showQueue) { showExpandedPlayer = false }
 
     val onTrackClick: (Track, List<Track>) -> Unit = { track, list ->
         playerViewModel.play(track, list)
@@ -171,10 +171,19 @@ fun MainScreen(
                                         maxLines = 1
                                     )
                                 },
-                                selected = selected,
-                                onClick = {
-                                    if (currentRoute != tab.route) {
-                                        navController.navigate(tab.route) {
+                            selected = selected,
+                            onClick = {
+                                if (tab.route == Screen.Home.route) {
+                                    // A playlist/detail screen is stacked above Home. Pop back to the
+                                    // existing Home instance instead of trying to restore a nested state.
+                                    val returnedHome = navController.popBackStack(Screen.Home.route, inclusive = false)
+                                    if (!returnedHome) {
+                                        navController.navigate(Screen.Home.route) {
+                                            launchSingleTop = true
+                                        }
+                                    }
+                                } else if (currentRoute != tab.route) {
+                                    navController.navigate(tab.route) {
                                             popUpTo(navController.graph.findStartDestination().id) {
                                                 saveState = true
                                             }
@@ -346,7 +355,9 @@ fun MainScreen(
         AnimatedVisibility(
             visible = showExpandedPlayer,
             enter = slideInVertically(tween(380, easing = FastOutSlowInEasing), initialOffsetY = { it }) + fadeIn(tween(250)),
-            exit = slideOutVertically(tween(320, easing = FastOutSlowInEasing), targetOffsetY = { it }) + fadeOut(tween(250)),
+            // Do not slide the touch layer away while it is fading. That left exposed areas
+            // where a second tap could activate cards on the screen behind the player.
+            exit = fadeOut(tween(180)),
             modifier = Modifier.fillMaxSize()
         ) {
             ExpandedPlayerScreen(
