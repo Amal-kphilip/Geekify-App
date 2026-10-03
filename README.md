@@ -1,102 +1,125 @@
-# Geekify Android
+# Geekify
 
-Native Android music streaming app (Kotlin, Jetpack Compose, Media3) that runs entirely on-device with zero intermediate servers. Directly communicates with YouTube Music (InnerTube) and proxies no audio through third-party backends.
+**Geekify** is a native Android music player built with Kotlin and Jetpack Compose. Discover music, search songs, build a personal library, and keep listening with background playback and notification controls.
 
----
+> Geekify is an independent personal and educational project. It is not affiliated with YouTube, YouTube Music, Spotify, or their respective owners.
 
-## Architecture Overview
+## Screenshots
 
-```
-data/
-  source/        MusicSource (interface) + YouTubeMusicSource (impl)
-    innertube/   InnerTubeClient (OkHttp), request builders, response parsers
-  model/         Track, Card, Shelf, SearchResponse, HomeResponse, Mix, etc.
-  cache/         TtlLruCache (in-memory 15-minute TTL cache)
-  local/         Room DB (liked tracks, history cap 40, local playlists) + DataStore preferences
-  auth/          AuthRepository (Firebase Auth + friendly error handling)
-  sync/          SyncRepository (Firestore 2-way cloud sync mirroring web cloudSync.ts)
-domain/
-  recommend/     Recommender.kt (pure Kotlin port of taste/mix recommendation engine)
-player/
-  StreamResolver (direct audio stream format picker & URL expiry resolver)
-  QueueManager   (queue state, shuffle, repeat, DataStore persistence)
-  PlaybackService (Media3 MediaSessionService + ExoPlayer foreground playback)
-  PlayerController (UI control binding)
-ui/
-  theme/         Geekify violet/mint design tokens & dark theme
-  components/    AuroraBackground canvas, GlassSurface, TrackRow, ShelfRow, CardItem
-  home/          HomeScreen & HomeViewModel
-  search/        SearchScreen & SearchViewModel
-  library/       LibraryScreen, LikedScreen, PlaylistScreen & LibraryViewModel
-  details/       ArtistScreen, CollectionScreen & DetailsViewModel
-  player/        NowPlayingBar (mini player), ExpandedPlayerScreen, QueueScreen
-  account/       AccountSheet & AccountViewModel
-  health/        HealthScreen (in-app extractor & endpoint diagnostic check)
-```
+<p align="center">
+  <img src="docs/screenshots/home.jpg" alt="Geekify home screen" width="190" />
+  <img src="docs/screenshots/search.jpg" alt="Geekify search screen" width="190" />
+  <img src="docs/screenshots/library.jpg" alt="Geekify library screen" width="190" />
+  <img src="docs/screenshots/now-playing.jpg" alt="Geekify now playing screen" width="190" />
+</p>
 
----
+<p align="center">
+  <img src="docs/screenshots/account.jpg" alt="Geekify account menu" width="190" />
+</p>
 
-## Firebase Setup (Manual Steps)
+## Features
 
-To enable cloud synchronization of your liked tracks and playlists across devices:
+- Search songs, albums, artists, and playlists.
+- Browse genre and language collections, including Malayalam, Tamil, Hindi, Telugu, and Punjabi music.
+- Background playback with a MediaSession notification and lock-screen controls.
+- Persistent queue, shuffle, repeat, seeking, and a full now-playing screen.
+- Liked songs, custom playlists, and recents stored locally in Room.
+- Add any searchable track to Liked Songs or a playlist.
+- Personal mixes based on recent plays, likes, artists, and detected language preference.
+- Optional Firebase account sync with email/password or Google sign-in.
+- In-app extractor health checks to help diagnose playback issues.
 
-1. Go to [Firebase Console](https://console.firebase.google.com/) and open your existing Geekify project (or create one).
-2. Add an **Android Application**:
-   - Package name: `com.geekify.android`
-   - Register your debug SHA-1 fingerprint (run `./gradlew signingReport` to find it).
-3. Download `google-services.json` and place it in the `app/` directory (replacing the placeholder).
-4. In Firebase Authentication:
-   - Enable **Email/Password** provider.
-   - Enable **Google** sign-in provider.
-5. In Firestore Database:
-   - Ensure the `firestore.rules` from the web app are deployed (`users/{uid}` read/write permissions for authenticated users).
+## Tech stack
 
-> **Note**: Guest mode works completely offline and requires no Firebase configuration. All liked songs and playlists persist locally in Room DB.
+| Area | Technology |
+| --- | --- |
+| Language and UI | Kotlin, Jetpack Compose, Material 3 |
+| Playback | Media3, ExoPlayer, MediaSessionService |
+| Music data | YouTube Music InnerTube, OkHttp, Kotlin Serialization |
+| Storage | Room, DataStore |
+| Images | Coil |
+| Accounts and sync | Firebase Authentication, Cloud Firestore, Credential Manager |
+| Build and CI | Gradle, GitHub Actions |
 
----
+## Run locally
 
-## Building the App
+### Prerequisites
 
-### Debug Build
-```bash
-./gradlew :app:assembleDebug
-```
-Output: `app/build/outputs/apk/debug/app-debug.apk`
+- Android Studio with JDK 17
+- Android SDK 26 or newer
+- An Android device or emulator
 
-### Release Build (R8 Minification Enabled)
-```bash
-./gradlew :app:assembleRelease
-```
-Output: `app/build/outputs/apk/release/app-release-unsigned.apk`
+### Steps
 
-## GitHub Releases and in-app updates
+1. Clone the repository.
 
-Push a tag such as `v0.1.1` to publish a GitHub Release. The included workflow builds a signed APK named `Geekify-v0.1.1.apk`, uploads it to that release, and keeps its Android version in sync with the tag. The app checks the latest release on launch and, when a newer version is available, can download and open the APK with Android's package installer.
+   ```bash
+   git clone https://github.com/Amal-kphilip/Geekify-App.git
+   cd Geekify-App
+   ```
 
-Before publishing, add these GitHub Actions repository secrets:
+2. Open the project in Android Studio and let Gradle sync.
 
-- `ANDROID_KEYSTORE_BASE64` — your release keystore, Base64 encoded
-- `ANDROID_KEYSTORE_PASSWORD`
-- `ANDROID_KEY_ALIAS`
-- `ANDROID_KEY_PASSWORD`
+3. Build a debug APK.
 
-The APK must remain signed with the same key across releases or Android will reject the update. On Android 8+, users may also need to allow Geekify to install unknown apps when prompted.
+   ```bash
+   ./gradlew :app:assembleDebug
+   ```
 
-### Run Unit Tests
+   The APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
+
+4. Optional: configure Firebase for account sync.
+
+   - Create or open a Firebase project.
+   - Add Android app ID `com.geekify.android` and download `google-services.json` into `app/`.
+   - Enable Email/Password and Google providers in Firebase Authentication.
+   - Create Firestore and deploy rules that restrict each `users/{uid}` document to its owner.
+   - Register debug and release SHA-1 fingerprints for Google sign-in.
+
+Guest mode works without Firebase; likes and playlists still stay on the device.
+
+## Tests
+
 ```bash
 ./gradlew testDebugUnitTest
+./gradlew :app:compileDebugKotlin
 ```
 
----
+Before opening a playback-related pull request, test play/pause, next/previous, screen-off playback, notification controls, a slow network, and app restart on a real device.
 
-## Terms of Service & License Notice
+## Contributing
 
-- **Terms of Service**: This application is intended strictly for personal, educational, and experimental use. Directly accessing streams without the official YouTube clients may violate YouTube's Terms of Service.
-- **Privacy**: No user telemetry, third-party trackers, or analytics are embedded in the app.
+Contributions are welcome—bug fixes, accessibility improvements, test coverage, documentation, and UI polish are all useful.
 
-## Playback maintenance note
+1. Open an issue for substantial changes so the direction can be agreed first.
+2. Fork the repository and create a focused branch.
+3. Make the change, add or update tests where practical, and run the checks above.
+4. Open a pull request with a concise description, screenshots for UI changes, and reproduction and verification steps.
 
-Audio URLs come from the InnerTube **VISIONOS** player client (`InnerTubeClient.playerStreams`) and are fetched
-with the same User-Agent (`InnerTubeClient.PLAYER_USER_AGENT`). YouTube changes which clients work without a PO
-token; if songs stop playing, open the Health screen to see the exact reason, then check yt-dlp's current
-`visionos` client values and bump `VISIONOS_VERSION` in `InnerTubeClient.kt`.
+Please do not commit credentials, keystores, `google-services.json`, generated build files, or downloaded media.
+
+## Roadmap
+
+- [ ] Improve device and network playback-resilience tests.
+- [ ] Add automated lint, unit-test, and release checks on pull requests.
+- [ ] Add Firebase Crashlytics and release-health monitoring.
+- [ ] Improve offline-friendly queue and metadata caching.
+- [ ] Expand accessibility coverage and large-screen layouts.
+- [ ] Improve language-aware recommendations when metadata uses Latin script.
+- [ ] Add contributor issue templates and `good first issue` tasks.
+
+## Open issues
+
+Browse or create work items in the [issue tracker](https://github.com/Amal-kphilip/Geekify-App/issues). Useful reports include the device/Android version, app version, exact reproduction steps, expected behavior, actual behavior, and relevant screenshots or logs.
+
+## Releases
+
+Tagged releases are built by GitHub Actions and publish a signed APK to [GitHub Releases](https://github.com/Amal-kphilip/Geekify-App/releases). Release signing values belong in GitHub Actions secrets; never commit them.
+
+## Project notes
+
+Audio URLs are resolved directly on the device and can change as upstream services evolve. If playback fails, use Geekify's Health screen first, include its message in a GitHub issue, and avoid sharing account credentials or private tokens.
+
+## License and terms
+
+This repository is for personal, educational, and experimental use. Directly accessing music streams may be subject to the upstream service's terms. Use the app responsibly and ensure that any distribution complies with applicable policies and rights.
