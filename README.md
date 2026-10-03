@@ -118,4 +118,4 @@ Audio URLs are resolved directly on the device and can change as upstream servic
 
 ## License and terms
 
-This repository is for personal, educational, and experimental use. Directly accessing music streams may be subject to the upstream service's terms. Use the app responsibly and ensure that any distribution complies with applicable policies and rights.
+Geekify is licensed under the [Apache License 2.0](LICENSE). Directly accessing music streams may be subject to the upstream service's terms. Use the app responsibly and ensure that any distribution complies with applicable policies and rights.
