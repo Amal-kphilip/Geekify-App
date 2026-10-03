@@ -20,13 +20,15 @@ import com.geekify.android.data.model.Track
 import com.geekify.android.ui.components.AuroraBackground
 import com.geekify.android.ui.components.DetailHeader
 import com.geekify.android.ui.components.TrackRow
+import com.geekify.android.ui.components.totalDurationText
 import com.geekify.android.ui.theme.*
 
 @Composable
 fun LikedScreen(
     viewModel: LibraryViewModel,
     onBack: () -> Unit,
-    onPlayTrack: (Track, List<Track>) -> Unit
+    onPlayTrack: (Track, List<Track>) -> Unit,
+    onShufflePlay: ((List<Track>) -> Unit)? = null
 ) {
     val liked by viewModel.liked.collectAsState()
 
@@ -37,8 +39,9 @@ fun LikedScreen(
                     onBack = onBack,
                     title = "Liked Songs",
                     subtitle = null,
-                    meta = "${liked.size} songs",
+                    meta = listOfNotNull("${liked.size} songs", totalDurationText(liked)).joinToString(" • "),
                     onPlay = if (liked.isNotEmpty()) ({ onPlayTrack(liked.first(), liked) }) else null,
+                    onShuffle = if (liked.isNotEmpty() && onShufflePlay != null) ({ onShufflePlay(liked) }) else null,
                     art = {
                         Box(
                             modifier = Modifier.fillMaxSize().background(LikedGradient),

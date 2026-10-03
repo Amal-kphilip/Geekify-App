@@ -36,6 +36,7 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun play(track: Track, queue: List<Track> = emptyList()) = controller.play(track, queue)
+    fun playShuffled(tracks: List<Track>) = controller.playShuffled(tracks)
     fun togglePlay() = controller.togglePlay()
     fun seek(positionMs: Long) = controller.seekTo(positionMs)
     fun next() = controller.next()

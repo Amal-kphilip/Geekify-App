@@ -9,6 +9,12 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -25,19 +31,37 @@ class StreamResolver @Inject constructor(
     data class ResolvedStream(val url: String, val mimeType: String, val expiresAt: Long)
 
     private val cache = HashMap<String, ResolvedStream>()
+    private val inFlight = HashMap<String, Deferred<ResolvedStream>>()
     private val lock = Any()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /**
+     * Returns a playable stream. A lookup that is already running (for example the prefetch of the
+     * very song the user just tapped) is shared instead of starting a second request. Cancelling the
+     * caller never cancels the shared lookup.
+     */
     suspend fun resolve(videoId: String, forceRefresh: Boolean = false): ResolvedStream {
-        synchronized(lock) {
+        val job: Deferred<ResolvedStream> = synchronized(lock) {
             if (!forceRefresh) {
                 val cached = cache[videoId]
                 if (cached != null && cached.expiresAt > System.currentTimeMillis()) return cached
+                inFlight[videoId]?.takeIf { it.isActive }?.let { return@synchronized it }
             }
             cache.remove(videoId)
+            scope.async {
+                try {
+                    doResolve(videoId).also { r -> synchronized(lock) { cache[videoId] = r } }
+                } finally {
+                    synchronized(lock) { inFlight.remove(videoId) }
+                }
+            }.also { inFlight[videoId] = it }
         }
-        val result = doResolve(videoId)
-        synchronized(lock) { cache[videoId] = result }
-        return result
+        return job.await()
+    }
+
+    /** Fire-and-forget warm-up so a later tap finds the URL already resolved. Errors are ignored. */
+    fun prefetch(videoIds: List<String>) {
+        videoIds.forEach { id -> scope.launch { runCatching { resolve(id) } } }
     }
 
     fun invalidate(videoId: String) {

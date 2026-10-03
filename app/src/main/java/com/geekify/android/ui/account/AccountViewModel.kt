@@ -65,11 +65,14 @@ class AccountViewModel @Inject constructor(
         }
     }
 
-    fun signInGoogle() {
+    fun signInGoogle(activityContext: android.content.Context) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null, message = null) }
             try {
-                auth.signInGoogle()
+                auth.signInGoogle(activityContext)
+                _uiState.update { it.copy(isLoading = false) }
+            } catch (e: AuthRepository.GoogleSignInCancelledException) {
+                // The person closed the account picker: nothing to report.
                 _uiState.update { it.copy(isLoading = false) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, error = auth.friendlyError(e)) }

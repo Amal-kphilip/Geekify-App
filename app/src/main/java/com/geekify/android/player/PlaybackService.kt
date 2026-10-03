@@ -12,6 +12,7 @@ import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -54,6 +55,7 @@ class PlaybackService : MediaSessionService() {
 
     @Inject lateinit var queueManager: QueueManager
     @Inject lateinit var streamResolver: StreamResolver
+    @Inject lateinit var innerTube: InnerTubeClient
     @Inject lateinit var musicSource: MusicSource
     @Inject lateinit var historyRepository: com.geekify.android.data.local.HistoryRepository
     @Inject lateinit var http: OkHttpClient
@@ -66,11 +68,15 @@ class PlaybackService : MediaSessionService() {
     private var progressJob: Job? = null
     private var lastPlayingVideoId: String? = null
     private var resolveRetries = 0
+    private var foregroundShownFor: String? = null
 
     override fun onCreate() {
         super.onCreate()
 
         createPlaybackNotificationChannel()
+
+        // Load the YouTube config/visitor id in the background so the first song does not wait for it.
+        scope.launch(Dispatchers.IO) { innerTube.warmUp() }
 
         // On current Samsung/Android releases a concrete provider and app icon make
         // the foreground media notification reliable when playback leaves the app.
@@ -112,7 +118,7 @@ class PlaybackService : MediaSessionService() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        mediaSession = MediaSession.Builder(this, player)
+        mediaSession = MediaSession.Builder(this, QueuePlayer(player))
             .setSessionActivity(pendingIntent)
             .build()
 
@@ -169,7 +175,16 @@ class PlaybackService : MediaSessionService() {
             // few seconds, during which Media3's automatic notification has no prepared item
             // yet. Without this, Android can keep the service background-only after the app is
             // minimized and no media card reaches the notification drawer.
-            if (state.isPlaying || state.isBuffering) showForegroundPlaybackNotification(track)
+            // Once per song is enough to promote the service. Re-posting it on every progress update
+            // (twice a second) kept overwriting Media3's own notification, which carries the controls.
+            if (state.isPlaying || state.isBuffering) {
+                if (foregroundShownFor != track.videoId) {
+                    foregroundShownFor = track.videoId
+                    showForegroundPlaybackNotification(track)
+                }
+            } else {
+                foregroundShownFor = null
+            }
             if (player.currentMediaItem?.mediaId != track.videoId) {
                 // After a restart the restored queue loads paused; only auto-play when the user asked to play.
                 loadAndPlay(track, autoPlay = state.isPlaying)
@@ -179,6 +194,33 @@ class PlaybackService : MediaSessionService() {
                 player.pause()
             }
         }.launchIn(scope)
+    }
+
+    /**
+     * ExoPlayer only ever holds the current song; the real queue lives in [QueueManager]. Without
+     * this wrapper the notification / lock screen / headset see a one-item playlist: no "next", and
+     * "previous" just restarts the song. This routes them to the real queue instead.
+     */
+    private inner class QueuePlayer(wrapped: Player) : ForwardingPlayer(wrapped) {
+        override fun getAvailableCommands(): Player.Commands =
+            super.getAvailableCommands().buildUpon()
+                .add(Player.COMMAND_SEEK_TO_NEXT)
+                .add(Player.COMMAND_SEEK_TO_PREVIOUS)
+                .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                .build()
+
+        override fun isCommandAvailable(command: Int): Boolean = availableCommands.contains(command)
+
+        override fun hasNextMediaItem(): Boolean = queueManager.state.value.hasNext
+        override fun hasPreviousMediaItem(): Boolean = queueManager.state.value.queue.isNotEmpty()
+
+        override fun seekToNext() { queueManager.next() }
+        override fun seekToNextMediaItem() { queueManager.next() }
+
+        // Same rule as the in-app button: past 3 s restarts the song, otherwise go to the previous one.
+        override fun seekToPrevious() { queueManager.previous(currentPosition.coerceAtLeast(0L) / 1000) }
+        override fun seekToPreviousMediaItem() { queueManager.previous(currentPosition.coerceAtLeast(0L) / 1000) }
     }
 
     private fun createPlaybackNotificationChannel() {
@@ -330,17 +372,14 @@ class PlaybackService : MediaSessionService() {
     private fun startPrefetch(currentId: String) {
         prefetchJob?.cancel()
         prefetchJob = scope.launch {
-            delay(1500)
+            // No artificial delay: resolving a URL is a tiny request, and having the next songs
+            // ready is what makes "next" and auto-advance start instantly.
             val s = queueManager.state.value
             val nextIds = buildList {
                 s.queue.getOrNull(s.index + 1)?.videoId?.let { add(it) }
                 s.queue.getOrNull(s.index + 2)?.videoId?.let { add(it) }
             }.filter { it != currentId }
-            nextIds.forEach { id ->
-                launch {
-                    runCatching { streamResolver.resolve(id) }
-                }
-            }
+            streamResolver.prefetch(nextIds)
         }
     }
 

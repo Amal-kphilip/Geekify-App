@@ -1,5 +1,8 @@
 package com.geekify.android.ui.account
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -17,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,6 +46,8 @@ fun AccountSheet(
     onHealthClick: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
+    // Credential Manager needs a real Activity to show Google's account sheet.
+    val activityContext = LocalContext.current.findActivity()
     var showAuthForm by remember { mutableStateOf(false) }
     var isSignUp by remember { mutableStateOf(false) }
     var email by remember { mutableStateOf("") }
@@ -69,7 +75,7 @@ fun AccountSheet(
                         onBack = { showAuthForm = false }, onSignUpChange = { isSignUp = it },
                         onEmailChange = { email = it }, onPasswordChange = { password = it }, onNameChange = { name = it },
                         onSubmit = { if (isSignUp) viewModel.signUpEmail(name, email, password) else viewModel.signInEmail(email, password) },
-                        onGoogleSignIn = { viewModel.signInGoogle() },
+                        onGoogleSignIn = { viewModel.signInGoogle(activityContext) },
                         onResetPassword = { if (email.isNotBlank()) viewModel.resetPassword(email) }
                     )
                 } else {
@@ -202,3 +208,9 @@ private fun AccountTextField(value: String, onValueChange: (String) -> Unit, lab
 
 @Composable
 private fun accountTextFieldColors() = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrandViolet, unfocusedBorderColor = InkGlassBorder, focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary)
+
+private tailrec fun Context.findActivity(): Context = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> this
+}

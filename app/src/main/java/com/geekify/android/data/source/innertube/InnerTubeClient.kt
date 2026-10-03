@@ -2,6 +2,7 @@ package com.geekify.android.data.source.innertube
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.*
 import okhttp3.OkHttpClient
@@ -64,7 +65,9 @@ class InnerTubeClient @Inject constructor(private val http: OkHttpClient) {
         }
 
     private suspend fun callPlayerVisionOs(videoId: String): JsonObject {
-        runCatching { getConfig() } // also loads the anonymous visitor id used below; not required to continue
+        // The visitor id is optional. Never make the first tap wait on the (large) Music homepage
+        // download for it: give it a short window, otherwise continue without it.
+        if (visitorData == null) runCatching { withTimeoutOrNull(1_500) { getConfig() } }
         val body = buildJsonObject {
             put("context", buildJsonObject {
                 put("client", buildJsonObject {
@@ -95,16 +98,24 @@ class InnerTubeClient @Inject constructor(private val http: OkHttpClient) {
             .header("User-Agent", PLAYER_USER_AGENT)
             .post(body).build()
 
-        val response = withContext(Dispatchers.IO) { http.newCall(request).execute() }
-        response.use {
-            val text = it.body.string()
-            if (it.isSuccessful) {
-                val obj = json.parseToJsonElement(text).jsonObject
-                rememberVisitor(obj)
-                return obj
+        // Execute, read the whole body AND parse on the IO pool. Callers (the playback service) run on
+        // the main thread, and reading/parsing a ~100 KB player response there froze the UI.
+        return withContext(Dispatchers.IO) {
+            http.newCall(request).execute().use {
+                val text = it.body.string()
+                if (it.isSuccessful) {
+                    val obj = json.parseToJsonElement(text).jsonObject
+                    rememberVisitor(obj)
+                    return@use obj
+                }
+                throw InnerTubeException("YouTube refused the stream request (${it.code}).", it.code >= 500 || it.code == 429)
             }
-            throw InnerTubeException("YouTube refused the stream request (${it.code}).", it.code >= 500 || it.code == 429)
         }
+    }
+
+    /** Loads the Music config + anonymous visitor id ahead of time so the first song starts faster. */
+    suspend fun warmUp() {
+        runCatching { getConfig() }
     }
 
     private fun rememberVisitor(obj: JsonObject) {
@@ -133,12 +144,13 @@ class InnerTubeClient @Inject constructor(private val http: OkHttpClient) {
                     .header("X-YouTube-Client-Version", c.version)
                     .header("Origin", "https://music.youtube.com")
                     .header("User-Agent", USER_AGENT).post(body).build()
-                val response = withContext(Dispatchers.IO) { http.newCall(request).execute() }
-                response.use {
-                    val text = it.body.string()
-                    if (it.isSuccessful) return json.parseToJsonElement(text).jsonObject.also { o -> rememberVisitor(o) }
-                    if (it.code in 400..499 && it.code != 429) throw InnerTubeException("YouTube rejected this request.", false)
-                    throw InnerTubeException("YouTube is temporarily unavailable (${it.code}).", true)
+                return withContext(Dispatchers.IO) {
+                    http.newCall(request).execute().use {
+                        val text = it.body.string()
+                        if (it.isSuccessful) return@use json.parseToJsonElement(text).jsonObject.also { o -> rememberVisitor(o) }
+                        if (it.code in 400..499 && it.code != 429) throw InnerTubeException("YouTube rejected this request.", false)
+                        throw InnerTubeException("YouTube is temporarily unavailable (${it.code}).", true)
+                    }
                 }
             } catch (t: Throwable) {
                 last = t

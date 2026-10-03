@@ -27,7 +27,8 @@ data class CollectionUiState(
 
 @HiltViewModel
 class DetailsViewModel @Inject constructor(
-    private val musicSource: MusicSource
+    private val musicSource: MusicSource,
+    private val streamResolver: com.geekify.android.player.StreamResolver
 ) : ViewModel() {
 
     private val _artistState = MutableStateFlow(ArtistUiState())
@@ -50,7 +51,11 @@ class DetailsViewModel @Inject constructor(
         viewModelScope.launch {
             _collectionState.update { it.copy(isLoading = true, error = null) }
             when (val res = musicSource.collection(id, kind)) {
-                is MusicResult.Success -> _collectionState.update { it.copy(collection = res.value, isLoading = false) }
+                is MusicResult.Success -> {
+                    _collectionState.update { it.copy(collection = res.value, isLoading = false) }
+                    // The Play button starts the first song: have its stream URL ready before the tap.
+                    streamResolver.prefetch(res.value.tracks.take(2).map { it.videoId })
+                }
                 is MusicResult.Failure -> _collectionState.update { it.copy(error = res.message, isLoading = false) }
             }
         }

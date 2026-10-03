@@ -92,6 +92,13 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
         update(_state.value.copy(queue = q, index = idx, isPlaying = true, isBuffering = true, progressMs = 0L, error = null))
     }
 
+    /** Starts [tracks] from a random song with shuffle switched on, like Spotify's shuffle-play. */
+    fun playShuffled(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        val idx = tracks.indices.random()
+        update(_state.value.copy(queue = tracks, index = idx, isPlaying = true, isBuffering = true, progressMs = 0L, shuffle = true, error = null))
+    }
+
     fun togglePlay() {
         if (_state.value.current == null) return
         update(_state.value.copy(isPlaying = !_state.value.isPlaying))
@@ -140,6 +147,12 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
             s.repeat == RepeatMode.ALL -> 0
             else -> { update(s.copy(isPlaying = false)); return }
         }
+        if (next == s.index) {
+            // Repeat-all with a single song: same handling as repeat-one.
+            seekTo(0)
+            update(s.copy(isPlaying = true, progressMs = 0L))
+            return
+        }
         update(s.copy(index = next, isPlaying = true, isBuffering = true, progressMs = 0L, error = null))
     }
 
@@ -150,8 +163,14 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
             seekTo(0)
             return false
         }
-        val prev = if (s.index <= 0) 0 else s.index - 1
-        update(s.copy(index = prev, isPlaying = true, isBuffering = true, progressMs = 0L, error = null))
+        if (s.index <= 0) {
+            // Already on the first song: restart it in place (a same-index "load" would never run
+            // and would leave the buffering spinner stuck).
+            seekTo(0)
+            update(s.copy(isPlaying = true, progressMs = 0L, error = null))
+            return false
+        }
+        update(s.copy(index = s.index - 1, isPlaying = true, isBuffering = true, progressMs = 0L, error = null))
         return true
     }
 

@@ -24,6 +24,7 @@ import com.geekify.android.data.model.Track
 import com.geekify.android.ui.components.AuroraBackground
 import com.geekify.android.ui.components.DetailHeader
 import com.geekify.android.ui.components.TrackRow
+import com.geekify.android.ui.components.totalDurationText
 import com.geekify.android.ui.components.rememberArtColor
 import com.geekify.android.ui.theme.*
 
@@ -33,7 +34,8 @@ fun PlaylistScreen(
     playlistName: String,
     viewModel: LibraryViewModel,
     onBack: () -> Unit,
-    onPlayTrack: (Track, List<Track>) -> Unit
+    onPlayTrack: (Track, List<Track>) -> Unit,
+    onShufflePlay: ((List<Track>) -> Unit)? = null
 ) {
     val tracks by viewModel.playlistTracks(playlistId).collectAsState(initial = emptyList())
     val coverUrl = tracks.firstOrNull()?.thumbnails?.lastOrNull()?.url
@@ -46,8 +48,9 @@ fun PlaylistScreen(
                     onBack = onBack,
                     title = playlistName,
                     subtitle = null,
-                    meta = "${tracks.size} tracks",
+                    meta = listOfNotNull("${tracks.size} tracks", totalDurationText(tracks)).joinToString(" • "),
                     onPlay = if (tracks.isNotEmpty()) ({ onPlayTrack(tracks.first(), tracks) }) else null,
+                    onShuffle = if (tracks.isNotEmpty() && onShufflePlay != null) ({ onShufflePlay(tracks) }) else null,
                     trailing = {
                         IconButton(onClick = {
                             viewModel.deletePlaylist(playlistId)

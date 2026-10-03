@@ -288,7 +288,8 @@ fun MainScreen(
                         LikedScreen(
                             viewModel = libraryVm,
                             onBack = { navController.popBackStack() },
-                            onPlayTrack = onTrackClick
+                            onPlayTrack = onTrackClick,
+                            onShufflePlay = { playerViewModel.playShuffled(it) }
                         )
                     }
 
@@ -307,7 +308,8 @@ fun MainScreen(
                             playlistName = name,
                             viewModel = libraryVm,
                             onBack = { navController.popBackStack() },
-                            onPlayTrack = onTrackClick
+                            onPlayTrack = onTrackClick,
+                            onShufflePlay = { playerViewModel.playShuffled(it) }
                         )
                     }
 
@@ -344,7 +346,8 @@ fun MainScreen(
                             viewModel = detailsVm,
                             onBack = { navController.popBackStack() },
                             onPlayTrack = onTrackClick,
-                            onTrackActions = onTrackActions
+                            onTrackActions = onTrackActions,
+                            onShufflePlay = { playerViewModel.playShuffled(it) }
                         )
                     }
 

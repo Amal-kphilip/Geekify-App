@@ -123,5 +123,25 @@ object Parsers {
             }
         } }
     }
+    data class CollectionHeader(val title: String?, val creator: String?, val description: String?, val year: String?)
+
+    /** Best-effort read of an album/playlist page header. Never throws; missing parts are null. */
+    fun collectionHeader(raw: JsonElement): CollectionHeader = runCatching {
+        val h = walk(raw).firstNotNullOfOrNull { n ->
+            objectOrNull(n["musicResponsiveHeaderRenderer"]) ?: objectOrNull(n["musicDetailHeaderRenderer"])
+        } ?: return@runCatching CollectionHeader(null, null, null, null)
+        val subtitleParts = ((objectOrNull(h["subtitle"])?.get("runs")) as? JsonArray).orEmpty()
+            .map { text(objectOrNull(it)?.get("text")).trim() }
+            .filter { it.isNotBlank() && it != "•" }
+        val year = subtitleParts.firstOrNull { it.matches(Regex("^\\d{4}$")) }
+        val kindWords = setOf("album", "playlist", "single", "ep", "mix", "podcast")
+        val creator = text(h["straplineTextOne"]).trim().ifBlank { null }
+            ?: subtitleParts.firstOrNull { it != year && it.lowercase() !in kindWords }
+        val description = (objectOrNull(h["description"])?.get("musicDescriptionShelfRenderer")
+            ?.let { objectOrNull(it)?.get("description") } ?: h["description"])
+            ?.let { text(it).trim() }?.ifBlank { null }
+        CollectionHeader(text(h["title"]).trim().ifBlank { null }, creator, description, year)
+    }.getOrDefault(CollectionHeader(null, null, null, null))
+
     fun seconds(value: String?): Int? { val parts = value?.trim()?.split(":") ?: return null; if (parts.size !in 2..3 || parts.any { it.toIntOrNull() == null }) return null; return parts.map(String::toInt).let { if (it.size == 2) it[0] * 60 + it[1] else it[0] * 3600 + it[1] * 60 + it[2] } }
 }

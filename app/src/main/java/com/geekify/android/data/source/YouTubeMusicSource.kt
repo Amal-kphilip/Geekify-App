@@ -86,8 +86,9 @@ class YouTubeMusicSource @Inject constructor(
         return ArtistPage(id, name, thumbnails = Parsers.findThumbnails(raw), songs = songs, albums = has("album").distinctBy { it.id }, singles = has("single", "ep").distinctBy { it.id }, related = has("similar", "artist", "fan").distinctBy { it.id })
     }
     private fun parseCollection(raw: JsonObject, id: String, kind: CollectionKind): CollectionPage {
-        val title = Parsers.shelves(raw).firstOrNull()?.first ?: id; val tracks = Parsers.tracks(raw, 250); val thumbs = Parsers.findThumbnails(raw)
-        return CollectionPage(id, title, type = if (kind == CollectionKind.ALBUM) "album" else "playlist", thumbnails = thumbs, tracks = tracks.map { if (it.thumbnails.isEmpty()) it.copy(thumbnails = thumbs) else it }.distinctBy { it.videoId })
+        val header = Parsers.collectionHeader(raw)
+        val title = header.title ?: Parsers.shelves(raw).firstOrNull()?.first ?: id; val tracks = Parsers.tracks(raw, 250); val thumbs = Parsers.findThumbnails(raw)
+        return CollectionPage(id, title, description = header.description, year = header.year, artist = header.creator, type = if (kind == CollectionKind.ALBUM) "album" else "playlist", thumbnails = thumbs, tracks = tracks.map { if (it.thumbnails.isEmpty()) it.copy(thumbnails = thumbs) else it }.distinctBy { it.videoId })
     }
     private suspend fun <T> guarded(block: suspend () -> T): MusicResult<T> = try {
         MusicResult.Success(block())

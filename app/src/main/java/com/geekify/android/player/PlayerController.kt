@@ -15,6 +15,7 @@ class PlayerController @Inject constructor(
     val state: StateFlow<QueueState> = queueManager.state
 
     fun play(track: Track, queue: List<Track> = emptyList()) = queueManager.play(track, queue)
+    fun playShuffled(tracks: List<Track>) = queueManager.playShuffled(tracks)
     fun togglePlay() = queueManager.togglePlay()
     fun seekTo(positionMs: Long) = queueManager.seekTo(positionMs)
     fun next() = queueManager.next()

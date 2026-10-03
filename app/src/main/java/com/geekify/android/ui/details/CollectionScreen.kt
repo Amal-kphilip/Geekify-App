@@ -19,6 +19,7 @@ import com.geekify.android.data.model.Track
 import com.geekify.android.ui.components.AuroraBackground
 import com.geekify.android.ui.components.DetailHeader
 import com.geekify.android.ui.components.TrackRow
+import com.geekify.android.ui.components.totalDurationText
 import com.geekify.android.ui.components.rememberArtColor
 import com.geekify.android.ui.theme.*
 
@@ -29,7 +30,8 @@ fun CollectionScreen(
     viewModel: DetailsViewModel,
     onBack: () -> Unit,
     onPlayTrack: (Track, List<Track>) -> Unit,
-    onTrackActions: (Track) -> Unit
+    onTrackActions: (Track) -> Unit,
+    onShufflePlay: ((List<Track>) -> Unit)? = null
 ) {
     val state by viewModel.collectionState.collectAsState()
 
@@ -55,12 +57,15 @@ fun CollectionScreen(
                         onBack = onBack,
                         title = collection.title,
                         subtitle = collection.artist,
+                        description = collection.description,
                         meta = listOfNotNull(
                             if (kind == CollectionKind.ALBUM) "Album" else "Playlist",
                             collection.year,
-                            "${collection.tracks.size} tracks"
+                            "${collection.tracks.size} tracks",
+                            totalDurationText(collection.tracks)
                         ).joinToString(" • "),
                         onPlay = if (collection.tracks.isNotEmpty()) ({ onPlayTrack(collection.tracks.first(), collection.tracks) }) else null,
+                        onShuffle = if (collection.tracks.isNotEmpty() && onShufflePlay != null) ({ onShufflePlay(collection.tracks) }) else null,
                         art = {
                             if (thumbUrl != null) {
                                 AsyncImage(
