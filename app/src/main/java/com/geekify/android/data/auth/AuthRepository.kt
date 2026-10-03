@@ -1,6 +1,7 @@
 package com.geekify.android.data.auth
 
 import android.content.Context
+import com.geekify.android.R
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
@@ -49,10 +50,10 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
         cred.user?.updateProfile(com.google.firebase.auth.userProfileChangeRequest { displayName = name.trim() })?.await()
     }
 
-    suspend fun signInGoogle(webClientId: String) {
+    suspend fun signInGoogle() {
         val option = GetGoogleIdOption.Builder()
             .setFilterByAuthorizedAccounts(false)
-            .setServerClientId(webClientId)
+            .setServerClientId(context.getString(R.string.default_web_client_id))
             .build()
         val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
         val result = CredentialManager.create(context).getCredential(context, request)

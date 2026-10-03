@@ -1,6 +1,7 @@
 package com.geekify.android.ui.account
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -63,6 +64,7 @@ fun AccountSheet(
                         onBack = { showAuthForm = false }, onSignUpChange = { isSignUp = it },
                         onEmailChange = { email = it }, onPasswordChange = { password = it }, onNameChange = { name = it },
                         onSubmit = { if (isSignUp) viewModel.signUpEmail(name, email, password) else viewModel.signInEmail(email, password) },
+                        onGoogleSignIn = { viewModel.signInGoogle() },
                         onResetPassword = { if (email.isNotBlank()) viewModel.resetPassword(email) }
                     )
                 } else {
@@ -148,7 +150,8 @@ private fun ProfileHub(
 private fun AccountAuthForm(
     state: AccountUiState, isSignUp: Boolean, email: String, password: String, name: String,
     onBack: () -> Unit, onSignUpChange: (Boolean) -> Unit, onEmailChange: (String) -> Unit,
-    onPasswordChange: (String) -> Unit, onNameChange: (String) -> Unit, onSubmit: () -> Unit, onResetPassword: () -> Unit
+    onPasswordChange: (String) -> Unit, onNameChange: (String) -> Unit, onSubmit: () -> Unit,
+    onGoogleSignIn: () -> Unit, onResetPassword: () -> Unit
 ) {
     Column(Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(20.dp)) {
         IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back to profile menu", tint = TextPrimary) }
@@ -164,6 +167,26 @@ private fun AccountAuthForm(
         Spacer(Modifier.height(18.dp))
         Button(onClick = onSubmit, enabled = !state.isLoading, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = BrandViolet)) {
             if (state.isLoading) CircularProgressIndicator(color = InkBackground, modifier = Modifier.size(20.dp)) else Text(if (isSignUp) "Create account" else "Sign in", color = InkBackground, fontWeight = FontWeight.Bold)
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            HorizontalDivider(modifier = Modifier.weight(1f), color = InkGlassBorder)
+            Text("or", color = TextMuted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp))
+            HorizontalDivider(modifier = Modifier.weight(1f), color = InkGlassBorder)
+        }
+        OutlinedButton(
+            onClick = onGoogleSignIn,
+            enabled = !state.isLoading,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+            border = BorderStroke(1.dp, InkGlassBorder)
+        ) {
+            Icon(Icons.Default.AccountCircle, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(10.dp))
+            Text("Continue with Google", fontWeight = FontWeight.SemiBold)
         }
         TextButton(onClick = { onSignUpChange(!isSignUp) }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text(if (isSignUp) "Already have an account? Sign in" else "Create an account", color = BrandMint) }
         if (!isSignUp) TextButton(onClick = onResetPassword, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Forgot password?", color = TextMuted) }

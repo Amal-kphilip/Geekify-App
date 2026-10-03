@@ -65,6 +65,18 @@ class AccountViewModel @Inject constructor(
         }
     }
 
+    fun signInGoogle() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, error = null, message = null) }
+            try {
+                auth.signInGoogle()
+                _uiState.update { it.copy(isLoading = false) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isLoading = false, error = auth.friendlyError(e)) }
+            }
+        }
+    }
+
     fun resetPassword(email: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
