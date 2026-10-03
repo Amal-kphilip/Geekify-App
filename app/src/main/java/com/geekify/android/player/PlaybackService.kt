@@ -17,7 +17,9 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.DefaultMediaNotificationProvider
 import com.geekify.android.MainActivity
+import com.geekify.android.R
 import com.geekify.android.data.model.Track
 import com.geekify.android.ui.components.bestArtworkUrl
 import com.geekify.android.data.source.innertube.InnerTubeClient
@@ -56,6 +58,14 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // On current Samsung/Android releases a concrete provider and app icon make
+        // the foreground media notification reliable when playback leaves the app.
+        setMediaNotificationProvider(
+            DefaultMediaNotificationProvider(this).apply {
+                setSmallIcon(R.mipmap.ic_launcher)
+            }
+        )
 
         val dataSourceFactory = OkHttpDataSource.Factory(http)
             // googlevideo checks that the URL is fetched with the same User-Agent as the client that issued it.
