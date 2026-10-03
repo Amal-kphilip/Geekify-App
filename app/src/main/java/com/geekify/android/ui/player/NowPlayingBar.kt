@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.geekify.android.ui.components.bouncyClickable
+import com.geekify.android.ui.components.bestArtworkUrl
 import com.geekify.android.ui.components.rememberArtColor
 import com.geekify.android.ui.theme.*
 
@@ -46,7 +47,7 @@ fun NowPlayingBar(
     val isLiked by viewModel.isCurrentLiked.collectAsState()
     val track = state.current ?: return
 
-    val thumbUrl = track.thumbnails.lastOrNull()?.url
+    val thumbUrl = track.thumbnails.bestArtworkUrl(480)
     val artColor by rememberArtColor(thumbUrl, fallback = InkElevated)
     val barColor by animateColorAsState(artColor, tween(500), label = "barColor")
 

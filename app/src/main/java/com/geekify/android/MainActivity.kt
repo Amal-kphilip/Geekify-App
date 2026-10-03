@@ -42,6 +42,9 @@ class MainActivity : ComponentActivity() {
 
         // Start PlaybackService
         val serviceIntent = Intent(this, PlaybackService::class.java)
+        // MediaSessionService promotes itself to a foreground media service when playback starts.
+        // Starting it normally here avoids Android's five-second foreground-start deadline while
+        // the user is still browsing before choosing a song.
         startService(serviceIntent)
 
         // Observe foregrounding for Firestore pull sync

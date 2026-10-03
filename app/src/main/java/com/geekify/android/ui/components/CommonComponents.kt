@@ -170,7 +170,7 @@ fun TrackRow(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        val thumbUrl = track.thumbnails.lastOrNull()?.url
+        val thumbUrl = track.thumbnails.bestArtworkUrl(480)
         Box(
             modifier = Modifier
                 .size(52.dp)
@@ -244,7 +244,7 @@ fun CardItem(
             .width(width)
             .bouncyClickable(onClick = onClick)
     ) {
-        val thumbUrl = card.thumbnails.lastOrNull()?.url
+        val thumbUrl = card.thumbnails.bestArtworkUrl(480)
         val isCircle = card.type == "artist"
 
         Box(

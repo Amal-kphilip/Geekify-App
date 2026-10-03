@@ -10,7 +10,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
@@ -42,26 +41,25 @@ fun HomeScreen(
     onTrackClick: (Track, List<Track>) -> Unit,
     onCardClick: (Card) -> Unit,
     onAccountClick: () -> Unit,
-    onHealthClick: () -> Unit,
     onLikedClick: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
     val filters = listOf("Everything", "Songs", "Albums", "Playlists", "Artists")
 
-    // ---- Derived content for the Spotify-style home ----
+    // ---- Derived content for the personal home feed ----
     val allItems = state.shelves.flatMap { it.items }.distinctBy { it.title }
     val mixTiles = state.mixes.take(2).map { mix ->
-        QuickItem(mix.title, mix.tracks.firstOrNull()?.thumbnails?.lastOrNull()?.url) {
+        QuickItem(mix.title, mix.tracks.firstOrNull()?.thumbnails?.bestArtworkUrl(480)) {
             if (mix.tracks.isNotEmpty()) onTrackClick(mix.tracks.first(), mix.tracks)
         }
     }
     val quickFromFeed = allItems.take(5 - mixTiles.size)
     val quickTiles = mixTiles + quickFromFeed.map { item ->
         when (item) {
-            is ShelfTrack -> QuickItem(item.value.title, item.value.thumbnails.lastOrNull()?.url) {
+            is ShelfTrack -> QuickItem(item.value.title, item.value.thumbnails.bestArtworkUrl(480)) {
                 onTrackClick(item.value, listOf(item.value))
             }
-            is ShelfCard -> QuickItem(item.value.title, item.value.thumbnails.lastOrNull()?.url) {
+            is ShelfCard -> QuickItem(item.value.title, item.value.thumbnails.bestArtworkUrl(480)) {
                 onCardClick(item.value)
             }
         }
@@ -100,9 +98,6 @@ fun HomeScreen(
                                     onClick = { viewModel.setFilter(filter) }
                                 )
                             }
-                        }
-                        IconButton(onClick = onHealthClick) {
-                            Icon(Icons.Default.HealthAndSafety, contentDescription = "Health Check", tint = TextSecondary)
                         }
                     }
                 }
@@ -164,12 +159,12 @@ fun HomeScreen(
                         Column(modifier = Modifier.padding(top = 28.dp)) {
                             SectionTitle("Picked for you")
                             val (label, title, subtitle, thumb) = when (featured) {
-                                is ShelfTrack -> listOf("Song", featured.value.title, featured.value.artist, featured.value.thumbnails.lastOrNull()?.url)
+                                is ShelfTrack -> listOf("Song", featured.value.title, featured.value.artist, featured.value.thumbnails.bestArtworkUrl(720))
                                 is ShelfCard -> listOf(
                                     featured.value.type.replaceFirstChar { it.uppercase() },
                                     featured.value.title,
                                     featured.value.subtitle,
-                                    featured.value.thumbnails.lastOrNull()?.url
+                                    featured.value.thumbnails.bestArtworkUrl(720)
                                 )
                             }
                             val open = {
@@ -342,7 +337,7 @@ private fun FeaturedCard(
 
 @Composable
 private fun MixCover(mix: Mix, onClick: () -> Unit) {
-    val thumb = mix.tracks.firstOrNull()?.thumbnails?.lastOrNull()?.url
+    val thumb = mix.tracks.firstOrNull()?.thumbnails?.bestArtworkUrl(480)
     Column(
         modifier = Modifier
             .width(156.dp)

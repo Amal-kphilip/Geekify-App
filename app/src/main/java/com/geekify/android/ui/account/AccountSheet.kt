@@ -12,6 +12,10 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mail
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.HealthAndSafety
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,13 +28,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.geekify.android.data.auth.SyncState
 import com.geekify.android.ui.components.GlassSurface
+import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AccountSheet(
     viewModel: AccountViewModel,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onRecentsClick: () -> Unit,
+    onSettingsClick: () -> Unit,
+    onHealthClick: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
     var isSignUp by remember { mutableStateOf(false) }
@@ -111,6 +119,20 @@ fun AccountSheet(
                 }
 
                 Spacer(Modifier.height(24.dp))
+
+                Text("YOUR SPACE", color = BrandMint, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(8.dp))
+                GlassSurface(modifier = Modifier.fillMaxWidth(), backgroundColor = InkElevated) {
+                    Column {
+                        AccountMenuRow(Icons.Default.History, "Recents", "Your recently played tracks") { onRecentsClick(); onDismiss() }
+                        HorizontalDivider(color = InkGlassBorder)
+                        AccountMenuRow(Icons.Default.HealthAndSafety, "Extractor health", "Check music and stream connections") { onHealthClick(); onDismiss() }
+                        HorizontalDivider(color = InkGlassBorder)
+                        AccountMenuRow(Icons.Default.Settings, "Settings", "Playback and app preferences") { onSettingsClick(); onDismiss() }
+                    }
+                }
+
+                Spacer(Modifier.height(20.dp))
 
                 Button(
                     onClick = {
@@ -250,5 +272,26 @@ fun AccountSheet(
 
             Spacer(Modifier.height(24.dp))
         }
+    }
+}
+
+@Composable
+private fun AccountMenuRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 14.dp).bouncyClickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, null, tint = BrandMint, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text(subtitle, color = TextMuted, fontSize = 12.sp)
+        }
+        Icon(Icons.Default.ChevronRight, null, tint = TextMuted)
     }
 }

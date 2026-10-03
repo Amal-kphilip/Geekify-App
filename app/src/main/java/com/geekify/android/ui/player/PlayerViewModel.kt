@@ -42,6 +42,7 @@ class PlayerViewModel @Inject constructor(
     fun previous() = controller.previous(state.value.progressMs / 1000)
     fun toggleShuffle() = controller.toggleShuffle()
     fun cycleRepeat() = controller.cycleRepeat()
+    fun setVolume(volume: Float) = controller.setVolume(volume)
     fun addToQueue(track: Track) = controller.addToQueue(track)
     fun removeFromQueue(index: Int) = controller.removeFromQueue(index)
     fun reorder(from: Int, to: Int) = controller.reorder(from, to)

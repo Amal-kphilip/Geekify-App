@@ -3,21 +3,22 @@ package com.geekify.android.ui.theme
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
-// ---- Surfaces (near-black, Spotify style) ----
-val InkBackground = Color(0xFF0D0D0D)
-val InkPanel = Color(0xFF1F1F1F)
-val InkElevated = Color(0xFF2A2A2A)
+// ---- Geekify "midnight aurora" surfaces ----
+val InkBackground = Color(0xFF090B18)
+val InkPanel = Color(0xFF12172B)
+val InkElevated = Color(0xFF1B2340)
 val InkGlass = Color(0x1FFFFFFF)
 val InkGlassBorder = Color(0x24FFFFFF)
 
 // ---- Accent ----
-val SpotifyGreen = Color(0xFF1ED760)
+// Kept as a legacy symbol while the interface is migrated away from the old green palette.
+val SpotifyGreen = Color(0xFF7C8CFF)
 val OnAccent = Color(0xFF000000)
 
 // Legacy brand aliases: every older screen that still references these now picks up the green accent.
-val BrandViolet = SpotifyGreen
-val BrandMint = SpotifyGreen
-val BrandPink = SpotifyGreen
+val BrandViolet = Color(0xFF8B7CFF)
+val BrandMint = Color(0xFF46E0C2)
+val BrandPink = Color(0xFFFF7EB6)
 
 // ---- Text ----
 val TextPrimary = Color(0xFFFFFFFF)
@@ -25,12 +26,12 @@ val TextSecondary = Color(0xFFB3B3B3)
 val TextMuted = Color(0xFF8A8A8A)
 
 val ErrorRed = Color(0xFFF87171)
-val SuccessGreen = SpotifyGreen
+val SuccessGreen = BrandMint
 
-val BrandGradient = Brush.linearGradient(listOf(SpotifyGreen, SpotifyGreen))
+val BrandGradient = Brush.linearGradient(listOf(BrandViolet, BrandMint))
 
 /** "Liked Songs" tile: purple to mint, like Spotify. */
-val LikedGradient = Brush.linearGradient(listOf(Color(0xFF4B2FE8), Color(0xFFA8E6CF)))
+val LikedGradient = Brush.linearGradient(listOf(Color(0xFF6558D9), Color(0xFF4FC7D9)))
 
 /** Browse / Search category tile colours. */
 val CategoryColors = listOf(

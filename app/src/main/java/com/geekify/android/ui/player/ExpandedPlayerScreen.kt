@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,6 +20,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -30,6 +32,7 @@ import com.geekify.android.ui.components.AuroraBackground
 import com.geekify.android.ui.components.SeekBar
 import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.components.rememberArtColor
+import com.geekify.android.ui.components.bestArtworkUrl
 import com.geekify.android.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -54,8 +57,11 @@ fun ExpandedPlayerScreen(
     val fraction = if (isDragging) dragFraction else liveFraction
     val currentPositionMs = (fraction * totalDurationMs).toLong()
 
-    val thumbUrl = track.thumbnails.lastOrNull()?.url
+    val thumbUrl = track.thumbnails.bestArtworkUrl()
     val artColor by rememberArtColor(thumbUrl, fallback = InkElevated)
+    var volumeHint by remember { mutableStateOf(false) }
+    var volume by remember { mutableFloatStateOf(state.volume) }
+    LaunchedEffect(state.volume) { volume = state.volume }
 
     // The cover gently shrinks when paused and springs back when playing.
     val artScale by animateFloatAsState(
@@ -122,6 +128,38 @@ fun ExpandedPlayerScreen(
                         )
                     } else {
                         Icon(Icons.Default.MusicNote, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(80.dp))
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .pointerInput(track.videoId) {
+                            detectVerticalDragGestures(
+                                onDragStart = { volumeHint = true },
+                                onVerticalDrag = { change, dragAmount ->
+                                    change.consume()
+                                    volume = (volume - dragAmount / 800f).coerceIn(0f, 1f)
+                                    viewModel.setVolume(volume)
+                                },
+                                onDragEnd = { volumeHint = false },
+                                onDragCancel = { volumeHint = false }
+                            )
+                        }
+                )
+                if (volumeHint) {
+                    Surface(
+                        modifier = Modifier.align(Alignment.Center),
+                        color = InkBackground.copy(alpha = 0.78f),
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.VolumeUp, null, tint = BrandMint)
+                            Spacer(Modifier.width(8.dp))
+                            Text("${(volume * 100).toInt()}%", color = TextPrimary, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -194,6 +232,14 @@ fun ExpandedPlayerScreen(
             }
 
             Spacer(Modifier.height(12.dp))
+
+            Text(
+                "Swipe cover up or down for volume",
+                color = TextMuted,
+                fontSize = 11.sp,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
+            Spacer(Modifier.height(8.dp))
 
             // Controls
             Row(

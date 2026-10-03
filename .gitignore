@@ -11,3 +11,4 @@ run-gradle-build.cmd
 *.jks
 *.keystore
 keystore.properties
+.kotlin/

@@ -3,6 +3,7 @@ package com.geekify.android.player
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.Bundle
+import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -18,6 +19,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.geekify.android.MainActivity
 import com.geekify.android.data.model.Track
+import com.geekify.android.ui.components.bestArtworkUrl
 import com.geekify.android.data.source.innertube.InnerTubeClient
 import com.geekify.android.data.source.MusicSource
 import dagger.hilt.android.AndroidEntryPoint
@@ -172,6 +174,7 @@ class PlaybackService : MediaSessionService() {
                             .setTitle(track.title)
                             .setArtist(track.artist)
                             .setAlbumTitle(track.album)
+                            .setArtworkUri(track.thumbnails.bestArtworkUrl()?.let(Uri::parse))
                             .build()
                     )
                     .build()
@@ -220,7 +223,14 @@ class PlaybackService : MediaSessionService() {
                         .setMediaId(track.videoId)
                         .setUri(stream.url)
                         .setMimeType(stream.mimeType)
-                        .setMediaMetadata(MediaMetadata.Builder().setTitle(track.title).setArtist(track.artist).setAlbumTitle(track.album).build())
+                    .setMediaMetadata(
+                        MediaMetadata.Builder()
+                            .setTitle(track.title)
+                            .setArtist(track.artist)
+                            .setAlbumTitle(track.album)
+                            .setArtworkUri(track.thumbnails.bestArtworkUrl()?.let(Uri::parse))
+                            .build()
+                    )
                         .build()
                     player.setMediaItem(item, resumeAt)
                     player.playWhenReady = true

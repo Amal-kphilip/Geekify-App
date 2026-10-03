@@ -54,6 +54,9 @@ import com.geekify.android.ui.library.LibraryScreen
 import com.geekify.android.ui.library.LibraryViewModel
 import com.geekify.android.ui.library.LikedScreen
 import com.geekify.android.ui.library.PlaylistScreen
+import com.geekify.android.ui.library.RecentsScreen
+import com.geekify.android.ui.library.RecentsViewModel
+import com.geekify.android.ui.library.SettingsScreen
 import com.geekify.android.ui.player.ExpandedPlayerScreen
 import com.geekify.android.ui.player.NowPlayingBar
 import com.geekify.android.ui.player.PlayerViewModel
@@ -228,8 +231,7 @@ fun MainScreen(
                             onLikedClick = { navController.navigate(Screen.Liked.route) },
                             onTrackClick = onTrackClick,
                             onCardClick = onCardClick,
-                            onAccountClick = { showAccountSheet = true },
-                            onHealthClick = { navController.navigate(Screen.Health.route) }
+                            onAccountClick = { showAccountSheet = true }
                         )
                     }
 
@@ -327,6 +329,15 @@ fun MainScreen(
                             onBack = { navController.popBackStack() }
                         )
                     }
+
+                    composable(Screen.Recents.route) {
+                        val recentsVm: RecentsViewModel = hiltViewModel()
+                        RecentsScreen(recentsVm, onBack = { navController.popBackStack() }, onPlay = onTrackClick)
+                    }
+
+                    composable(Screen.Settings.route) {
+                        SettingsScreen(onBack = { navController.popBackStack() })
+                    }
                 }
             }
         }
@@ -377,7 +388,10 @@ fun MainScreen(
         if (showAccountSheet) {
             AccountSheet(
                 viewModel = accountViewModel,
-                onDismiss = { showAccountSheet = false }
+                onDismiss = { showAccountSheet = false },
+                onRecentsClick = { navController.navigate(Screen.Recents.route) },
+                onSettingsClick = { navController.navigate(Screen.Settings.route) },
+                onHealthClick = { navController.navigate(Screen.Health.route) }
             )
         }
 

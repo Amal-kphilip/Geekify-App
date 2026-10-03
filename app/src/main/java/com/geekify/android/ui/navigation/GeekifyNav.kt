@@ -15,4 +15,6 @@ sealed class Screen(val route: String) {
         fun createRoute(id: String, kind: String) = "collection/$id/$kind"
     }
     object Health : Screen("health")
+    object Recents : Screen("recents")
+    object Settings : Screen("settings")
 }
