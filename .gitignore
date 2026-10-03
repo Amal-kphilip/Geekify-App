@@ -1,0 +1,13 @@
+.gradle/
+.idea/
+build/
+app/build/
+local.properties
+app/google-services.json
+*.iml
+gradle-build.out.log
+gradle-build.err.log
+run-gradle-build.cmd
+*.jks
+*.keystore
+keystore.properties
