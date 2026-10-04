@@ -151,11 +151,9 @@ Tagged releases are built by GitHub Actions and publish a signed APK to [GitHub 
   <tr>
     <td align="center">
       <a href="https://github.com/Amal-kphilip/Geekify-App/releases/latest/download/Geekify-latest.apk">
-        <img
-          src="https://img.shields.io/badge/GET%20IT%20ON-GitHub-181717?style=for-the-badge&logo=github&logoColor=white"
-          alt="Get the stable Geekify release on GitHub"
-          height="100"
-        >
+        <img src="docs/badges/github-stable.svg"
+             alt="Get the stable Geekify release on GitHub"
+             height="100">
       </a>
     </td>
   </tr>
@@ -168,4 +166,3 @@ Audio URLs are resolved directly on the device and can change as upstream servic
 ## License and terms
 
 Geekify is licensed under the [GNU General Public License v3.0](LICENSE). Directly accessing music streams may be subject to the upstream service's terms. Use the app responsibly and ensure that any distribution complies with applicable policies, copyright laws, and rights.
-
