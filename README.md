@@ -13,12 +13,18 @@
 </p>
 
 <p align="center">
-  <a href="#download">Download</a> ·
   <a href="#features">Features</a> ·
-  <a href="#translation">Translate</a> ·
-  <a href="#faq">FAQ</a> ·
-  <a href="#support">Support</a>
+  <a href="#tech-stack">Tech stack</a> ·
+  <a href="#run-locally">Run locally</a> ·
+  <a href="#tests">Tests</a> ·
+  <a href="#contributing">Contributing</a> ·
+  <a href="#roadmap">Roadmap</a> ·
+  <a href="#open-issues">Open issues</a> ·
+  <a href="#releases">Releases</a> ·
+  <a href="#project-notes">Project notes</a> ·
+  <a href="#license-and-terms">License and terms</a>
 </p>
+
 
 **Geekify** is a native Android music player built with Kotlin and Jetpack Compose. Discover music, search songs, build a personal library, and keep listening with background playback and notification controls.
 
