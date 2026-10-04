@@ -25,6 +25,16 @@
   <a href="#license-and-terms">License and terms</a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/Amal-kphilip/Geekify-App">
+    <img
+      src="https://img.shields.io/badge/GET%20IT%20ON-GitHub-181717?style=for-the-badge&logo=github&logoColor=white"
+      alt="Get it on GitHub"
+      height="50"
+    />
+  </a>
+</p>
+
 
 **Geekify** is a native Android music player built with Kotlin and Jetpack Compose. Discover music, search songs, build a personal library, and keep listening with background playback and notification controls.
 
