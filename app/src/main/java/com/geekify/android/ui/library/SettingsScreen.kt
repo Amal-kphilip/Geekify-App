@@ -2,29 +2,33 @@ package com.geekify.android.ui.library
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.geekify.android.BuildConfig
 import com.geekify.android.ui.components.AuroraBackground
+import com.geekify.android.ui.components.CircleIconButton
 import com.geekify.android.ui.theme.*
 
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
     AuroraBackground {
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 20.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back", tint = TextPrimary) }
-                Text("Settings", color = TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircleIconButton(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", onClick = onBack, size = 50.dp)
+                Text("Settings", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
+                Spacer(Modifier.size(50.dp))
             }
             Spacer(Modifier.height(20.dp))
-            Surface(color = InkElevated, shape = MaterialTheme.shapes.large) {
+            Surface(color = InkElevated, shape = RoundedCornerShape(28.dp)) {
                 Column(Modifier.padding(18.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.AutoAwesome, null, tint = BrandMint)

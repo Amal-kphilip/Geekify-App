@@ -15,7 +15,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Explicit
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
@@ -23,7 +23,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -39,6 +42,9 @@ import com.geekify.android.ui.theme.*
 
 /** videoId of the track that is currently playing; lets every TrackRow highlight itself. */
 val LocalNowPlayingId = compositionLocalOf<String?> { null }
+
+/** Extra bottom space that scrolling lists need so their last row clears the floating nav + mini player. */
+val LocalBottomInset = compositionLocalOf { 0.dp }
 
 @Composable
 fun GlassSurface(
@@ -57,7 +63,38 @@ fun GlassSurface(
     )
 }
 
-/** Spotify-style filter pill: green when selected, dark grey otherwise, colour cross-fades. */
+/** Frosted-glass capsule used by the floating bottom navigation and the mini player. */
+fun Modifier.glassPill(shape: Shape = RoundedCornerShape(40.dp)): Modifier = this
+    .clip(shape)
+    .background(NavPill)
+    .background(Brush.verticalGradient(listOf(Color(0x1AFFFFFF), Color.Transparent)))
+    .border(BorderStroke(1.dp, NavPillBorder), shape)
+
+/** Round, softly filled icon button (search / favourites / back / more in the header rows). */
+@Composable
+fun CircleIconButton(
+    icon: ImageVector,
+    contentDescription: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    size: Dp = 46.dp,
+    iconSize: Dp = 22.dp,
+    container: Color = InkElevated,
+    tint: Color = TextPrimary
+) {
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(container)
+            .bouncyClickable(pressedScale = 0.92f, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(iconSize))
+    }
+}
+
+/** Filter chip: lime when selected, dark violet-grey otherwise; colours cross-fade. */
 @Composable
 fun PillChip(
     text: String,
@@ -65,14 +102,14 @@ fun PillChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val bg by animateColorAsState(if (selected) SpotifyGreen else InkElevated, tween(220), label = "chipBg")
-    val fg by animateColorAsState(if (selected) Color.Black else TextPrimary, tween(220), label = "chipFg")
+    val bg by animateColorAsState(if (selected) Lime else InkElevated, tween(220), label = "chipBg")
+    val fg by animateColorAsState(if (selected) OnAccent else TextPrimary, tween(220), label = "chipFg")
     Box(
         modifier = modifier
             .clip(CircleShape)
             .background(bg)
             .bouncyClickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 20.dp, vertical = 11.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(text = text, color = fg, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
@@ -85,8 +122,8 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
         text = text,
         color = TextPrimary,
         fontSize = 22.sp,
-        fontWeight = FontWeight.Bold,
-        modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        fontWeight = FontWeight.Medium,
+        modifier = modifier.padding(horizontal = 20.dp, vertical = 8.dp)
     )
 }
 
@@ -115,9 +152,9 @@ fun Avatar(
                 contentScale = ContentScale.Crop
             )
         } else if (!name.isNullOrBlank()) {
-            Text(name.first().uppercase(), color = Color.Black, fontWeight = FontWeight.Bold, fontSize = (size.value * 0.42f).sp)
+            Text(name.first().uppercase(), color = OnAccent, fontWeight = FontWeight.Bold, fontSize = (size.value * 0.42f).sp)
         } else {
-            Icon(Icons.Default.Person, contentDescription = "Account", tint = Color.Black, modifier = Modifier.size(size * 0.55f))
+            Icon(Icons.Default.Person, contentDescription = "Account", tint = OnAccent, modifier = Modifier.size(size * 0.55f))
         }
     }
 }
@@ -126,7 +163,7 @@ fun Avatar(
 @Composable
 fun EqualizerBars(
     modifier: Modifier = Modifier,
-    color: Color = SpotifyGreen,
+    color: Color = Lime,
     animate: Boolean = true
 ) {
     val transition = rememberInfiniteTransition(label = "eq")
@@ -168,14 +205,14 @@ fun TrackRow(
         modifier = modifier
             .fillMaxWidth()
             .bouncyClickable(pressedScale = 0.985f, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         val thumbUrl = track.thumbnails.bestArtworkUrl(480)
         Box(
             modifier = Modifier
-                .size(52.dp)
-                .clip(RoundedCornerShape(4.dp))
+                .size(64.dp)
+                .clip(RoundedCornerShape(16.dp))
                 .background(InkElevated),
             contentAlignment = Alignment.Center
         ) {
@@ -191,18 +228,18 @@ fun TrackRow(
             }
         }
 
-        Spacer(Modifier.width(14.dp))
+        Spacer(Modifier.width(16.dp))
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = track.title,
-                color = if (isPlaying) SpotifyGreen else TextPrimary,
+                color = if (isPlaying) Lime else TextPrimary,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.height(3.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (isPlaying) {
                     EqualizerBars(modifier = Modifier.padding(end = 6.dp).size(width = 14.dp, height = 12.dp))
@@ -216,7 +253,7 @@ fun TrackRow(
                     )
                 }
                 Text(
-                    text = listOfNotNull(track.artist, track.duration).joinToString(" • "),
+                    text = listOfNotNull(track.artist, track.duration).joinToString("  •  "),
                     color = TextSecondary,
                     fontSize = 14.sp,
                     maxLines = 1,
@@ -226,9 +263,14 @@ fun TrackRow(
         }
 
         if (onMoreClick != null) {
-            IconButton(onClick = onMoreClick) {
-                Icon(Icons.Default.MoreVert, contentDescription = "More", tint = TextSecondary)
-            }
+            Spacer(Modifier.width(8.dp))
+            CircleIconButton(
+                icon = Icons.Default.MoreHoriz,
+                contentDescription = "More",
+                onClick = onMoreClick,
+                size = 40.dp,
+                iconSize = 20.dp
+            )
         }
     }
 }
@@ -249,7 +291,7 @@ fun TrackActionsDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = InkElevated,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(28.dp),
         title = {
             Text(
                 track.title,
@@ -277,7 +319,7 @@ fun TrackActionsDialog(
                     }
                 }
                 TextButton(onClick = { showCreateDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text("New playlist", color = SpotifyGreen, fontWeight = FontWeight.SemiBold)
+                    Text("New playlist", color = Lime, fontWeight = FontWeight.SemiBold)
                 }
             }
         },
@@ -315,7 +357,7 @@ fun CardItem(
         Box(
             modifier = Modifier
                 .size(width)
-                .clip(if (isCircle) CircleShape else RoundedCornerShape(6.dp))
+                .clip(if (isCircle) CircleShape else RoundedCornerShape(22.dp))
                 .background(InkElevated),
             contentAlignment = Alignment.Center
         ) {
@@ -331,13 +373,13 @@ fun CardItem(
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(10.dp))
 
         Text(
             text = card.title,
             color = TextPrimary,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -364,7 +406,7 @@ fun CreatePlaylistDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = InkElevated,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(28.dp),
         title = { Text("Give your playlist a name", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp) },
         text = {
             TextField(
@@ -375,9 +417,9 @@ fun CreatePlaylistDialog(
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = Color.Transparent,
                     unfocusedContainerColor = Color.Transparent,
-                    focusedIndicatorColor = SpotifyGreen,
+                    focusedIndicatorColor = Lime,
                     unfocusedIndicatorColor = TextMuted,
-                    cursorColor = SpotifyGreen,
+                    cursorColor = Lime,
                     focusedTextColor = TextPrimary,
                     unfocusedTextColor = TextPrimary
                 )
@@ -386,7 +428,7 @@ fun CreatePlaylistDialog(
         confirmButton = {
             Button(
                 onClick = { if (name.isNotBlank()) onCreate(name.trim()) },
-                colors = ButtonDefaults.buttonColors(containerColor = SpotifyGreen, contentColor = Color.Black),
+                colors = ButtonDefaults.buttonColors(containerColor = Lime, contentColor = OnAccent),
                 shape = CircleShape
             ) { Text("Create", fontWeight = FontWeight.Bold) }
         },

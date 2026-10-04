@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -56,24 +57,28 @@ fun DetailHeader(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp)
-                .padding(horizontal = 4.dp),
+                .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextPrimary)
-            }
+            CircleIconButton(
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+                onClick = onBack,
+                container = Color.White.copy(alpha = 0.16f)
+            )
             Spacer(Modifier.weight(1f))
             trailing()
         }
 
+        Spacer(Modifier.height(8.dp))
+
         Box(
             modifier = Modifier
                 .align(Alignment.CenterHorizontally)
-                .fillMaxWidth(0.67f)
+                .fillMaxWidth(0.68f)
                 .aspectRatio(1f)
-                .shadow(16.dp, RoundedCornerShape(4.dp))
-                .clip(RoundedCornerShape(4.dp))
+                .shadow(24.dp, RoundedCornerShape(32.dp))
+                .clip(RoundedCornerShape(32.dp))
                 .background(InkElevated),
             contentAlignment = Alignment.Center,
             content = art
@@ -81,13 +86,13 @@ fun DetailHeader(
 
         Spacer(Modifier.height(24.dp))
 
-        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 20.dp)) {
             Text(
                 text = title,
                 color = TextPrimary,
-                fontSize = 22.sp,
-                lineHeight = 28.sp,
-                fontWeight = FontWeight.Bold,
+                fontSize = 26.sp,
+                lineHeight = 32.sp,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
@@ -109,7 +114,7 @@ fun DetailHeader(
                         modifier = Modifier.size(28.dp).clip(CircleShape).background(BrandGradient),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(subtitle.first().uppercase(), color = InkBackground, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text(subtitle.first().uppercase(), color = OnAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                     Spacer(Modifier.width(10.dp))
                     Text(
@@ -131,7 +136,7 @@ fun DetailHeader(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 16.dp),
+                .padding(horizontal = 20.dp, vertical = 18.dp),
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -141,7 +146,7 @@ fun DetailHeader(
                     Icon(
                         imageVector = if (isSaved) Icons.Default.CheckCircle else Icons.Default.AddCircleOutline,
                         contentDescription = if (isSaved) "Remove from Your Library" else "Add to Your Library",
-                        tint = if (isSaved) SpotifyGreen else TextSecondary,
+                        tint = if (isSaved) Lime else TextSecondary,
                         modifier = Modifier.size(32.dp)
                     )
                 }
@@ -158,7 +163,7 @@ fun DetailHeader(
                     modifier = Modifier
                         .size(60.dp)
                         .clip(CircleShape)
-                        .background(SpotifyGreen)
+                        .background(Lime)
                         .bouncyClickable(pressedScale = 0.92f, onClick = onPlay),
                     contentAlignment = Alignment.Center
                 ) {

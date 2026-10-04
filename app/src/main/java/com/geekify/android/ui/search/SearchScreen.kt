@@ -52,12 +52,12 @@ fun SearchScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp),
+                        .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Avatar(photoUrl = photoUrl, name = userName, onClick = onAvatarClick)
                     Spacer(Modifier.width(16.dp))
-                    Text("Search", color = TextPrimary, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                    Text("Search", color = TextPrimary, fontSize = 32.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
 
@@ -67,33 +67,33 @@ fun SearchScreen(
                 onValueChange = viewModel::onQueryChange,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = if (searching) 8.dp else 0.dp),
-                placeholder = { Text("What do you want to listen to?", color = Color(0xFF4D4D4D), fontWeight = FontWeight.Medium) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.Black) },
+                    .padding(horizontal = 20.dp, vertical = if (searching) 8.dp else 0.dp),
+                placeholder = { Text("What do you want to listen to?", color = TextSecondary, fontWeight = FontWeight.Normal) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextSecondary) },
                 trailingIcon = {
                     if (state.query.isNotEmpty()) {
                         IconButton(onClick = { viewModel.onQueryChange("") }) {
-                            Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color.Black)
+                            Icon(Icons.Default.Clear, contentDescription = "Clear", tint = TextSecondary)
                         }
                     }
                 },
                 singleLine = true,
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(50),
                 colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.White,
-                    unfocusedContainerColor = Color.White,
+                    focusedContainerColor = InkElevated,
+                    unfocusedContainerColor = InkElevated,
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent,
-                    cursorColor = Color.Black,
-                    focusedTextColor = Color.Black,
-                    unfocusedTextColor = Color.Black
+                    cursorColor = Lime,
+                    focusedTextColor = TextPrimary,
+                    unfocusedTextColor = TextPrimary
                 )
             )
 
             AnimatedVisibility(visible = searching) {
                 LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(tabs) { tab ->
                         PillChip(text = tab, selected = state.selectedTab == tab, onClick = { viewModel.onTabSelected(tab) })
@@ -104,19 +104,19 @@ fun SearchScreen(
             Box(modifier = Modifier.fillMaxSize()) {
                 when {
                     !searching -> {
-                        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
                             Text(
                                 text = "Browse all",
                                 color = TextPrimary,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Medium,
                                 modifier = Modifier.padding(top = 24.dp, bottom = 12.dp)
                             )
                             LazyVerticalGrid(
                                 columns = GridCells.Fixed(2),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                                contentPadding = PaddingValues(bottom = 24.dp)
+                                contentPadding = PaddingValues(bottom = 24.dp + LocalBottomInset.current)
                             ) {
                                 items(viewModel.genreTags.size) { index ->
                                     val tag = viewModel.genreTags[index]
@@ -138,7 +138,7 @@ fun SearchScreen(
                     else -> {
                         val response = state.response
                         if (response != null) {
-                            LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                            LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp + LocalBottomInset.current)) {
                                 if (response.songs.isNotEmpty() && (state.selectedTab == "All" || state.selectedTab == "Songs")) {
                                     item { SectionTitle("Songs") }
                                     items(response.songs, key = { it.videoId }) { song ->
@@ -173,7 +173,7 @@ fun SearchScreen(
 @Composable
 private fun CardsRow(cards: List<Card>, onCardClick: (Card) -> Unit) {
     LazyRow(
-        contentPadding = PaddingValues(horizontal = 16.dp),
+        contentPadding = PaddingValues(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         items(cards, key = { it.id }) { card ->
@@ -182,38 +182,38 @@ private fun CardsRow(cards: List<Card>, onCardClick: (Card) -> Unit) {
     }
 }
 
-/** Colourful Spotify "Browse all" tile with a tilted art square peeking out of the corner. */
+/** Pastel "Browse all" tile with a tilted art square peeking out of the corner. */
 @Composable
 private fun CategoryTile(title: String, color: Color, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(100.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .height(104.dp)
+            .clip(RoundedCornerShape(26.dp))
             .background(color)
             .bouncyClickable(pressedScale = 0.96f, onClick = onClick)
     ) {
         Text(
             text = title,
-            color = Color.White,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
+            color = OnPastel,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold,
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .fillMaxWidth(0.7f)
-                .padding(12.dp)
+                .padding(16.dp)
         )
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .offset(x = 14.dp, y = 8.dp)
+                .offset(x = 14.dp, y = 10.dp)
                 .rotate(25f)
                 .size(64.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(Color.Black.copy(alpha = 0.25f)),
+                .clip(RoundedCornerShape(18.dp))
+                .background(OnPastel.copy(alpha = 0.14f)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Default.MusicNote, contentDescription = null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(32.dp))
+            Icon(Icons.Default.MusicNote, contentDescription = null, tint = OnPastel.copy(alpha = 0.7f), modifier = Modifier.size(32.dp))
         }
     }
 }

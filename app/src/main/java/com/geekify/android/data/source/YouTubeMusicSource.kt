@@ -5,7 +5,6 @@ import com.geekify.android.data.model.*
 import com.geekify.android.data.source.innertube.InnerTubeClient
 import com.geekify.android.data.source.innertube.Parsers
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.JsonObject
@@ -51,48 +50,20 @@ class YouTubeMusicSource @Inject constructor(
             parseCollection(raw ?: throw (last ?: IllegalStateException("Collection not found")), id, kind).also { if (it.tracks.isEmpty()) error("Collection not found."); cache.put(key, it, FIFTEEN_MINUTES) }
         }
     }
-    override suspend fun home(languageHint: String?, forceRefresh: Boolean): MusicResult<HomeResponse> = guarded {
-        // YouTube's own shelves keep their original order (it ranks them); we no longer shuffle them.
-        val pool = (if (forceRefresh) null else cache.get<List<Shelf>>("home-pool")) ?: coroutineScope {
-            val endpoints = listOf("FEmusic_home", "FEmusic_charts", "FEmusic_new_releases", "FEmusic_explore")
-            endpoints.map { async { runCatching { parseHome(innerTube.browse(it)).shelves }.getOrDefault(emptyList()) } }
-                .awaitAll().flatten()
-                .filter { it.items.isNotEmpty() }
-                .distinctBy { it.title.trim().lowercase() }
-                .also { if (it.isNotEmpty()) cache.put("home-pool", it, FIFTEEN_MINUTES) }
+    override suspend fun home(): MusicResult<HomeResponse> = guarded {
+        val pool = cache.get<List<Shelf>>("home-pool") ?: coroutineScope {
+            val endpoints = listOf("FEmusic_home", "FEmusic_explore", "FEmusic_charts", "FEmusic_new_releases")
+            endpoints.map { async { runCatching { parseHome(innerTube.browse(it)).shelves }.getOrDefault(emptyList()) } }.flatMap { it.await() }
+                .filter { it.items.isNotEmpty() }.distinctBy { it.title.trim().lowercase() }.also { if (it.isNotEmpty()) cache.put("home-pool", it, FIFTEEN_MINUTES) }
         }
-
-        // Stable for the whole day (so the page doesn't reshuffle on every open); pull-to-refresh rotates it.
-        val seed = if (forceRefresh) System.currentTimeMillis() else System.currentTimeMillis() / DAY_MS
-        val rnd = Random(seed + (languageHint?.hashCode() ?: 0))
-        val ownLanguage = languageHint?.let { languageShelves[it] }.orEmpty().shuffled(rnd).take(2)
-        // English music is always part of the feed, whatever else you listen to.
-        val english = listOf(englishShelves.first()) + englishShelves.drop(1).shuffled(rnd).take(2)
-        val generic = genericShelves.shuffled(rnd).take(if (ownLanguage.isEmpty()) 2 else 1)
-        // Unknown taste yet: start with the most popular regional picks instead of random languages.
-        val coldStart = if (languageHint == null) listOf(languageShelves.getValue("Malayalam").first(), languageShelves.getValue("Hindi").first()) else emptyList()
-
-        val extra = coroutineScope {
-            (ownLanguage + coldStart + english + generic).distinctBy { it.first }.map { (title, query, type) ->
-                async {
-                    val result = (search(query, type) as? MusicResult.Success)?.value ?: return@async null
-                    val items = if (type == SearchType.PLAYLIST) result.playlists.map(::ShelfCard) else result.albums.map(::ShelfCard)
-                    items.takeIf { it.isNotEmpty() }?.let { Shelf(title, it.take(20)) }
-                }
-            }.awaitAll().filterNotNull()
+        val shuffled = pool.shuffled().map { it.copy(items = it.items.shuffled()) }.toMutableList()
+        genreShelves.shuffled().take(4).forEach { (title, query, type) ->
+            val result = search(query, type).let { (it as? MusicResult.Success)?.value } ?: return@forEach
+            val items = if (type == SearchType.PLAYLIST) result.playlists.map(::ShelfCard) else result.albums.map(::ShelfCard)
+            if (items.isNotEmpty()) shuffled.add(Random.nextInt(0, minOf(4, shuffled.size) + 1), Shelf(title, items.take(20)))
         }
-        val languageRows = extra.filter { shelf -> (ownLanguage + coldStart).any { it.first == shelf.title } }
-        val englishRows = extra.filter { shelf -> english.any { it.first == shelf.title } }
-        val genericRows = extra - languageRows.toSet() - englishRows.toSet()
-
-        // Regional and English rows alternate at the top, then YouTube's own shelves.
-        val topRows = buildList {
-            val a = languageRows.iterator(); val b = englishRows.iterator()
-            while (a.hasNext() || b.hasNext()) { if (a.hasNext()) add(a.next()); if (b.hasNext()) add(b.next()) }
-        }
-        val shelves = (topRows + pool.take(3) + genericRows + pool.drop(3)).distinctBy { it.title.trim().lowercase() }
-        if (shelves.isEmpty()) error("Could not load the YouTube Music home feed. Try again shortly.")
-        HomeResponse(shelves.take(18))
+        if (shuffled.isEmpty()) error("Could not load the YouTube Music home feed. Try again shortly.")
+        HomeResponse(shuffled.take(18))
     }
     private fun parseSearch(raw: JsonObject, query: String, type: String?): SearchResponse {
         val shelves = Parsers.shelves(raw).mapNotNull { (title, block) ->
@@ -131,56 +102,6 @@ class YouTubeMusicSource @Inject constructor(
     private fun formatDuration(s: Int): String = if (s >= 3600) "%d:%02d:%02d".format(s / 3600, (s % 3600) / 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
     private companion object {
         const val FIFTEEN_MINUTES = 15 * 60 * 1000L
-        const val DAY_MS = 24 * 60 * 60 * 1000L
-        val languageShelves: Map<String, List<Triple<String, String, SearchType>>> = mapOf(
-            "Malayalam" to listOf(
-                Triple("Malayalam hits", "Malayalam hits", SearchType.PLAYLIST),
-                Triple("New Malayalam releases", "new Malayalam songs", SearchType.ALBUM),
-                Triple("Malayalam romantic", "Malayalam romantic songs", SearchType.PLAYLIST),
-                Triple("Malayalam throwback", "Malayalam old hits", SearchType.PLAYLIST)
-            ),
-            "Hindi" to listOf(
-                Triple("Hindi hits", "Hindi hits", SearchType.PLAYLIST),
-                Triple("New Hindi releases", "new Hindi songs", SearchType.ALBUM),
-                Triple("Hindi romantic", "Hindi romantic songs", SearchType.PLAYLIST),
-                Triple("Bollywood throwback", "old Bollywood hits", SearchType.PLAYLIST)
-            ),
-            "Tamil" to listOf(
-                Triple("Tamil hits", "Tamil hits", SearchType.PLAYLIST),
-                Triple("New Tamil releases", "new Tamil songs", SearchType.ALBUM),
-                Triple("Tamil melodies", "Tamil melody songs", SearchType.PLAYLIST),
-                Triple("Tamil throwback", "Tamil old hits", SearchType.PLAYLIST)
-            ),
-            "Telugu" to listOf(
-                Triple("Telugu hits", "Telugu hits", SearchType.PLAYLIST),
-                Triple("New Telugu releases", "new Telugu songs", SearchType.ALBUM),
-                Triple("Telugu melodies", "Telugu melody songs", SearchType.PLAYLIST)
-            ),
-            "Punjabi" to listOf(
-                Triple("Punjabi hits", "Punjabi hits", SearchType.PLAYLIST),
-                Triple("New Punjabi releases", "new Punjabi songs", SearchType.ALBUM)
-            ),
-            "K-pop" to listOf(
-                Triple("K-pop hits", "k-pop hits", SearchType.PLAYLIST),
-                Triple("New K-pop albums", "new k-pop albums", SearchType.ALBUM)
-            )
-        )
-        val englishShelves = listOf(
-            Triple("English hits", "English hits", SearchType.PLAYLIST),
-            Triple("New English releases", "new English songs", SearchType.ALBUM),
-            Triple("English love songs", "English love songs", SearchType.PLAYLIST),
-            Triple("Chill English", "chill english songs", SearchType.PLAYLIST),
-            Triple("English throwback", "English throwback hits", SearchType.PLAYLIST),
-            Triple("English workout", "english workout songs", SearchType.PLAYLIST)
-        )
-        val genericShelves = listOf(
-            Triple("Pop hits", "pop hits", SearchType.PLAYLIST),
-            Triple("Hip-hop", "hip hop hits", SearchType.PLAYLIST),
-            Triple("Lo-fi & chill", "lofi chill beats", SearchType.PLAYLIST),
-            Triple("Workout", "workout music", SearchType.PLAYLIST),
-            Triple("Throwback", "throwback hits", SearchType.PLAYLIST),
-            Triple("Rock classics", "classic rock", SearchType.PLAYLIST),
-            Triple("Fresh albums", "new albums", SearchType.ALBUM)
-        )
+        val genreShelves = listOf(Triple("Malayalam hits", "Malayalam hits", SearchType.PLAYLIST), Triple("Malayalam new releases", "new Malayalam songs", SearchType.ALBUM), Triple("Hindi hits", "Hindi hits", SearchType.PLAYLIST), Triple("Tamil hits", "Tamil hits", SearchType.PLAYLIST), Triple("Telugu hits", "Telugu hits", SearchType.PLAYLIST), Triple("Punjabi hits", "Punjabi hits", SearchType.PLAYLIST), Triple("Hip-hop", "hip hop hits", SearchType.PLAYLIST), Triple("Pop hits", "pop hits", SearchType.PLAYLIST), Triple("Lo-fi & chill", "lofi chill beats", SearchType.PLAYLIST), Triple("Workout", "workout music", SearchType.PLAYLIST), Triple("Throwback", "throwback hits", SearchType.PLAYLIST), Triple("Party", "party songs", SearchType.PLAYLIST), Triple("Rock classics", "classic rock", SearchType.PLAYLIST), Triple("Romantic", "romantic songs", SearchType.PLAYLIST), Triple("K-pop", "k-pop hits", SearchType.PLAYLIST), Triple("Fresh albums", "new albums", SearchType.ALBUM))
     }
 }

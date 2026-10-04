@@ -10,9 +10,7 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -50,6 +48,7 @@ import coil3.request.SuccessResult
 import coil3.request.allowHardware
 import coil3.toBitmap
 import com.geekify.android.ui.theme.InkElevated
+import com.geekify.android.ui.theme.Lime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.PI
@@ -57,11 +56,9 @@ import kotlin.math.abs
 import kotlin.math.sin
 
 /** Clickable with a soft spring "press-in" scale, no ripple. Gives every tap a smooth feel. */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun Modifier.bouncyClickable(
     pressedScale: Float = 0.96f,
-    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit
 ): Modifier {
     val source = remember { MutableInteractionSource() }
@@ -76,12 +73,7 @@ fun Modifier.bouncyClickable(
             scaleX = scale
             scaleY = scale
         }
-        .combinedClickable(
-            interactionSource = source,
-            indication = null,
-            onLongClick = onLongClick,
-            onClick = onClick
-        )
+        .clickable(interactionSource = source, indication = null, onClick = onClick)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -144,12 +136,9 @@ private fun averageDarkColor(bitmap: android.graphics.Bitmap): Int {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Seek bar: Material 3 Expressive-style wavy progress. The played portion is a smooth, flowing
-// wave; the remaining portion is a flat rounded track. This is purely a drawing of the playback
-// position (it never reads audio data). The wave flows only while [isPlaying] is true.
+// Seek bar: straight track, lime progress, round thumb with a soft glow. It only draws the
+// playback position. Between the ~0.5 s position updates it glides so the thumb never ticks.
 // ---------------------------------------------------------------------------------------------
-
-private const val TWO_PI = (2.0 * PI).toFloat()
 
 @Composable
 fun SeekBar(
@@ -157,17 +146,15 @@ fun SeekBar(
     onChange: (Float) -> Unit,
     onChangeFinished: () -> Unit,
     modifier: Modifier = Modifier,
-    activeColor: Color = Color.White,
-    trackColor: Color = Color.White.copy(alpha = 0.28f),
-    isPlaying: Boolean = true
+    activeColor: Color = Lime,
+    trackColor: Color = Color.White.copy(alpha = 0.22f),
+    @Suppress("UNUSED_PARAMETER") isPlaying: Boolean = true
 ) {
     val currentOnChange by rememberUpdatedState(onChange)
     val currentOnFinished by rememberUpdatedState(onChangeFinished)
     var dragging by remember { mutableStateOf(false) }
-    val thumbRadius by animateDpAsState(if (dragging) 8.dp else 6.dp, label = "thumb")
+    val thumbRadius by animateDpAsState(if (dragging) 10.dp else 8.dp, label = "thumb")
 
-    // Glide between the ~1 s position updates so the wave front never ticks or jitters.
-    // Big jumps (user seeks, track changes) and dragging snap immediately, as before.
     val target = fraction.coerceIn(0f, 1f)
     var lastTarget by remember { mutableFloatStateOf(target) }
     val smoothFraction by animateFloatAsState(
@@ -176,25 +163,6 @@ fun SeekBar(
         label = "seekFraction"
     )
     SideEffect { lastTarget = target }
-
-    // Wave phase advances once per frame only while playing; pausing simply stops the loop,
-    // so the wave freezes in place and resumes from the same phase. Read only in the draw
-    // phase below, so nothing recomposes per frame.
-    val phase = remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(isPlaying) {
-        if (!isPlaying) return@LaunchedEffect
-        var last = 0L
-        while (true) {
-            withFrameNanos { now ->
-                if (last != 0L) {
-                    val dt = (now - last) / 1_000_000_000f
-                    phase.floatValue = (phase.floatValue + dt * TWO_PI * 0.7f) % TWO_PI
-                }
-                last = now
-            }
-        }
-    }
-    val wavePath = remember { Path() }
 
     Canvas(
         modifier = modifier
@@ -232,32 +200,9 @@ fun SeekBar(
         val thumbR = thumbRadius.toPx()
         val endX = (size.width * smoothFraction).coerceIn(thumbR, size.width - thumbR)
 
-        // Remaining duration: flat rounded track.
-        drawLine(trackColor, Offset(endX, cy), Offset(size.width - strokeW / 2f, cy), strokeW, StrokeCap.Round)
-
-        // Played duration: flowing wave built from two blended sines for an organic, non-mechanical
-        // shape. Amplitude eases in at the start and out toward the thumb so it joins cleanly.
-        val amplitude = 3.dp.toPx()
-        val k = TWO_PI / 38.dp.toPx()
-        val rampIn = 14.dp.toPx()
-        val rampOut = 12.dp.toPx()
-        val step = 2.dp.toPx()
-        val ph = phase.floatValue
-        wavePath.rewind()
-        var x = 0f
-        while (true) {
-            val xx = minOf(x, endX)
-            val inE = (xx / rampIn).coerceIn(0f, 1f)
-            val outE = ((endX - xx) / rampOut).coerceIn(0f, 1f)
-            val env = (inE * inE * (3f - 2f * inE)) * (outE * outE * (3f - 2f * outE))
-            val wave = (sin(k * xx - ph) + 0.22f * sin(2f * k * xx - 1.6f * ph + 0.9f)) / 1.22f
-            val y = cy + amplitude * env * wave
-            if (x == 0f) wavePath.moveTo(xx, y) else wavePath.lineTo(xx, y)
-            if (x >= endX) break
-            x += step
-        }
-        drawPath(wavePath, activeColor, style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
-
+        drawLine(trackColor, Offset(strokeW / 2f, cy), Offset(size.width - strokeW / 2f, cy), strokeW, StrokeCap.Round)
+        drawLine(activeColor, Offset(strokeW / 2f, cy), Offset(endX, cy), strokeW, StrokeCap.Round)
+        drawCircle(activeColor.copy(alpha = 0.22f), thumbR * 1.9f, Offset(endX, cy))
         drawCircle(activeColor, thumbR, Offset(endX, cy))
     }
 }

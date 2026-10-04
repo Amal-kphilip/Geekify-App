@@ -19,6 +19,9 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.LibraryMusic
 import androidx.compose.material.icons.outlined.Search
@@ -26,7 +29,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -47,7 +56,10 @@ import com.geekify.android.data.model.Track
 import com.geekify.android.ui.account.AccountSheet
 import com.geekify.android.ui.account.AccountViewModel
 import com.geekify.android.ui.components.CreatePlaylistDialog
+import com.geekify.android.ui.components.LocalBottomInset
 import com.geekify.android.ui.components.LocalNowPlayingId
+import com.geekify.android.ui.components.bouncyClickable
+import com.geekify.android.ui.components.glassPill
 import com.geekify.android.ui.components.TrackActionsDialog
 import com.geekify.android.ui.details.ArtistScreen
 import com.geekify.android.ui.details.CollectionScreen
@@ -70,8 +82,12 @@ import com.geekify.android.ui.player.QueueScreen
 import com.geekify.android.ui.search.SearchScreen
 import com.geekify.android.ui.search.SearchViewModel
 import com.geekify.android.ui.theme.*
+import com.geekify.android.BuildConfig
+import com.geekify.android.ui.update.UpdateDialog
+import com.geekify.android.ui.update.UpdateStage
 import com.geekify.android.update.AppUpdateManager
 import com.geekify.android.update.AvailableUpdate
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private data class NavTab(
@@ -108,7 +124,8 @@ fun MainScreen(
     val updateManager = remember { AppUpdateManager(context.applicationContext) }
     val updateScope = rememberCoroutineScope()
     var availableUpdate by remember { mutableStateOf<AvailableUpdate?>(null) }
-    var isDownloadingUpdate by remember { mutableStateOf(false) }
+    var updateStage by remember { mutableStateOf(UpdateStage.Available) }
+    var downloadedApk by remember { mutableStateOf<java.io.File?>(null) }
     // null = size unknown (indeterminate ring); otherwise the real 0f..1f download fraction.
     var updateProgress by remember { mutableStateOf<Float?>(null) }
     var updateError by remember { mutableStateOf<String?>(null) }
@@ -148,96 +165,34 @@ fun MainScreen(
         }
     }
 
-    CompositionLocalProvider(LocalNowPlayingId provides playerState.current?.videoId) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        Scaffold(
-            containerColor = InkBackground,
-            bottomBar = {
-                Column(modifier = Modifier.background(Color.Transparent)) {
-                    // Persistent Mini Player - only visible when not expanded
-                    if (!showExpandedPlayer && !showQueue) {
-                        NowPlayingBar(
-                            viewModel = playerViewModel,
-                            onClick = { showExpandedPlayer = true }
-                        )
-                    }
+    // Height of the floating mini player + navigation pill, so scrolling lists can leave room for them.
+    var floatingBarsHeightPx by remember { mutableIntStateOf(0) }
+    val floatingBarsHeight = with(LocalDensity.current) { floatingBarsHeightPx.toDp() }
 
-                    // Bottom Navigation Bar (Home / Search / Your Library / Create)
-                    NavigationBar(
-                        containerColor = InkBackground,
-                        tonalElevation = 0.dp
-                    ) {
-                        val items = listOf(
-                            NavTab(Screen.Home.route, "Home", Icons.Filled.Home, Icons.Outlined.Home),
-                            NavTab(Screen.Search.route, "Search", Icons.Filled.Search, Icons.Outlined.Search),
-                            NavTab(Screen.Library.route, "Your Library", Icons.Filled.LibraryMusic, Icons.Outlined.LibraryMusic)
-                        )
-
-                        items.forEach { tab ->
-                            val selected = currentRoute == tab.route
-                            NavigationBarItem(
-                                icon = { Icon(if (selected) tab.selectedIcon else tab.icon, contentDescription = tab.label) },
-                                label = {
-                                    Text(
-                                        tab.label,
-                                        fontSize = 11.sp,
-                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                        maxLines = 1
-                                    )
-                                },
-                            selected = selected,
-                            onClick = {
-                                if (tab.route == Screen.Home.route) {
-                                    // A playlist/detail screen is stacked above Home. Pop back to the
-                                    // existing Home instance instead of trying to restore a nested state.
-                                    val returnedHome = navController.popBackStack(Screen.Home.route, inclusive = false)
-                                    if (!returnedHome) {
-                                        navController.navigate(Screen.Home.route) {
-                                            launchSingleTop = true
-                                        }
-                                    }
-                                } else if (currentRoute != tab.route) {
-                                    navController.navigate(tab.route) {
-                                            popUpTo(navController.graph.findStartDestination().id) {
-                                                saveState = true
-                                            }
-                                            launchSingleTop = true
-                                            restoreState = true
-                                        }
-                                    }
-                                },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = TextPrimary,
-                                    selectedTextColor = TextPrimary,
-                                    unselectedIconColor = TextSecondary,
-                                    unselectedTextColor = TextSecondary,
-                                    indicatorColor = Color.Transparent
-                                )
-                            )
-                        }
-
-                        // "Create" is an action, never a destination.
-                        NavigationBarItem(
-                            icon = { Icon(Icons.Filled.Add, contentDescription = "Create") },
-                            label = { Text("Create", fontSize = 11.sp, maxLines = 1) },
-                            selected = false,
-                            onClick = { showCreatePlaylist = true },
-                            colors = NavigationBarItemDefaults.colors(
-                                unselectedIconColor = TextSecondary,
-                                unselectedTextColor = TextSecondary,
-                                indicatorColor = Color.Transparent
-                            )
-                        )
-                    }
-                }
+    val navigateToTab: (String) -> Unit = { route ->
+        if (route == Screen.Home.route) {
+            // A playlist/detail screen is stacked above Home. Pop back to the
+            // existing Home instance instead of trying to restore a nested state.
+            val returnedHome = navController.popBackStack(Screen.Home.route, inclusive = false)
+            if (!returnedHome) {
+                navController.navigate(Screen.Home.route) { launchSingleTop = true }
             }
-        ) { padding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(bottom = padding.calculateBottomPadding())
-            ) {
+        } else if (currentRoute != route) {
+            navController.navigate(route) {
+                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
+
+    CompositionLocalProvider(
+        LocalNowPlayingId provides playerState.current?.videoId,
+        LocalBottomInset provides floatingBarsHeight
+    ) {
+    Box(modifier = Modifier.fillMaxSize().background(InkBackground)) {
                 NavHost(
+                    modifier = Modifier.fillMaxSize(),
                     navController = navController,
                     startDestination = Screen.Home.route,
                     enterTransition = { fadeIn(tween(240)) },
@@ -255,7 +210,11 @@ fun MainScreen(
                             onTrackClick = onTrackClick,
                             onTrackActions = onTrackActions,
                             onCardClick = onCardClick,
-                            onAccountClick = { showAccountSheet = true }
+                            onAccountClick = { showAccountSheet = true },
+                            onSearchClick = { navigateToTab(Screen.Search.route) },
+                            likedIds = likedTracks.map { it.videoId }.toSet(),
+                            onToggleLike = { libraryViewModel.toggleLike(it) },
+                            onAddToQueue = { playerViewModel.addToQueue(it) }
                         )
                     }
 
@@ -281,7 +240,9 @@ fun MainScreen(
                             onAvatarClick = { showAccountSheet = true },
                             onLikedClick = { navController.navigate(Screen.Liked.route) },
                             onPlaylistClick = { id, name -> navController.navigate(Screen.Playlist.createRoute(id, name)) },
-                            onCollectionClick = { id, kind -> navController.navigate(Screen.Collection.createRoute(id, kind)) }
+                            onCollectionClick = { id, kind -> navController.navigate(Screen.Collection.createRoute(id, kind)) },
+                            onBack = { navigateToTab(Screen.Home.route) },
+                            onPlayTracks = { list -> list.firstOrNull()?.let { first -> playerViewModel.play(first, list) } }
                         )
                     }
 
@@ -372,6 +333,44 @@ fun MainScreen(
                         SettingsScreen(onBack = { navController.popBackStack() })
                     }
                 }
+
+        // ---- Floating mini player + navigation pill (content scrolls underneath) ----
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .onSizeChanged { floatingBarsHeightPx = it.height }
+        ) {
+            // Fades the list into the background behind the pills.
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            0.45f to InkBackground.copy(alpha = 0.88f),
+                            1f to InkBackground
+                        )
+                    )
+            )
+            Column(
+                modifier = Modifier
+                    .navigationBarsPadding()
+                    .padding(start = 16.dp, end = 16.dp, top = 30.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                NowPlayingBar(
+                    viewModel = playerViewModel,
+                    onClick = { showExpandedPlayer = true }
+                )
+                FloatingNavBar(
+                    currentRoute = currentRoute,
+                    onHome = { navigateToTab(Screen.Home.route) },
+                    onSearch = { navigateToTab(Screen.Search.route) },
+                    onLibrary = { navigateToTab(Screen.Library.route) },
+                    onCreate = { showCreatePlaylist = true },
+                    onSettings = { navigateToTab(Screen.Settings.route) }
+                )
             }
         }
 
@@ -443,83 +442,127 @@ fun MainScreen(
         }
 
         availableUpdate?.let { update ->
-            AlertDialog(
-                onDismissRequest = { if (!isDownloadingUpdate) availableUpdate = null },
-                title = { Text("Update available") },
-                text = {
-                    Column {
-                        Text(
-                            updateError ?: "Geekify ${update.version} is ready to download and install."
-                        )
-                        AnimatedVisibility(visible = isDownloadingUpdate) {
-                            UpdateProgressRing(
-                                progress = updateProgress,
-                                modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
-                            )
+            UpdateDialog(
+                stage = updateStage,
+                currentVersion = BuildConfig.VERSION_NAME,
+                newVersion = update.version.trimStart('v', 'V'),
+                progress = updateProgress,
+                error = updateError,
+                onUpdate = {
+                    updateStage = UpdateStage.Downloading
+                    updateError = null
+                    updateProgress = null
+                    updateScope.launch {
+                        runCatching {
+                            updateManager.download(update) { updateProgress = it }
+                        }.onSuccess { apk ->
+                            downloadedApk = apk
+                            updateProgress = 1f
+                            updateStage = UpdateStage.Ready
+                        }.onFailure {
+                            updateStage = UpdateStage.Available
+                            updateError = "Couldn’t download the update. Please try again."
                         }
                     }
                 },
-                confirmButton = {
-                    TextButton(
-                        enabled = !isDownloadingUpdate,
-                        onClick = {
-                            isDownloadingUpdate = true
-                            updateError = null
-                            updateProgress = null
-                            updateScope.launch {
-                                runCatching {
-                                    updateManager.download(update) { updateProgress = it }
-                                }.onSuccess { apk ->
-                                    isDownloadingUpdate = false
-                                    updateManager.install(apk)
-                                }.onFailure { error ->
-                                    isDownloadingUpdate = false
-                                    updateError = "Couldn’t download the update. Please try again."
-                                }
-                            }
+                onInstall = {
+                    downloadedApk?.let { apk ->
+                        updateStage = UpdateStage.Installing
+                        updateManager.install(apk)
+                        updateScope.launch {
+                            // If the system installer was cancelled, let the person try again.
+                            delay(3000)
+                            if (updateStage == UpdateStage.Installing) updateStage = UpdateStage.Ready
                         }
-                    ) { Text(if (isDownloadingUpdate) "Downloading…" else "Update") }
+                    }
                 },
-                dismissButton = {
-                    TextButton(
-                        enabled = !isDownloadingUpdate,
-                        onClick = { availableUpdate = null }
-                    ) { Text("Later") }
-                }
+                onLater = { availableUpdate = null }
             )
         }
     }
     }
 }
 
-/** Circular download indicator: smooth real-percentage ring that turns into a check at 100%. */
+/** Frosted capsule with five icons; the selected one sits in a lime circle. */
 @Composable
-private fun UpdateProgressRing(progress: Float?, modifier: Modifier = Modifier) {
-    val animated by animateFloatAsState(
-        targetValue = progress ?: 0f,
-        animationSpec = tween(300, easing = LinearEasing),
-        label = "updateProgress"
-    )
-    val done = progress != null && progress >= 1f
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        Box(modifier = Modifier.size(64.dp), contentAlignment = Alignment.Center) {
-            if (progress == null) {
-                CircularProgressIndicator(modifier = Modifier.fillMaxSize(), strokeWidth = 5.dp)
-            } else {
-                CircularProgressIndicator(
-                    progress = { animated },
-                    modifier = Modifier.fillMaxSize(),
-                    strokeWidth = 5.dp,
-                    color = if (done) BrandMint else ProgressIndicatorDefaults.circularColor
-                )
-            }
-            Crossfade(targetState = done, animationSpec = tween(200), label = "updateDone") { finished ->
-                if (finished) {
-                    Icon(Icons.Filled.Check, contentDescription = "Download complete", tint = BrandMint)
-                } else if (progress != null) {
-                    Text("${(animated * 100).toInt()}%", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                }
-            }
-        }
+private fun FloatingNavBar(
+    currentRoute: String?,
+    onHome: () -> Unit,
+    onSearch: () -> Unit,
+    onLibrary: () -> Unit,
+    onCreate: () -> Unit,
+    onSettings: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassPill(CircleShape)
+            .padding(horizontal = 10.dp, vertical = 9.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        NavPillItem(
+            selected = currentRoute == Screen.Home.route,
+            selectedIcon = Icons.Filled.Home,
+            icon = Icons.Outlined.Home,
+            label = "Home",
+            onClick = onHome
+        )
+        NavPillItem(
+            selected = currentRoute == Screen.Search.route,
+            selectedIcon = Icons.Filled.Search,
+            icon = Icons.Outlined.Search,
+            label = "Search",
+            onClick = onSearch
+        )
+        NavPillItem(
+            selected = currentRoute == Screen.Library.route,
+            selectedIcon = Icons.Filled.LibraryMusic,
+            icon = Icons.Outlined.LibraryMusic,
+            label = "My Music",
+            onClick = onLibrary
+        )
+        // "Create" is an action, never a destination.
+        NavPillItem(
+            selected = false,
+            selectedIcon = Icons.Filled.Add,
+            icon = Icons.Outlined.Add,
+            label = "Create playlist",
+            onClick = onCreate
+        )
+        NavPillItem(
+            selected = currentRoute == Screen.Settings.route,
+            selectedIcon = Icons.Filled.Settings,
+            icon = Icons.Outlined.Settings,
+            label = "Settings",
+            onClick = onSettings
+        )
+    }
+}
+
+@Composable
+private fun NavPillItem(
+    selected: Boolean,
+    selectedIcon: ImageVector,
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit
+) {
+    val bg by animateColorAsState(if (selected) Lime else Color.Transparent, tween(220), label = "navBg")
+    val fg by animateColorAsState(if (selected) OnAccent else Color.White.copy(alpha = 0.92f), tween(220), label = "navFg")
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .clip(CircleShape)
+            .background(bg)
+            .bouncyClickable(pressedScale = 0.9f, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = if (selected) selectedIcon else icon,
+            contentDescription = label,
+            tint = fg,
+            modifier = Modifier.size(26.dp)
+        )
     }
 }

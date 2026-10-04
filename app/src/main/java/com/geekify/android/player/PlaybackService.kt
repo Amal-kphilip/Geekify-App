@@ -8,7 +8,6 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Bundle
-import android.os.SystemClock
 import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
@@ -52,8 +51,6 @@ class PlaybackService : MediaSessionService() {
     companion object {
         private const val PLAYBACK_CHANNEL_ID = "playback"
         private const val PLAYBACK_NOTIFICATION_ID = 1001
-        /** After this long paused, the stream URL / connection is treated as stale and re-resolved on resume. */
-        private const val STALE_AFTER_PAUSE_MS = 30 * 60 * 1000L
     }
 
     @Inject lateinit var queueManager: QueueManager
@@ -72,9 +69,6 @@ class PlaybackService : MediaSessionService() {
     private var lastPlayingVideoId: String? = null
     private var resolveRetries = 0
     private var foregroundShownFor: String? = null
-    private var pausedAtElapsed = 0L
-    private var pendingAutoPlay = true
-    private var restoredPositionPending = true
 
     override fun onCreate() {
         super.onCreate()
@@ -129,16 +123,18 @@ class PlaybackService : MediaSessionService() {
             .build()
 
         player.addListener(object : Player.Listener {
+            // The queue's `isPlaying` is the user's *intent* to play, so it follows playWhenReady.
+            // It must not follow ExoPlayer's momentary isPlaying: when a song ends, STATE_ENDED
+            // (which calls queueManager.next() and sets isPlaying = true) is delivered BEFORE
+            // onIsPlayingChanged(false). Mirroring that false here used to flip the intent back
+            // off, so the next song was loaded paused and auto-advance never started playback.
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                if (!playWhenReady) pausedAtElapsed = SystemClock.elapsedRealtime()
+                queueManager.setPlaying(playWhenReady)
             }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                queueManager.setPlaying(isPlaying)
                 if (isPlaying) {
-                    resolveRetries = 0
-                    pausedAtElapsed = 0L
                     queueManager.setBuffering(false)
-                    if (queueManager.state.value.error != null) queueManager.setError(null)
                     val current = queueManager.state.value.current ?: return
                     if (current.videoId != lastPlayingVideoId) {
                         lastPlayingVideoId = current.videoId
@@ -151,11 +147,7 @@ class PlaybackService : MediaSessionService() {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 when (playbackState) {
                     Player.STATE_BUFFERING -> queueManager.setBuffering(true)
-                    Player.STATE_READY -> {
-                        queueManager.setBuffering(false)
-                        // Show the right position/duration even while paused (e.g. after a restart).
-                        queueManager.setProgress(player.currentPosition.coerceAtLeast(0L), player.duration.coerceAtLeast(0L))
-                    }
+                    Player.STATE_READY -> queueManager.setBuffering(false)
                     Player.STATE_ENDED -> queueManager.next()
                     else -> Unit
                 }
@@ -205,11 +197,10 @@ class PlaybackService : MediaSessionService() {
                 // After a restart the restored queue loads paused; only auto-play when the user asked to play.
                 loadAndPlay(track, autoPlay = state.isPlaying)
             } else if (state.isPlaying && !player.isPlaying && player.playbackState != Player.STATE_BUFFERING) {
-                // After a long pause (or an error) the old URL/connection may be dead and an IDLE player
-                // ignores play(). Fetch a fresh stream and continue from the same position.
-                if (needsFreshStream()) resumeWithFreshStream(track, player.currentPosition.coerceAtLeast(0L))
-                else player.play()
-            } else if (!state.isPlaying && player.isPlaying) {
+                // Repeat-one / replay after the end of the queue: an ended player must be rewound first.
+                if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
+                player.play()
+            } else if (!state.isPlaying && player.playWhenReady) {
                 player.pause()
             }
         }.launchIn(scope)
@@ -230,13 +221,6 @@ class PlaybackService : MediaSessionService() {
                 .build()
 
         override fun isCommandAvailable(command: Int): Boolean = availableCommands.contains(command)
-
-        // Play from the notification / lock screen / headset: if the stream is stale or nothing is loaded
-        // yet, hand the request to the queue state so the service reloads it properly.
-        override fun play() {
-            if (player.currentMediaItem == null || needsFreshStream()) queueManager.setPlaying(true)
-            else super.play()
-        }
 
         override fun hasNextMediaItem(): Boolean = queueManager.state.value.hasNext
         override fun hasPreviousMediaItem(): Boolean = queueManager.state.value.queue.isNotEmpty()
@@ -297,54 +281,7 @@ class PlaybackService : MediaSessionService() {
     private var loadJob: Job? = null
     private var loadingId: String? = null
 
-    private fun buildItem(track: Track, stream: StreamResolver.ResolvedStream): MediaItem =
-        MediaItem.Builder()
-            .setMediaId(track.videoId)
-            .setUri(stream.url)
-            .setMimeType(stream.mimeType)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(track.title)
-                    .setArtist(track.artist)
-                    .setAlbumTitle(track.album)
-                    .setArtworkUri(track.thumbnails.bestArtworkUrl()?.let(Uri::parse))
-                    .build()
-            )
-            .build()
-
-    /** True when pressing play would do nothing useful: the player is idle, or has been paused so long the URL may be dead. */
-    private fun needsFreshStream(): Boolean {
-        if (player.currentMediaItem == null) return false
-        if (player.playbackState == Player.STATE_IDLE) return true
-        return pausedAtElapsed > 0L && SystemClock.elapsedRealtime() - pausedAtElapsed > STALE_AFTER_PAUSE_MS
-    }
-
-    private fun resumeWithFreshStream(track: Track, resumeAt: Long) {
-        if (loadingId == track.videoId && loadJob?.isActive == true) return
-        loadJob?.cancel()
-        loadingId = track.videoId
-        queueManager.setBuffering(true)
-        loadJob = scope.launch {
-            try {
-                val stream = streamResolver.resolve(track.videoId, forceRefresh = true)
-                player.setMediaItem(buildItem(track, stream), resumeAt)
-                player.playWhenReady = true
-                player.prepare()
-                pausedAtElapsed = 0L
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                // Leave the track in place so tapping play again retries.
-                queueManager.setError(e.message ?: "Could not resume playback. Check your connection and tap play again.")
-            } finally {
-                if (loadingId == track.videoId) loadingId = null
-            }
-        }
-    }
-
     private fun loadAndPlay(track: Track, autoPlay: Boolean = true) {
-        // The latest play/pause intent wins, even while a lookup is already running.
-        pendingAutoPlay = autoPlay
         // State emissions (progress, volume...) must not restart a lookup that is already running.
         if (loadingId == track.videoId && loadJob?.isActive == true) return
         if (player.currentMediaItem?.mediaId == track.videoId) {
@@ -355,14 +292,25 @@ class PlaybackService : MediaSessionService() {
         loadingId = track.videoId
         resolveRetries = 0
         if (autoPlay) queueManager.setBuffering(true)
-        // First load after the service (re)starts: continue from the saved position.
-        val startAt = if (restoredPositionPending) queueManager.state.value.progressMs else 0L
-        restoredPositionPending = false
         loadJob = scope.launch {
             try {
                 val stream = streamResolver.resolve(track.videoId)
-                player.setMediaItem(buildItem(track, stream), startAt)
-                player.playWhenReady = pendingAutoPlay
+                val item = MediaItem.Builder()
+                    .setMediaId(track.videoId)
+                    .setUri(stream.url)
+                    .setMimeType(stream.mimeType)
+                    .setMediaMetadata(
+                        MediaMetadata.Builder()
+                            .setTitle(track.title)
+                            .setArtist(track.artist)
+                            .setAlbumTitle(track.album)
+                            .setArtworkUri(track.thumbnails.bestArtworkUrl()?.let(Uri::parse))
+                            .build()
+                    )
+                    .build()
+                player.setMediaItem(item)
+                // The user may have pressed play/pause while the stream was being resolved.
+                player.playWhenReady = queueManager.state.value.isPlaying
                 player.prepare()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -390,10 +338,8 @@ class PlaybackService : MediaSessionService() {
         val urlProblem = error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
             error.errorCode == PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE ||
             error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
-            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
-            error.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED ||
-            error.errorCode == PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE
-        if (urlProblem && resolveRetries < 2) {
+            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT
+        if (urlProblem && resolveRetries < 1) {
             // Expired or rejected URL: get a fresh one once and try again from the same position.
             resolveRetries++
             val resumeAt = player.currentPosition.coerceAtLeast(0L)
@@ -404,9 +350,21 @@ class PlaybackService : MediaSessionService() {
                 delay(400)
                 try {
                     val stream = streamResolver.resolve(track.videoId, forceRefresh = true)
-                    val item = buildItem(track, stream)
+                    val item = MediaItem.Builder()
+                        .setMediaId(track.videoId)
+                        .setUri(stream.url)
+                        .setMimeType(stream.mimeType)
+                    .setMediaMetadata(
+                        MediaMetadata.Builder()
+                            .setTitle(track.title)
+                            .setArtist(track.artist)
+                            .setAlbumTitle(track.album)
+                            .setArtworkUri(track.thumbnails.bestArtworkUrl()?.let(Uri::parse))
+                            .build()
+                    )
+                        .build()
                     player.setMediaItem(item, resumeAt)
-                    player.playWhenReady = true
+                    player.playWhenReady = queueManager.state.value.isPlaying
                     player.prepare()
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e

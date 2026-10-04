@@ -1,5 +1,6 @@
 package com.geekify.android.ui.details
 
+import com.geekify.android.ui.components.LocalBottomInset
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,6 +27,7 @@ import com.geekify.android.data.model.Card
 import com.geekify.android.data.model.Track
 import com.geekify.android.ui.components.AuroraBackground
 import com.geekify.android.ui.components.CardItem
+import com.geekify.android.ui.components.CircleIconButton
 import com.geekify.android.ui.components.SectionTitle
 import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.components.rememberArtColor
@@ -71,13 +73,16 @@ fun ArtistScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(56.dp)
-                                .padding(horizontal = 4.dp),
+                                .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            IconButton(onClick = onBack) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextPrimary)
-                            }
+                            CircleIconButton(
+                                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                onClick = onBack,
+                                size = 50.dp,
+                                container = Color.White.copy(alpha = 0.16f)
+                            )
                         }
                         Box(
                             modifier = Modifier
@@ -101,8 +106,8 @@ fun ArtistScreen(
                         Text(
                             text = artist.name,
                             color = TextPrimary,
-                            fontSize = 28.sp,
-                            fontWeight = FontWeight.Bold
+                            fontSize = 30.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                         if (artist.songs.isNotEmpty()) {
                             Spacer(Modifier.height(16.dp))
@@ -147,7 +152,7 @@ fun ArtistScreen(
                     item { CardRow(artist.related, onCardClick) }
                 }
 
-                item { Spacer(Modifier.height(24.dp)) }
+                item { Spacer(Modifier.height(24.dp + LocalBottomInset.current)) }
             }
         }
     }

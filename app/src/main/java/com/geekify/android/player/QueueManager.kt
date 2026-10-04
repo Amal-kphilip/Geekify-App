@@ -5,7 +5,6 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
-import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.geekify.android.data.model.Track
 import kotlinx.coroutines.CoroutineScope
@@ -66,7 +65,6 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
         private val KEY_SHUFFLE = stringPreferencesKey("player_shuffle")
         private val KEY_REPEAT = stringPreferencesKey("player_repeat")
         private val KEY_VOLUME = floatPreferencesKey("player_volume")
-        private val KEY_POSITION = longPreferencesKey("player_position")
     }
 
     init {
@@ -83,8 +81,7 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
                 val shuffle = prefs[KEY_SHUFFLE] == "true"
                 val repeat = prefs[KEY_REPEAT]?.let { runCatching { RepeatMode.valueOf(it) }.getOrNull() } ?: RepeatMode.OFF
                 val volume = prefs[KEY_VOLUME] ?: 0.85f
-                val position = prefs[KEY_POSITION] ?: 0L
-                _state.value = QueueState(queue, index.coerceIn(-1, queue.size - 1), false, false, position, 0L, shuffle, repeat, volume)
+                _state.value = QueueState(queue, index.coerceIn(-1, queue.size - 1), false, false, 0L, 0L, shuffle, repeat, volume)
             } catch (_: Exception) {}
         }
     }
@@ -110,7 +107,6 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
     fun setPlaying(playing: Boolean) {
         if (_state.value.isPlaying != playing) {
             _state.value = _state.value.copy(isPlaying = playing)
-            if (!playing) persist(_state.value)   // remember where we paused
         }
     }
 
@@ -231,7 +227,6 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
                 prefs[KEY_SHUFFLE] = s.shuffle.toString()
                 prefs[KEY_REPEAT] = s.repeat.name
                 prefs[KEY_VOLUME] = s.volume
-                prefs[KEY_POSITION] = s.progressMs
             }
         }
     }

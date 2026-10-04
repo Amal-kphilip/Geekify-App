@@ -1,5 +1,6 @@
 package com.geekify.android.ui.library
 
+import com.geekify.android.ui.components.LocalBottomInset
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -90,7 +91,7 @@ fun PlaylistScreen(
                 )
             }
 
-            item { Spacer(Modifier.height(24.dp)) }
+            item { Spacer(Modifier.height(24.dp + LocalBottomInset.current)) }
         }
     }
 }

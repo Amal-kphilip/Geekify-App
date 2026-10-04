@@ -2,7 +2,7 @@
     <style name="Theme.Geekify" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:statusBarColor">#0D0D0D</item>
-        <item name="android:navigationBarColor">#0D0D0D</item>
+        <item name="android:statusBarColor">#0B0A10</item>
+        <item name="android:navigationBarColor">#0B0A10</item>
     </style>
 </resources>

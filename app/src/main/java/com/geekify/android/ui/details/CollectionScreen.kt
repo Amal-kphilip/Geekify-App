@@ -1,5 +1,6 @@
 package com.geekify.android.ui.details
 
+import com.geekify.android.ui.components.LocalBottomInset
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -112,7 +113,7 @@ fun CollectionScreen(
                     )
                 }
 
-                item { Spacer(Modifier.height(24.dp)) }
+                item { Spacer(Modifier.height(24.dp + LocalBottomInset.current)) }
             }
         }
     }

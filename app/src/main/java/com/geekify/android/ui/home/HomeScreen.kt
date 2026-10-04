@@ -10,16 +10,24 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -30,7 +38,23 @@ import com.geekify.android.data.model.*
 import com.geekify.android.ui.components.*
 import com.geekify.android.ui.theme.*
 
-private data class QuickItem(val title: String, val thumb: String?, val onClick: () -> Unit)
+/** One card in the "Curated & trending" carousel. [lead] is the song the heart / queue / more buttons act on. */
+private data class DiscoverItem(
+    val key: String,
+    val title: String,
+    val description: String,
+    val art: String?,
+    val lead: Track?,
+    val onPlay: () -> Unit
+)
+
+/** One row in the "Top daily playlists" list. */
+private data class ListRowItem(
+    val title: String,
+    val subtitle: String,
+    val art: String?,
+    val onClick: () -> Unit
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,67 +66,126 @@ fun HomeScreen(
     onTrackActions: (Track) -> Unit,
     onCardClick: (Card) -> Unit,
     onAccountClick: () -> Unit,
-    onLikedClick: () -> Unit
+    onLikedClick: () -> Unit,
+    onSearchClick: () -> Unit = {},
+    likedIds: Set<String> = emptySet(),
+    onToggleLike: (Track) -> Unit = {},
+    onAddToQueue: (Track) -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
     val filters = listOf("Everything", "Songs", "Albums", "Playlists", "Artists")
+    var showAllPlaylists by remember { mutableStateOf(false) }
 
-    // Refresh the personal rows whenever Home is shown (cheap: skipped unless your listening changed).
-    LaunchedEffect(Unit) { viewModel.onScreenShown() }
+    val firstName = userName?.trim()?.split(" ")?.firstOrNull()?.takeIf { it.isNotBlank() } ?: "there"
 
-    val showPersonal = state.selectedFilter == "Everything"
-    val showSongRows = showPersonal || state.selectedFilter == "Songs"
+    // ---- Derived content for the home feed ----
+    val allItems = state.shelves.flatMap { it.items }.distinctBy { it.title }
 
-    // ---- Quick-access tiles: your mixes first, then what you played last, then the feed as a fallback ----
-    val mixTiles = state.mixes.take(2).map { mix ->
-        QuickItem(mix.title, mix.tracks.firstOrNull()?.thumbnails?.bestArtworkUrl(480)) {
-            if (mix.tracks.isNotEmpty()) onTrackClick(mix.tracks.first(), mix.tracks)
+    val mixCards = state.mixes.map { mix ->
+        val lead = mix.tracks.firstOrNull()
+        DiscoverItem(
+            key = "mix:" + mix.id,
+            title = mix.title,
+            description = mix.subtitle,
+            art = lead?.thumbnails?.bestArtworkUrl(720),
+            lead = lead,
+            onPlay = { if (mix.tracks.isNotEmpty()) onTrackClick(mix.tracks.first(), mix.tracks) }
+        )
+    }
+    val feedCards = allItems
+        .filterIsInstance<ShelfCard>()
+        .filter { it.value.type == "album" || it.value.type == "playlist" }
+        .take(4)
+    val discover = (mixCards + feedCards.map { item ->
+        DiscoverItem(
+            key = "card:" + item.value.id,
+            title = item.value.title,
+            description = item.value.subtitle?.takeIf { it.isNotBlank() }
+                ?: item.value.type.replaceFirstChar { it.uppercase() },
+            art = item.value.thumbnails.bestArtworkUrl(720),
+            lead = null,
+            onPlay = { onCardClick(item.value) }
+        )
+    }).take(6)
+
+    val usedIds = feedCards.map { it.id }.toSet()
+    val listItems = allItems.filter { it.id !in usedIds }.map { item ->
+        when (item) {
+            is ShelfTrack -> ListRowItem(
+                title = item.value.title,
+                subtitle = "By ${item.value.artist}",
+                art = item.value.thumbnails.bestArtworkUrl(480),
+                onClick = { onTrackClick(item.value, listOf(item.value)) }
+            )
+            is ShelfCard -> ListRowItem(
+                title = item.value.title,
+                subtitle = item.value.subtitle?.takeIf { it.isNotBlank() }
+                    ?: item.value.type.replaceFirstChar { it.uppercase() },
+                art = item.value.thumbnails.bestArtworkUrl(480),
+                onClick = { onCardClick(item.value) }
+            )
         }
     }
-    val recentTiles = state.recent.take(5 - mixTiles.size).map { track ->
-        QuickItem(track.title, track.thumbnails.bestArtworkUrl(480)) { onTrackClick(track, state.recent) }
-    }
-    val personalTiles = mixTiles + recentTiles
-    val feedTiles = state.shelves.flatMap { it.items }.distinctBy { it.title }
-        .take((5 - personalTiles.size).coerceAtLeast(0))
-        .map { item ->
-            when (item) {
-                is ShelfTrack -> QuickItem(item.value.title, item.value.thumbnails.bestArtworkUrl(480)) {
-                    onTrackClick(item.value, listOf(item.value))
-                }
-                is ShelfCard -> QuickItem(item.value.title, item.value.thumbnails.bestArtworkUrl(480)) {
-                    onCardClick(item.value)
-                }
-            }
-        }
-    val quickTiles = personalTiles + feedTiles
+    val visibleList = if (showAllPlaylists) listItems.take(20) else listItems.take(5)
 
-    // "Picked for you" = the top pick of your first mix (not a random item from the feed).
-    val pickMix = state.mixes.firstOrNull { it.tracks.isNotEmpty() }
-    val pickTrack = pickMix?.tracks?.firstOrNull()
-
-    AuroraBackground {
+    Box(modifier = Modifier.fillMaxSize().background(InkBackground)) {
         PullToRefreshBox(
             isRefreshing = state.isLoading && (state.shelves.isNotEmpty() || state.mixes.isNotEmpty()),
             onRefresh = { viewModel.loadHome(true) },
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
+            modifier = Modifier.fillMaxSize()
         ) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                // Avatar + filter pills
+                // ---- Header: glow, avatar, search / favourites, greeting, filter chips ----
                 item {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 16.dp, top = 8.dp, bottom = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .drawBehind { drawHeaderGlow() }
+                            .statusBarsPadding()
+                            .padding(top = 14.dp)
                     ) {
-                        Avatar(photoUrl = photoUrl, name = userName, onClick = onAccountClick)
-                        Spacer(Modifier.width(12.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Avatar(photoUrl = photoUrl, name = userName, size = 58.dp, onClick = onAccountClick)
+                            Spacer(Modifier.weight(1f))
+                            CircleIconButton(
+                                icon = Icons.Default.Search,
+                                contentDescription = "Search",
+                                onClick = onSearchClick,
+                                size = 50.dp,
+                                container = Color.White.copy(alpha = 0.14f)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            CircleIconButton(
+                                icon = Icons.Default.FavoriteBorder,
+                                contentDescription = "Liked songs",
+                                onClick = onLikedClick,
+                                size = 50.dp,
+                                container = Color.White.copy(alpha = 0.14f)
+                            )
+                        }
+
+                        Spacer(Modifier.height(16.dp))
+
+                        Text(
+                            text = "Hi, $firstName",
+                            color = TextPrimary,
+                            fontSize = 32.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 20.dp)
+                        )
+
+                        Spacer(Modifier.height(20.dp))
+
                         LazyRow(
-                            modifier = Modifier.weight(1f),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            contentPadding = PaddingValues(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             items(filters) { filter ->
                                 PillChip(
@@ -115,31 +198,7 @@ fun HomeScreen(
                     }
                 }
 
-                // Quick-access grid (Liked Songs + a few recent picks)
-                item {
-                    val tiles = listOf(
-                        QuickItem("Liked Songs", null, onLikedClick)
-                    ) + quickTiles
-                    Column(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        tiles.chunked(2).forEach { pair ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                pair.forEach { tile ->
-                                    QuickTile(
-                                        tile = tile,
-                                        isLiked = tile.title == "Liked Songs" && tile.thumb == null,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                                if (pair.size == 1) Spacer(Modifier.weight(1f))
-                            }
-                        }
-                    }
-                }
-
-                // Loading / error
+                // ---- Loading / error ----
                 if (state.isLoading && state.shelves.isEmpty()) {
                     item {
                         Box(
@@ -148,7 +207,7 @@ fun HomeScreen(
                                 .height(200.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            CircularProgressIndicator(color = SpotifyGreen)
+                            CircularProgressIndicator(color = Lime)
                         }
                     }
                 }
@@ -166,63 +225,27 @@ fun HomeScreen(
                     }
                 }
 
-                // First run: explain why there are no personal rows yet
-                if (showPersonal && !state.hasTaste) {
+                // ---- Curated & trending ----
+                if (discover.isNotEmpty()) {
                     item {
-                        Text(
-                            "Play or like a few songs and Geekify will build mixes around your taste.",
-                            color = TextSecondary,
-                            fontSize = 14.sp,
-                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp)
-                        )
-                    }
-                }
-
-                // Jump back in
-                if (showSongRows && state.recent.isNotEmpty()) {
-                    item(key = "recent") {
-                        ShelfRow(
-                            shelf = Shelf("Recently played", state.recent.map(::ShelfTrack)),
-                            modifier = Modifier.padding(top = 8.dp),
-                            onTrackClick = onTrackClick,
-                            onCardClick = onCardClick
-                        )
-                    }
-                }
-
-                // Picked for you
-                if (showPersonal && pickTrack != null && pickMix != null) {
-                    item(key = "picked") {
-                        Column(modifier = Modifier.padding(top = 28.dp)) {
-                            SectionTitle("Picked for you")
-                            FeaturedCard(
-                                label = "Song",
-                                title = pickTrack.title,
-                                subtitle = pickTrack.artist,
-                                thumb = pickTrack.thumbnails.bestArtworkUrl(720),
-                                onClick = { onTrackClick(pickTrack, pickMix.tracks) },
-                                onAddClick = { onTrackActions(pickTrack) },
-                                modifier = Modifier.padding(horizontal = 16.dp)
-                            )
-                        }
-                    }
-                }
-
-                // Your top mixes
-                if (showPersonal && state.mixes.isNotEmpty()) {
-                    item(key = "mixes") {
-                        Column(modifier = Modifier.padding(top = 28.dp)) {
-                            SectionTitle("Your top mixes")
+                        Column(modifier = Modifier.padding(top = 32.dp)) {
+                            SectionTitle("Curated & trending")
+                            Spacer(Modifier.height(6.dp))
                             LazyRow(
-                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                contentPadding = PaddingValues(horizontal = 20.dp),
                                 horizontalArrangement = Arrangement.spacedBy(14.dp)
                             ) {
-                                items(state.mixes, key = { it.id }) { mix ->
-                                    MixCover(
-                                        mix = mix,
-                                        onClick = {
-                                            if (mix.tracks.isNotEmpty()) onTrackClick(mix.tracks.first(), mix.tracks)
-                                        }
+                                items(discover.size, key = { discover[it].key }) { index ->
+                                    val card = discover[index]
+                                    val lead = card.lead
+                                    DiscoverCard(
+                                        item = card,
+                                        color = DiscoverColors[index % DiscoverColors.size],
+                                        liked = lead != null && lead.videoId in likedIds,
+                                        onToggleLike = { lead?.let(onToggleLike) },
+                                        onAddToQueue = { lead?.let(onAddToQueue) },
+                                        onMore = { lead?.let(onTrackActions) },
+                                        modifier = Modifier.fillParentMaxWidth(0.86f)
                                     )
                                 }
                             }
@@ -230,96 +253,222 @@ fun HomeScreen(
                     }
                 }
 
-                // Because you listened to ...
-                if (showSongRows) {
-                    items(state.becauseShelves, key = { "because:" + it.title }) { shelf ->
-                        ShelfRow(shelf = shelf, onTrackClick = onTrackClick, onCardClick = onCardClick)
+                // ---- Top daily playlists ----
+                if (listItems.isNotEmpty()) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 32.dp, end = 20.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            SectionTitle("Top daily playlists", modifier = Modifier.weight(1f))
+                            if (listItems.size > 5) {
+                                Text(
+                                    text = if (showAllPlaylists) "Show less" else "See all",
+                                    color = TextSecondary,
+                                    fontSize = 16.sp,
+                                    modifier = Modifier.bouncyClickable { showAllPlaylists = !showAllPlaylists }
+                                )
+                            }
+                        }
+                    }
+                    items(visibleList.size) { index ->
+                        PlaylistRow(item = visibleList[index])
                     }
                 }
 
-                // Shelves from the feed
+                // ---- Remaining shelves from the feed ----
                 items(state.shelves, key = { it.title }) { shelf ->
                     ShelfRow(shelf = shelf, onTrackClick = onTrackClick, onCardClick = onCardClick)
                 }
 
-                item { Spacer(Modifier.height(24.dp)) }
+                item { Spacer(Modifier.height(24.dp + LocalBottomInset.current)) }
+            }
+        }
+    }
+}
+
+/** Soft white / pink / violet light that blooms from the top-left corner and fades into the background. */
+private fun DrawScope.drawHeaderGlow() {
+    val w = size.width
+    val h = size.height
+    // violet bloom
+    drawRect(
+        Brush.radialGradient(
+            colors = listOf(Color(0xFF8A4DFF).copy(alpha = 0.55f), Color.Transparent),
+            center = Offset(w * 0.20f, h * 0.10f),
+            radius = w * 0.95f
+        )
+    )
+    // blue streak drifting right
+    drawRect(
+        Brush.radialGradient(
+            colors = listOf(Color(0xFF4A78FF).copy(alpha = 0.38f), Color.Transparent),
+            center = Offset(w * 0.45f, h * 0.18f),
+            radius = w * 0.50f
+        )
+    )
+    // pink core
+    drawRect(
+        Brush.radialGradient(
+            colors = listOf(Color(0xFFFF8FC4).copy(alpha = 0.80f), Color.Transparent),
+            center = Offset(w * 0.08f, 0f),
+            radius = w * 0.58f
+        )
+    )
+    // hot white centre
+    drawRect(
+        Brush.radialGradient(
+            colors = listOf(Color.White.copy(alpha = 0.95f), Color.White.copy(alpha = 0f)),
+            center = Offset(w * 0.10f, -h * 0.02f),
+            radius = w * 0.30f
+        )
+    )
+    // melt into the screen background
+    drawRect(
+        Brush.verticalGradient(
+            0.45f to Color.Transparent,
+            1f to InkBackground
+        )
+    )
+}
+
+@Composable
+private fun DiscoverCard(
+    item: DiscoverItem,
+    color: Color,
+    liked: Boolean,
+    onToggleLike: () -> Unit,
+    onAddToQueue: () -> Unit,
+    onMore: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .height(186.dp)
+            .clip(RoundedCornerShape(28.dp))
+            .background(color)
+            .bouncyClickable(pressedScale = 0.98f, onClick = item.onPlay)
+    ) {
+        // Artwork on the right, melting into the card colour.
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .fillMaxWidth(0.46f)
+        ) {
+            if (item.art != null) {
+                AsyncImage(
+                    model = item.art,
+                    contentDescription = item.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Brush.horizontalGradient(listOf(color, Color.Transparent)))
+                )
+            } else {
+                Icon(
+                    Icons.Default.MusicNote,
+                    contentDescription = null,
+                    tint = OnPastel.copy(alpha = 0.35f),
+                    modifier = Modifier.align(Alignment.Center).size(56.dp)
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .fillMaxWidth(0.62f)
+                .padding(start = 22.dp, top = 22.dp)
+        ) {
+            Text(
+                text = item.title,
+                color = OnPastel,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = item.description,
+                color = OnPastel.copy(alpha = 0.82f),
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 20.dp, bottom = 18.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .shadow(10.dp, CircleShape, ambientColor = OnPastel, spotColor = OnPastel)
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(OnPastel)
+                    .bouncyClickable(pressedScale = 0.92f, onClick = item.onPlay),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color.White, modifier = Modifier.size(28.dp))
+            }
+            if (item.lead != null) {
+                Spacer(Modifier.width(10.dp))
+                CardAction(
+                    icon = if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                    description = if (liked) "Remove from Liked Songs" else "Add to Liked Songs",
+                    onClick = onToggleLike
+                )
+                CardAction(Icons.Default.AddCircleOutline, "Add to queue", onAddToQueue)
+                CardAction(Icons.Default.MoreHoriz, "More", onMore)
             }
         }
     }
 }
 
 @Composable
-private fun QuickTile(tile: QuickItem, isLiked: Boolean, modifier: Modifier = Modifier) {
+private fun CardAction(icon: ImageVector, description: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .bouncyClickable(pressedScale = 0.88f, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = description, tint = OnPastel, modifier = Modifier.size(24.dp))
+    }
+}
+
+@Composable
+private fun PlaylistRow(item: ListRowItem) {
     Row(
-        modifier = modifier
-            .height(56.dp)
-            .clip(RoundedCornerShape(6.dp))
-            .background(InkElevated)
-            .bouncyClickable(pressedScale = 0.97f, onClick = tile.onClick),
+        modifier = Modifier
+            .fillMaxWidth()
+            .bouncyClickable(pressedScale = 0.985f, onClick = item.onClick)
+            .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(56.dp)
-                .background(InkPanel),
-            contentAlignment = Alignment.Center
-        ) {
-            when {
-                isLiked -> Box(
-                    modifier = Modifier.fillMaxSize().background(LikedGradient),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.Favorite, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
-                }
-                tile.thumb != null -> AsyncImage(
-                    model = tile.thumb,
-                    contentDescription = tile.title,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-                else -> Icon(Icons.Default.MusicNote, contentDescription = null, tint = TextSecondary)
-            }
-        }
-        Text(
-            text = tile.title,
-            color = TextPrimary,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 10.dp)
-        )
-    }
-}
-
-@Composable
-private fun FeaturedCard(
-    label: String,
-    title: String,
-    subtitle: String?,
-    thumb: String?,
-    onClick: () -> Unit,
-    onAddClick: (() -> Unit)?,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(150.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(InkPanel)
-            .bouncyClickable(pressedScale = 0.98f, onClick = onClick)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(150.dp)
+                .size(72.dp)
+                .clip(RoundedCornerShape(20.dp))
                 .background(InkElevated),
             contentAlignment = Alignment.Center
         ) {
-            if (thumb != null) {
+            if (item.art != null) {
                 AsyncImage(
-                    model = thumb,
-                    contentDescription = title,
+                    model = item.art,
+                    contentDescription = item.title,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
@@ -327,106 +476,32 @@ private fun FeaturedCard(
                 Icon(Icons.Default.MusicNote, contentDescription = null, tint = TextSecondary)
             }
         }
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .padding(16.dp)
-        ) {
-            Text(label, color = TextSecondary, fontSize = 14.sp)
+        Spacer(Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                title,
+                text = item.title,
                 color = TextPrimary,
                 fontSize = 17.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            if (!subtitle.isNullOrBlank()) {
-                Text(subtitle, color = TextSecondary, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Spacer(Modifier.weight(1f))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                IconButton(onClick = { onAddClick?.invoke() }, enabled = onAddClick != null) {
-                    Icon(Icons.Default.AddCircleOutline, contentDescription = "Song actions", tint = TextSecondary, modifier = Modifier.size(28.dp))
-                }
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(Color.White),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color.Black, modifier = Modifier.size(28.dp))
-                }
-            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = item.subtitle,
+                color = TextSecondary,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
-    }
-}
-
-@Composable
-private fun MixCover(mix: Mix, onClick: () -> Unit) {
-    val thumb = mix.tracks.firstOrNull()?.thumbnails?.bestArtworkUrl(480)
-    Column(
-        modifier = Modifier
-            .width(156.dp)
-            .bouncyClickable(onClick = onClick)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(156.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(InkElevated)
-        ) {
-            if (thumb != null) {
-                AsyncImage(
-                    model = thumb,
-                    contentDescription = mix.title,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            }
-            // Scrim + title
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))))
-                    .padding(start = 10.dp, end = 10.dp, top = 24.dp, bottom = 8.dp)
-            ) {
-                Text(
-                    mix.title,
-                    color = Color.White,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            // Little green badge top-left
-            Box(
-                modifier = Modifier
-                    .padding(8.dp)
-                    .size(22.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .align(Alignment.TopStart),
-                contentAlignment = Alignment.Center
-            ) {
-                Box(Modifier.size(10.dp).clip(CircleShape).background(SpotifyGreen))
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = mix.subtitle,
-            color = TextSecondary,
-            fontSize = 13.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
+        Spacer(Modifier.width(12.dp))
+        CircleIconButton(
+            icon = Icons.Default.PlayArrow,
+            contentDescription = "Play",
+            onClick = item.onClick,
+            size = 42.dp,
+            iconSize = 22.dp
         )
     }
 }

@@ -16,9 +16,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.geekify.android.ui.components.AuroraBackground
+import com.geekify.android.ui.components.CircleIconButton
 import com.geekify.android.ui.components.TrackRow
 import com.geekify.android.ui.theme.TextMuted
 import com.geekify.android.ui.theme.TextPrimary
@@ -36,22 +38,38 @@ fun QueueScreen(
         Scaffold(
             containerColor = Color.Transparent,
             topBar = {
-                TopAppBar(
-                    title = { Text("Playing Queue", fontWeight = FontWeight.Bold, color = TextPrimary) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextPrimary)
-                        }
-                    },
-                    actions = {
-                        if (state.queue.isNotEmpty()) {
-                            IconButton(onClick = { viewModel.clearQueue() }) {
-                                Icon(Icons.Default.ClearAll, contentDescription = "Clear Queue", tint = TextSecondary)
-                            }
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircleIconButton(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        onClick = onBack,
+                        size = 50.dp
+                    )
+                    Text(
+                        "Playing Queue",
+                        color = TextPrimary,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (state.queue.isNotEmpty()) {
+                        CircleIconButton(
+                            icon = Icons.Default.ClearAll,
+                            contentDescription = "Clear Queue",
+                            onClick = { viewModel.clearQueue() },
+                            size = 50.dp
+                        )
+                    } else {
+                        Spacer(Modifier.size(50.dp))
+                    }
+                }
             }
         ) { padding ->
             if (state.queue.isEmpty()) {
@@ -68,17 +86,17 @@ fun QueueScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
-                        .padding(horizontal = 8.dp)
+                        .navigationBarsPadding()
                 ) {
                     val nowPlaying = state.current
                     if (nowPlaying != null) {
                         item {
                             Text(
-                                text = "NOW PLAYING",
-                                color = TextMuted,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                text = "Now playing",
+                                color = TextSecondary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
                             )
                             TrackRow(
                                 track = nowPlaying,
@@ -93,11 +111,11 @@ fun QueueScreen(
                     if (nextTracks.isNotEmpty()) {
                         item {
                             Text(
-                                text = "NEXT UP (${nextTracks.size})",
-                                color = TextMuted,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                text = "Next up (${nextTracks.size})",
+                                color = TextSecondary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
                             )
                         }
 
