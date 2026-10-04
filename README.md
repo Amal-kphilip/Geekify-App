@@ -25,15 +25,6 @@
   <a href="#license-and-terms">License and terms</a>
 </p>
 
-<p align="center">
-  <a href="https://github.com/Amal-kphilip/Geekify-App">
-    <img
-      src="https://img.shields.io/badge/GET%20IT%20ON-GitHub-181717?style=for-the-badge&logo=github&logoColor=white"
-      alt="Get it on GitHub"
-      height="50"
-    />
-  </a>
-</p>
 
 
 **Geekify** is a native Android music player built with Kotlin and Jetpack Compose. Discover music, search songs, build a personal library, and keep listening with background playback and notification controls.
@@ -148,6 +139,27 @@ Browse or create work items in the [issue tracker](https://github.com/Amal-kphil
 ## Releases
 
 Tagged releases are built by GitHub Actions and publish a signed APK to [GitHub Releases](https://github.com/Amal-kphilip/Geekify-App/releases). Release signing values belong in GitHub Actions secrets; never commit them.
+
+<h1><a id="download-now"></a>Download Now</h1>
+
+<h2>Stable Release</h2>
+
+<table>
+  <tr>
+    <th align="center">GitHub</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/Amal-kphilip/Geekify-App/releases/latest/download/Geekify-latest.apk">
+        <img
+          src="https://img.shields.io/badge/GET%20IT%20ON-GitHub-181717?style=for-the-badge&logo=github&logoColor=white"
+          alt="Get the stable Geekify release on GitHub"
+          height="100"
+        >
+      </a>
+    </td>
+  </tr>
+</table>
 
 ## Project notes
 
