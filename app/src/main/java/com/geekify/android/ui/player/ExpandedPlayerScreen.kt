@@ -3,6 +3,7 @@ package com.geekify.android.ui.player
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -44,6 +45,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -88,9 +91,11 @@ fun ExpandedPlayerScreen(
 
     val thumbUrl = track.thumbnails.bestArtworkUrl()
     val artColor by rememberArtColor(thumbUrl, fallback = InkElevated)
-    var volumeHint by remember { mutableStateOf(false) }
-    var volume by remember { mutableFloatStateOf(state.volume) }
-    LaunchedEffect(state.volume) { volume = state.volume }
+
+    // Swipe down anywhere on the player (cover included) to minimise it. The sheet follows the finger.
+    val dismissOffset = remember { Animatable(0f) }
+    val dismissScope = rememberCoroutineScope()
+    val screenHeightPx = with(LocalDensity.current) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
 
     // The cover gently shrinks when paused and springs back when playing.
     val artScale by animateFloatAsState(
@@ -113,7 +118,34 @@ fun ExpandedPlayerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .graphicsLayer {
+                translationY = dismissOffset.value
+                alpha = 1f - (dismissOffset.value / screenHeightPx).coerceIn(0f, 1f) * 0.5f
+            }
             .background(InkBackground)
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onVerticalDrag = { change, dragAmount ->
+                        change.consume()
+                        dismissScope.launch {
+                            dismissOffset.snapTo((dismissOffset.value + dragAmount).coerceAtLeast(0f))
+                        }
+                    },
+                    onDragEnd = {
+                        dismissScope.launch {
+                            if (dismissOffset.value > screenHeightPx * 0.16f) {
+                                dismissOffset.animateTo(screenHeightPx, tween(180))
+                                onDismiss()
+                            } else {
+                                dismissOffset.animateTo(0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy))
+                            }
+                        }
+                    },
+                    onDragCancel = {
+                        dismissScope.launch { dismissOffset.animateTo(0f) }
+                    }
+                )
+            }
             .clickable(
                 interactionSource = overlayInteraction,
                 indication = null,
@@ -187,39 +219,6 @@ fun ExpandedPlayerScreen(
                         )
                     } else {
                         Icon(Icons.Default.MusicNote, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(80.dp))
-                    }
-                }
-                // Swipe the cover up or down to change the volume.
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .pointerInput(track.videoId) {
-                            detectVerticalDragGestures(
-                                onDragStart = { volumeHint = true },
-                                onVerticalDrag = { change, dragAmount ->
-                                    change.consume()
-                                    volume = (volume - dragAmount / 800f).coerceIn(0f, 1f)
-                                    viewModel.setVolume(volume)
-                                },
-                                onDragEnd = { volumeHint = false },
-                                onDragCancel = { volumeHint = false }
-                            )
-                        }
-                )
-                if (volumeHint) {
-                    Surface(
-                        modifier = Modifier.align(Alignment.Center),
-                        color = InkBackground.copy(alpha = 0.78f),
-                        shape = RoundedCornerShape(24.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.VolumeUp, null, tint = Lime)
-                            Spacer(Modifier.width(8.dp))
-                            Text("${(volume * 100).toInt()}%", color = TextPrimary, fontWeight = FontWeight.Bold)
-                        }
                     }
                 }
             }

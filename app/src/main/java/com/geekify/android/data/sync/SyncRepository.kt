@@ -200,6 +200,16 @@ class SyncRepository @Inject constructor(
         }
     }
 
+    /** Stops syncing and removes this account's backed-up library from the cloud. */
+    suspend fun deleteCloudData(uid: String) {
+        pushJob?.cancel(); pushJob = null
+        stopSync()
+        db.collection("users").document(uid).delete().await()
+    }
+
+    /** Resumes syncing for [uid], e.g. when an account deletion failed part-way. */
+    suspend fun resumeSync(uid: String) = startSync(uid)
+
     suspend fun signOutAndClear() {
         val uid = activeUid
         if (uid != null) {

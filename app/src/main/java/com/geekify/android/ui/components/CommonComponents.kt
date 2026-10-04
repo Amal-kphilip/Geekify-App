@@ -16,13 +16,20 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Explicit
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -396,44 +403,93 @@ fun CardItem(
     }
 }
 
-/** Dark "New playlist" dialog shared by the Create tab and the Library screen. */
+/** "New playlist" popup shared by the Create button, the My Music menu and the song actions dialog. */
 @Composable
 fun CreatePlaylistDialog(
     onDismiss: () -> Unit,
     onCreate: (String) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = InkElevated,
-        shape = RoundedCornerShape(28.dp),
-        title = { Text("Give your playlist a name", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp) },
-        text = {
-            TextField(
-                value = name,
-                onValueChange = { name = it },
-                placeholder = { Text("My playlist #1", color = TextMuted) },
-                singleLine = true,
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    focusedIndicatorColor = Lime,
-                    unfocusedIndicatorColor = TextMuted,
-                    cursorColor = Lime,
-                    focusedTextColor = TextPrimary,
-                    unfocusedTextColor = TextPrimary
-                )
-            )
-        },
-        confirmButton = {
-            Button(
-                onClick = { if (name.isNotBlank()) onCreate(name.trim()) },
-                colors = ButtonDefaults.buttonColors(containerColor = Lime, contentColor = OnAccent),
-                shape = CircleShape
-            ) { Text("Create", fontWeight = FontWeight.Bold) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel", color = TextSecondary) }
+    val canCreate = name.isNotBlank()
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+
+    GeekifyDialog(onDismissRequest = onDismiss) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(InkElevated),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.PlaylistAdd, contentDescription = null, tint = Lime, modifier = Modifier.size(24.dp))
+            }
+            Spacer(Modifier.width(14.dp))
+            Column {
+                Text("New playlist", color = TextPrimary, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(2.dp))
+                Text("Name it, then add songs from anywhere.", color = TextSecondary, fontSize = 13.5.sp)
+            }
         }
-    )
+
+        Spacer(Modifier.height(22.dp))
+
+        TextField(
+            value = name,
+            onValueChange = { if (it.length <= 40) name = it },
+            placeholder = { Text("My playlist #1", color = TextMuted) },
+            singleLine = true,
+            shape = CircleShape,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done, capitalization = KeyboardCapitalization.Sentences),
+            keyboardActions = KeyboardActions(onDone = { if (canCreate) onCreate(name.trim()) }),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = InkElevated,
+                unfocusedContainerColor = InkElevated,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                cursorColor = Lime,
+                focusedTextColor = TextPrimary,
+                unfocusedTextColor = TextPrimary
+            ),
+            modifier = Modifier.fillMaxWidth().focusRequester(focus)
+        )
+
+        Spacer(Modifier.height(24.dp))
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(52.dp)
+                    .clip(CircleShape)
+                    .bouncyClickable(pressedScale = 0.97f, onClick = onDismiss),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Cancel", color = TextSecondary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1.4f)
+                    .height(52.dp)
+                    .clip(CircleShape)
+                    .background(if (canCreate) Lime else InkElevated)
+                    .then(
+                        if (canCreate) Modifier.bouncyClickable(pressedScale = 0.97f) { onCreate(name.trim()) }
+                        else Modifier
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "Create",
+                    color = if (canCreate) OnAccent else TextMuted,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
 }
