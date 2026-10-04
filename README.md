@@ -34,10 +34,10 @@
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/home.jpg" alt="Geekify home screen" width="190" />
-  <img src="docs/screenshots/now-playing.jpg" alt="Geekify search screen" width="190" />
-  <img src="docs/screenshots/search.jpg" alt="Geekify library screen" width="190" />
-  <img src="docs/screenshots/library.jpg" alt="Geekify now playing screen" width="190" />
+  <img src="docs/screenshots/home.jpg" alt="Geekify home screen" width="30%" />
+  <img src="docs/screenshots/now-playing.jpg" alt="Geekify search screen" width="30%" />
+  <img src="docs/screenshots/search.jpg" alt="Geekify library screen" width="30%" />
+  <img src="docs/screenshots/library.jpg" alt="Geekify now playing screen" width="30%" />
 </p>
 
 ## Features
