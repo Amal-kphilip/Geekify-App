@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/icon/icon.png" alt="Metrolist app icon" width="200" />
+<img src="docs/icon/icon-rounded.png" alt="Geekify app icon" width="200" />
 
 # Geekify
 
