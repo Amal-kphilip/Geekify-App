@@ -14,6 +14,8 @@ object Recommender {
     const val MAX_SEEDS = 6
     const val MAX_SEEDS_PER_ARTIST = 2
     const val MAX_TRACK_SECONDS = 15 * 60
+    const val MIN_TRACK_SECONDS = 60
+    private const val OTHER_LANGUAGE_PENALTY = 0.7
     private const val LANGUAGE_MATCH_BOOST = 1.35
 
     data class Signal(val videoId: String, val artist: String = "", val title: String = "")
@@ -35,6 +37,19 @@ object Recommender {
     data class MixResult(val id: String, val title: String, val subtitle: String, val videoIds: List<String>)
 
     private fun akey(name: String?) = (name ?: "").trim().lowercase()
+
+    // Non-music results that radio/related feeds love to mix in (film trailers, interviews, karaoke...).
+    private val junkTitle = Regex(
+        "(?i)\\b(podcast|interview|reaction|full album|jukebox|karaoke|nightcore|episode|trailer|teaser|promo|making of|ringtone|dialogue)\\b"
+    )
+    private val bracketed = Regex("\\(.*?\\)|\\[.*?\\]")
+    private val nonAlnum = Regex("[^\\p{L}\\p{N}]")
+
+    fun looksLikeJunk(title: String): Boolean = junkTitle.containsMatchIn(title)
+
+    /** Same song uploaded twice ("Song", "Song (Official Video)") should count once. */
+    fun songKey(title: String?, artist: String?): String =
+        nonAlnum.replace(bracketed.replace(title.orEmpty(), "").lowercase(), "") + "|" + akey(artist)
 
     /**
      * Infers the language where titles or artists use a distinct Indic/Korean script. Latin
@@ -153,6 +168,8 @@ object Recommender {
         val seeds = pickSeeds(weights, meta)
         val topW = seeds.maxOfOrNull { weights[it] ?: 0.0 } ?: 1.0
         val known = weights.keys.toSet()
+        val knownSongKeys = meta.values.map { songKey(it.title, it.artist) }.toSet()
+        val keyToVideo = mutableMapOf<String, String>()
         val knownArtists = affinity.keys.toSet()
         val totalAff = affinity.values.sum().let { if (it == 0.0) 1.0 else it }
 
@@ -164,7 +181,17 @@ object Recommender {
                 val vid = videoId(t)
                 if (vid.isEmpty() || vid in known) return@forEachIndexed
                 val dur = durationSeconds(t)
-                if (dur != null && dur > MAX_TRACK_SECONDS) return@forEachIndexed
+                if (dur != null && (dur > MAX_TRACK_SECONDS || dur < MIN_TRACK_SECONDS)) return@forEachIndexed
+                if (looksLikeJunk(title(t))) return@forEachIndexed
+                // Skip songs the person already knows, even when it is a different upload of the same song.
+                val key = songKey(title(t), artist(t))
+                if (key in knownSongKeys) return@forEachIndexed
+                val firstVid = keyToVideo.getOrPut(key) { vid }
+                if (firstVid != vid) {
+                    // Duplicate upload: credit the candidate we already have instead of listing it twice.
+                    cands[firstVid]?.let { it.score += w / (1 + RANK_DECAY * rank); it.sources.add(seed) }
+                    return@forEachIndexed
+                }
                 val c = cands.getOrPut(vid) {
                     Candidate(vid, title(t), akey(artist(t)), artistDisplay(t), thumbs(t), duration(t), dur, explicit(t), type(t))
                 }
@@ -177,8 +204,11 @@ object Recommender {
             c.score *= 1 + CO_OCCURRENCE_BOOST * (c.sources.size - 1)
             val share = (affinity[c.artist] ?: 0.0) / totalAff
             c.score *= 1 + minOf(0.6, share * 3)
-            if (preferredLanguage != null && languageOf(c.title, c.artistDisplay) == preferredLanguage) {
-                c.score *= LANGUAGE_MATCH_BOOST
+            if (preferredLanguage != null) {
+                val language = languageOf(c.title, c.artistDisplay)
+                if (language == preferredLanguage) c.score *= LANGUAGE_MATCH_BOOST
+                // Latin-script (English) songs have no detected language, so they are never penalised.
+                else if (language != null) c.score *= OTHER_LANGUAGE_PENALTY
             }
         }
 

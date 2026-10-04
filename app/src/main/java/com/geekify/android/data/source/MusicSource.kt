@@ -13,5 +13,9 @@ interface MusicSource {
     suspend fun related(videoId: String): MusicResult<List<Track>>
     suspend fun artist(channelId: String): MusicResult<ArtistPage>
     suspend fun collection(id: String, kind: CollectionKind): MusicResult<CollectionPage>
-    suspend fun home(): MusicResult<HomeResponse>
+    /**
+     * @param languageHint the listener's dominant language (e.g. "Malayalam"), used to pick relevant shelves.
+     * @param forceRefresh bypass the cache and rotate the optional shelves (pull-to-refresh).
+     */
+    suspend fun home(languageHint: String? = null, forceRefresh: Boolean = false): MusicResult<HomeResponse>
 }

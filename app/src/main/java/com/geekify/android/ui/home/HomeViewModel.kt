@@ -10,8 +10,13 @@ import com.geekify.android.data.source.MusicResult
 import com.geekify.android.data.source.MusicSource
 import com.geekify.android.domain.recommend.Recommender
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.Calendar
 import javax.inject.Inject
 
@@ -19,7 +24,11 @@ data class HomeUiState(
     val greeting: String = "",
     val userName: String? = null,
     val selectedFilter: String = "Everything",
+    val recent: List<Track> = emptyList(),
     val mixes: List<Mix> = emptyList(),
+    /** "Because you listened to ..." rows built from the songs you actually play. */
+    val becauseShelves: List<Shelf> = emptyList(),
+    val hasTaste: Boolean = true,
     val shelves: List<Shelf> = emptyList(),
     val isLoading: Boolean = false,
     val error: String? = null
@@ -38,9 +47,13 @@ class HomeViewModel @Inject constructor(
 
     private var allShelves: List<Shelf> = emptyList()
 
+    private val personalMutex = Mutex()
+    private var lastSignature: String? = null
+
     init {
         updateGreeting()
         observeAuth()
+        observeRecent()
         loadHome()
     }
 
@@ -61,15 +74,30 @@ class HomeViewModel @Inject constructor(
         }.launchIn(viewModelScope)
     }
 
+    private fun observeRecent() {
+        history.recent.onEach { tracks ->
+            _uiState.update { it.copy(recent = tracks.distinctBy { t -> t.videoId }.take(12)) }
+        }.launchIn(viewModelScope)
+    }
+
+    private fun signal(t: Track) = Recommender.Signal(t.videoId, t.artist, t.title)
+
     fun loadHome(forceRefresh: Boolean = false) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
 
-            // 1. Load recommendations / mixes
-            launch { buildMixes() }
+            val liked = library.likedOnce().take(40).map { signal(it) }
+            val recent = history.allOnce().take(30).map { signal(it) }
+            // Latin-script listening (English) has no detectable regional language; treat it as English
+            // so we don't push Malayalam/Hindi shelves at someone who plays English music.
+            val language = Recommender.dominantLanguage(liked, recent)
+                ?: if (liked.isNotEmpty() || recent.isNotEmpty()) "English" else null
 
-            // 2. Load home feed
-            when (val result = musicSource.home()) {
+            // 1. Personal mixes (built from what you play and like)
+            launch { refreshPersonal(force = forceRefresh) }
+
+            // 2. The general feed, tuned to your language instead of random genres
+            when (val result = musicSource.home(language, forceRefresh)) {
                 is MusicResult.Success -> {
                     allShelves = result.value.shelves
                     applyFilter(_uiState.value.selectedFilter)
@@ -80,6 +108,11 @@ class HomeViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /** Called whenever Home becomes visible: rebuilds the personal rows only if your listening changed. */
+    fun onScreenShown() {
+        viewModelScope.launch { refreshPersonal(force = false) }
     }
 
     fun setFilter(filter: String) {
@@ -110,21 +143,37 @@ class HomeViewModel @Inject constructor(
         _uiState.update { it.copy(shelves = filtered) }
     }
 
-    private suspend fun buildMixes() {
-        val liked = library.likedOnce().take(40).map { Recommender.Signal(it.videoId, it.artist, it.title) }
-        val recent = history.allOnce().take(30).map { Recommender.Signal(it.videoId, it.artist, it.title) }
-        if (liked.isEmpty() && recent.isEmpty()) return
+    private suspend fun refreshPersonal(force: Boolean) = personalMutex.withLock {
+        val likedTracks = library.likedOnce().take(40)
+        val recentTracks = history.allOnce().take(30)
+        val liked = likedTracks.map { signal(it) }
+        val recent = recentTracks.map { signal(it) }
 
-        // Pick top seeds to fetch related
+        if (liked.isEmpty() && recent.isEmpty()) {
+            lastSignature = null
+            _uiState.update { it.copy(mixes = emptyList(), becauseShelves = emptyList(), hasTaste = false) }
+            return@withLock
+        }
+
+        val signature = recent.take(6).joinToString(",") { it.videoId } + "|" + liked.take(10).joinToString(",") { it.videoId }
+        if (!force && signature == lastSignature) return@withLock
+        lastSignature = signature
+
         val (weights, meta, _) = Recommender.seedWeights(liked, recent)
-        val seeds = Recommender.pickSeeds(weights, meta, 4)
+        val latest = recent.firstOrNull()?.videoId
+        val seeds = (Recommender.pickSeeds(weights, meta, Recommender.MAX_SEEDS) + listOfNotNull(latest)).distinct()
 
-        val relatedMap = mutableMapOf<String, List<Track>>()
-        for (seed in seeds) {
-            when (val res = musicSource.related(seed)) {
-                is MusicResult.Success -> relatedMap[seed] = res.value
-                else -> Unit
-            }
+        // Fetch all seeds' radios at the same time (they used to load one after another).
+        val relatedMap: Map<String, List<Track>> = coroutineScope {
+            seeds.map { seed ->
+                async { seed to ((musicSource.related(seed) as? MusicResult.Success)?.value.orEmpty()) }
+            }.awaitAll().filter { it.second.isNotEmpty() }.toMap()
+        }
+        if (relatedMap.isEmpty()) {
+            // Offline or rate-limited: keep what is on screen and try again next time.
+            lastSignature = null
+            _uiState.update { it.copy(hasTaste = true) }
+            return@withLock
         }
 
         val (mixResults, _) = Recommender.buildMixes(
@@ -151,6 +200,26 @@ class HomeViewModel @Inject constructor(
                 tracks = mr.videoIds.mapNotNull { tracksById[it] }
             )
         }
-        _uiState.update { it.copy(mixes = mixes) }
+
+        // "Because you listened to X": direct picks from your latest and most-played songs.
+        val knownKeys = (liked + recent).map { Recommender.songKey(it.title, it.artist) }.toSet()
+        val used = mutableSetOf<String>()
+        val because = (listOfNotNull(latest) + seeds).distinct()
+            .mapNotNull { seed ->
+                val title = meta[seed]?.title?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val picks = relatedMap[seed].orEmpty()
+                    .filter { t ->
+                        t.videoId !in used && !Recommender.looksLikeJunk(t.title) &&
+                            Recommender.songKey(t.title, t.artist) !in knownKeys &&
+                            (t.durationSeconds == null || t.durationSeconds in Recommender.MIN_TRACK_SECONDS..Recommender.MAX_TRACK_SECONDS)
+                    }
+                    .take(15)
+                if (picks.size < 6) return@mapNotNull null
+                used += picks.map { it.videoId }
+                Shelf("Because you listened to $title", picks.map(::ShelfTrack))
+            }
+            .take(3)
+
+        _uiState.update { it.copy(mixes = mixes, becauseShelves = because, hasTaste = true) }
     }
 }

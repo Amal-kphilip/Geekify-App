@@ -10,7 +10,9 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -55,9 +57,11 @@ import kotlin.math.abs
 import kotlin.math.sin
 
 /** Clickable with a soft spring "press-in" scale, no ripple. Gives every tap a smooth feel. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun Modifier.bouncyClickable(
     pressedScale: Float = 0.96f,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit
 ): Modifier {
     val source = remember { MutableInteractionSource() }
@@ -72,7 +76,12 @@ fun Modifier.bouncyClickable(
             scaleX = scale
             scaleY = scale
         }
-        .clickable(interactionSource = source, indication = null, onClick = onClick)
+        .combinedClickable(
+            interactionSource = source,
+            indication = null,
+            onLongClick = onLongClick,
+            onClick = onClick
+        )
 }
 
 // ---------------------------------------------------------------------------------------------

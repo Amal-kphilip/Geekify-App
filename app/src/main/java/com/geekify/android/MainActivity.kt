@@ -29,6 +29,12 @@ class MainActivity : ComponentActivity() {
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* playback works either way */ }
 
+    override fun onStart() {
+        super.onStart()
+        // The system may have stopped the paused playback service while the app was minimised for a long time.
+        try { startService(Intent(this, PlaybackService::class.java)) } catch (_: Exception) {}
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

@@ -41,4 +41,14 @@ class RecommenderTest {
         val artistACount = diversified.count { it.artist == "artist a" }
         assertTrue(artistACount <= 2)
     }
+
+    @Test
+    fun testJunkAndDuplicateDetection() {
+        assertTrue(Recommender.looksLikeJunk("Movie Official Trailer"))
+        assertTrue(!Recommender.looksLikeJunk("Some Love Song"))
+        assertEquals(
+            Recommender.songKey("Song (Official Video)", "Artist A"),
+            Recommender.songKey("Song", "artist a")
+        )
+    }
 }

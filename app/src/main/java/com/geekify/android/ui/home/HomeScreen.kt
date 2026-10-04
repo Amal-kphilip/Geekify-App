@@ -47,27 +47,39 @@ fun HomeScreen(
     val state by viewModel.uiState.collectAsState()
     val filters = listOf("Everything", "Songs", "Albums", "Playlists", "Artists")
 
-    // ---- Derived content for the personal home feed ----
-    val allItems = state.shelves.flatMap { it.items }.distinctBy { it.title }
+    // Refresh the personal rows whenever Home is shown (cheap: skipped unless your listening changed).
+    LaunchedEffect(Unit) { viewModel.onScreenShown() }
+
+    val showPersonal = state.selectedFilter == "Everything"
+    val showSongRows = showPersonal || state.selectedFilter == "Songs"
+
+    // ---- Quick-access tiles: your mixes first, then what you played last, then the feed as a fallback ----
     val mixTiles = state.mixes.take(2).map { mix ->
         QuickItem(mix.title, mix.tracks.firstOrNull()?.thumbnails?.bestArtworkUrl(480)) {
             if (mix.tracks.isNotEmpty()) onTrackClick(mix.tracks.first(), mix.tracks)
         }
     }
-    val quickFromFeed = allItems.take(5 - mixTiles.size)
-    val quickTiles = mixTiles + quickFromFeed.map { item ->
-        when (item) {
-            is ShelfTrack -> QuickItem(item.value.title, item.value.thumbnails.bestArtworkUrl(480)) {
-                onTrackClick(item.value, listOf(item.value))
-            }
-            is ShelfCard -> QuickItem(item.value.title, item.value.thumbnails.bestArtworkUrl(480)) {
-                onCardClick(item.value)
+    val recentTiles = state.recent.take(5 - mixTiles.size).map { track ->
+        QuickItem(track.title, track.thumbnails.bestArtworkUrl(480)) { onTrackClick(track, state.recent) }
+    }
+    val personalTiles = mixTiles + recentTiles
+    val feedTiles = state.shelves.flatMap { it.items }.distinctBy { it.title }
+        .take((5 - personalTiles.size).coerceAtLeast(0))
+        .map { item ->
+            when (item) {
+                is ShelfTrack -> QuickItem(item.value.title, item.value.thumbnails.bestArtworkUrl(480)) {
+                    onTrackClick(item.value, listOf(item.value))
+                }
+                is ShelfCard -> QuickItem(item.value.title, item.value.thumbnails.bestArtworkUrl(480)) {
+                    onCardClick(item.value)
+                }
             }
         }
-    }
-    val rest = allItems.drop(quickFromFeed.size)
-    val featured: ShelfItem? = rest.firstOrNull { it is ShelfCard && (it.value.type == "album" || it.value.type == "playlist") }
-        ?: rest.firstOrNull()
+    val quickTiles = personalTiles + feedTiles
+
+    // "Picked for you" = the top pick of your first mix (not a random item from the feed).
+    val pickMix = state.mixes.firstOrNull { it.tracks.isNotEmpty() }
+    val pickTrack = pickMix?.tracks?.firstOrNull()
 
     AuroraBackground {
         PullToRefreshBox(
@@ -154,34 +166,42 @@ fun HomeScreen(
                     }
                 }
 
-                // Picked for you
-                if (featured != null) {
+                // First run: explain why there are no personal rows yet
+                if (showPersonal && !state.hasTaste) {
                     item {
+                        Text(
+                            "Play or like a few songs and Geekify will build mixes around your taste.",
+                            color = TextSecondary,
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp)
+                        )
+                    }
+                }
+
+                // Jump back in
+                if (showSongRows && state.recent.isNotEmpty()) {
+                    item(key = "recent") {
+                        ShelfRow(
+                            shelf = Shelf("Recently played", state.recent.map(::ShelfTrack)),
+                            modifier = Modifier.padding(top = 8.dp),
+                            onTrackClick = onTrackClick,
+                            onCardClick = onCardClick
+                        )
+                    }
+                }
+
+                // Picked for you
+                if (showPersonal && pickTrack != null && pickMix != null) {
+                    item(key = "picked") {
                         Column(modifier = Modifier.padding(top = 28.dp)) {
                             SectionTitle("Picked for you")
-                            val (label, title, subtitle, thumb) = when (featured) {
-                                is ShelfTrack -> listOf("Song", featured.value.title, featured.value.artist, featured.value.thumbnails.bestArtworkUrl(720))
-                                is ShelfCard -> listOf(
-                                    featured.value.type.replaceFirstChar { it.uppercase() },
-                                    featured.value.title,
-                                    featured.value.subtitle,
-                                    featured.value.thumbnails.bestArtworkUrl(720)
-                                )
-                            }
-                            val open = {
-                                when (featured) {
-                                    is ShelfTrack -> onTrackClick(featured.value, listOf(featured.value))
-                                    is ShelfCard -> onCardClick(featured.value)
-                                }
-                            }
-                            val actions = if (featured is ShelfTrack) ({ onTrackActions(featured.value) }) else null
                             FeaturedCard(
-                                label = label ?: "",
-                                title = title ?: "",
-                                subtitle = subtitle,
-                                thumb = thumb,
-                                onClick = open,
-                                onAddClick = actions,
+                                label = "Song",
+                                title = pickTrack.title,
+                                subtitle = pickTrack.artist,
+                                thumb = pickTrack.thumbnails.bestArtworkUrl(720),
+                                onClick = { onTrackClick(pickTrack, pickMix.tracks) },
+                                onAddClick = { onTrackActions(pickTrack) },
                                 modifier = Modifier.padding(horizontal = 16.dp)
                             )
                         }
@@ -189,8 +209,8 @@ fun HomeScreen(
                 }
 
                 // Your top mixes
-                if (state.mixes.isNotEmpty()) {
-                    item {
+                if (showPersonal && state.mixes.isNotEmpty()) {
+                    item(key = "mixes") {
                         Column(modifier = Modifier.padding(top = 28.dp)) {
                             SectionTitle("Your top mixes")
                             LazyRow(
@@ -207,6 +227,13 @@ fun HomeScreen(
                                 }
                             }
                         }
+                    }
+                }
+
+                // Because you listened to ...
+                if (showSongRows) {
+                    items(state.becauseShelves, key = { "because:" + it.title }) { shelf ->
+                        ShelfRow(shelf = shelf, onTrackClick = onTrackClick, onCardClick = onCardClick)
                     }
                 }
 
