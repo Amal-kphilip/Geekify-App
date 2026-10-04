@@ -1,57 +1,116 @@
+<div align="center">
+
+<img src="docs/icon/icon.png" alt="Metrolist app icon" width="200" />
+
 # Geekify
+
+<br/>
 
 [![Latest release](https://img.shields.io/github/v/release/Amal-kphilip/Geekify-App?style=for-the-badge&labelColor=0d1117)](https://github.com/Amal-kphilip/Geekify-App/releases)
 [![License](https://img.shields.io/github/license/Amal-kphilip/Geekify-App?style=for-the-badge&labelColor=0d1117)](https://github.com/Amal-kphilip/Geekify-App/blob/main/LICENSE)
 [![Download APK](https://img.shields.io/badge/Download-APK-0d1117?style=for-the-badge&logo=android&logoColor=white)](https://github.com/Amal-kphilip/Geekify-App/releases/latest/download/Geekify-latest.apk)
 
-<p align="center">
-<a href="#download-now">Download</a> ·
-  <a href="#features">Features</a> ·
-  <a href="#tech-stack">Tech stack</a> ·
-  <a href="#open-issues">Open issues</a> ·
-  <a href="#releases">Releases</a> ·
-  <a href="#license-and-terms">License and terms</a>
-</p>
+<br/>
 
+[**Download**](#download-now) · [**Features**](#features) · [**Tech Stack**](#tech-stack) · [**Local Setup**](#run-locally) · [**Roadmap**](#roadmap)
 
+</div>
 
-**Geekify** is a native Android music player built with Kotlin and Jetpack Compose. Discover music, search songs, build a personal library, and keep listening with background playback and notification controls.
+> [!NOTE]
+> **Geekify** is an independent personal and educational project. It is not affiliated with, authorized, or endorsed by YouTube, YouTube Music, Spotify, Google LLC, or any of their respective owners.
 
-> Geekify is an independent personal and educational project. It is not affiliated with YouTube, YouTube Music, Spotify, or their respective owners.
+---
 
+<div align="center">
 
-## Screenshots
+<h1><a id="screenshots"></a>Screenshots</h1>
 
-<p align="center">
-  <img src="docs/screenshots/home.jpg" alt="Geekify home screen" width="30%" />
-  <img src="docs/screenshots/now-playing.jpg" alt="Geekify search screen" width="30%" />
-  <img src="docs/screenshots/search.jpg" alt="Geekify library screen" width="30%" />
-  <img src="docs/screenshots/library.jpg" alt="Geekify now playing screen" width="30%" />
-</p>
+<img src="docs/screenshots/home.jpg" alt="Geekify home screen" width="22%" />
+<img src="docs/screenshots/now-playing.jpg" alt="Geekify now playing screen" width="22%" />
+<img src="docs/screenshots/search.jpg" alt="Geekify search screen" width="22%" />
+<img src="docs/screenshots/library.jpg" alt="Geekify library screen" width="22%" />
 
-## Features
+</div>
 
-- Search songs, albums, artists, and playlists.
-- Browse genre and language collections, including Malayalam, Tamil, Hindi, Telugu, and Punjabi music.
-- Background playback with a MediaSession notification and lock-screen controls.
-- Persistent queue, shuffle, repeat, seeking, and a full now-playing screen.
-- Liked songs, custom playlists, and recents stored locally in Room.
-- Add any searchable track to Liked Songs or a playlist.
-- Personal mixes based on recent plays, likes, artists, and detected language preference.
-- Optional Firebase account sync with email/password or Google sign-in.
-- In-app extractor health checks to help diagnose playback issues.
+---
 
-## Tech stack
+<div align="center">
+
+<h1><a id="features"></a>Features</h1>
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+
+#### Playback & Audio
+- Background playback with MediaSession controls
+- Persistent queue, shuffle, repeat, and seeking controls
+- Full-screen Now Playing view
+- In-app extractor health checks for stream diagnostics
+
+</td>
+    <td width="50%" valign="top">
+
+#### Search & Discovery
+- Search songs, albums, artists, and playlists
+- Genre and language collections (Malayalam, Tamil, Hindi, Telugu, Punjabi)
+- Personal mixes based on history, likes, and language preferences
+
+</td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+
+#### Library & Playlists
+- Liked songs and custom local playlists
+- Local data persistence with Room database
+- Track management: add any searchable track to Liked or playlists
+
+</td>
+    <td width="50%" valign="top">
+
+#### Accounts & Sync
+- Optional Firebase account sync (Email/Password or Google Sign-In)
+- Cloud Firestore sync across devices
+- Offline-first Guest Mode (no account required)
+
+</td>
+  </tr>
+</table>
+
+</div>
+
+---
+
+<div align="center">
+
+<h1><a id="tech-stack"></a>Tech Stack</h1>
 
 | Area | Technology |
-| --- | --- |
-| Language and UI | Kotlin, Jetpack Compose, Material 3 |
-| Playback | Media3, ExoPlayer, MediaSessionService |
-| Music data | YouTube Music InnerTube, OkHttp, Kotlin Serialization |
-| Storage | Room, DataStore |
-| Images | Coil |
-| Accounts and sync | Firebase Authentication, Cloud Firestore, Credential Manager |
-| Build and CI | Gradle, GitHub Actions |
+| :--- | :--- |
+| **Language & UI** | Kotlin, Jetpack Compose, Material 3 |
+| **Playback** | Media3, ExoPlayer, MediaSessionService |
+| **Music Data** | YouTube Music InnerTube, OkHttp, Kotlin Serialization |
+| **Storage** | Room, DataStore |
+| **Images** | Coil |
+| **Accounts & Sync** | Firebase Authentication, Cloud Firestore, Credential Manager |
+| **Build & CI** | Gradle, GitHub Actions |
+
+</div>
+
+---
+
+<div align="center">
+
+<h1><a id="download-now"></a>Download Now</h1>
+
+<h2>Stable Release</h2>
+
+[![Download APK](https://img.shields.io/badge/Download_Latest_APK-0d1117?style=for-the-badge&logo=android&logoColor=white)](https://github.com/Amal-kphilip/Geekify-App/releases/latest/download/Geekify-latest.apk)
+
+</div>
+
+---
 
 ## Run locally
 
@@ -63,52 +122,47 @@
 
 ### Steps
 
-1. Clone the repository.
+1. **Clone the repository**
 
    ```bash
    git clone https://github.com/Amal-kphilip/Geekify-App.git
    cd Geekify-App
    ```
 
-2. Open the project in Android Studio and let Gradle sync.
+2. **Open & Sync**
 
-3. Build a debug APK.
+   Open the project in Android Studio and let Gradle complete syncing.
+
+3. **Build Debug APK**
 
    ```bash
    ./gradlew :app:assembleDebug
    ```
 
-   The APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
+   The generated APK will be at `app/build/outputs/apk/debug/app-debug.apk`.
 
-4. Optional: configure Firebase for account sync.
+4. **Optional: Firebase Setup**
 
-   - Create or open a Firebase project.
-   - Add Android app ID `com.geekify.android` and download `google-services.json` into `app/`.
-   - Enable Email/Password and Google providers in Firebase Authentication.
-   - Create Firestore and deploy rules that restrict each `users/{uid}` document to its owner.
-   - Register debug and release SHA-1 fingerprints for Google sign-in.
+   - Create/open a Firebase project.
+   - Register Android app ID `com.geekify.android` and place `google-services.json` in `app/`.
+   - Enable Email/Password and Google sign-in in Firebase Authentication.
+   - Create Firestore rules restricting `users/{uid}` documents to their owners.
+   - Register debug and release SHA-1 fingerprints.
 
-Guest mode works without Firebase; likes and playlists still stay on the device.
+> Guest mode runs locally without Firebase setup.
+
+---
 
 ## Tests
+
+Run the testing and compilation suites with:
 
 ```bash
 ./gradlew testDebugUnitTest
 ./gradlew :app:compileDebugKotlin
 ```
 
-Before opening a playback-related pull request, test play/pause, next/previous, screen-off playback, notification controls, a slow network, and app restart on a real device.
-
-## Contributing
-
-Contributions are welcome—bug fixes, accessibility improvements, test coverage, documentation, and UI polish are all useful.
-
-1. Open an issue for substantial changes so the direction can be agreed first.
-2. Fork the repository and create a focused branch.
-3. Make the change, add or update tests where practical, and run the checks above.
-4. Open a pull request with a concise description, screenshots for UI changes, and reproduction and verification steps.
-
-Please do not commit credentials, keystores, `google-services.json`, generated build files, or downloaded media.
+---
 
 ## Roadmap
 
@@ -120,37 +174,31 @@ Please do not commit credentials, keystores, `google-services.json`, generated b
 - [ ] Improve language-aware recommendations when metadata uses Latin script.
 - [ ] Add contributor issue templates and `good first issue` tasks.
 
-## Open issues
+---
 
-Browse or create work items in the [issue tracker](https://github.com/Amal-kphilip/Geekify-App/issues). Useful reports include the device/Android version, app version, exact reproduction steps, expected behavior, actual behavior, and relevant screenshots or logs.
+## Contributing
 
-## Releases
+Contributions are welcome—bug fixes, accessibility improvements, test coverage, documentation, and UI polish are all appreciated!
 
-Tagged releases are built by GitHub Actions and publish a signed APK to [GitHub Releases](https://github.com/Amal-kphilip/Geekify-App/releases). Release signing values belong in GitHub Actions secrets; never commit them.
+1. Open an issue for substantial changes to align on direction first.
+2. Fork the repository and create a dedicated topic branch.
+3. Apply changes, update tests, and run local build checks.
+4. Open a pull request with a clear description and screenshots (for UI updates).
 
-<h1><a id="download-now"></a>Download Now</h1>
+*Please do not commit credentials, keystores, `google-services.json`, or generated build files.*
 
-<h2>Stable Release</h2>
+---
 
-<table>
-  <tr>
-    <th align="center">GitHub</th>
-  </tr>
-  <tr>
-    <td align="center">
-      <a href="https://github.com/Amal-kphilip/Geekify-App/releases/latest/download/Geekify-latest.apk">
-        <img src="docs/badges/github-stable.svg"
-             alt="Get the stable Geekify release on GitHub"
-             height="100">
-      </a>
-    </td>
-  </tr>
-</table>
+## Project Notes & Disclaimer
 
-## Project notes
+Audio URLs are resolved directly on the device and may change as upstream services evolve. If playback fails, run Geekify's **Health screen** first and include the message in a GitHub issue.
 
-Audio URLs are resolved directly on the device and can change as upstream services evolve. If playback fails, use Geekify's Health screen first, include its message in a GitHub issue, and avoid sharing account credentials or private tokens.
+This project is **not affiliated with, authorized, or endorsed by** YouTube, YouTube Music, Spotify, or Google LLC. All product names, logos, and brands belong to their respective owners.
 
-## License and terms
+---
 
-Geekify is licensed under the [GNU General Public License v3.0](LICENSE). Directly accessing music streams may be subject to the upstream service's terms. Use the app responsibly and ensure that any distribution complies with applicable policies, copyright laws, and rights.
+## License
+
+Geekify is distributed under the [GNU General Public License v3.0](LICENSE).
+
+**Made with ❤️ by [Amal K Philip](https://github.com/Amal-kphilip)**
