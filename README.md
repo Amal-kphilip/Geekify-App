@@ -106,7 +106,9 @@
 
 <h2>Stable Release</h2>
 
-[![Download APK](https://img.shields.io/badge/Download_Latest_APK-0d1117?style=for-the-badge&logo=android&logoColor=white)](https://github.com/Amal-kphilip/Geekify-App/releases/latest/download/Geekify-latest.apk)
+<a href="https://github.com/Amal-kphilip/Geekify-App/releases/latest/download/Geekify-latest.apk">
+  <img src="docs/badges/github-stable.svg" alt="Download latest stable APK" width="260" />
+</a>
 
 </div>
 
