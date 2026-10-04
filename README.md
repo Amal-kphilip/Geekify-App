@@ -1,27 +1,15 @@
 # Geekify
 
-<p align="center">
-  <a href="https://github.com/Amal-kphilip/Geekify-App/releases/latest">
-    <img src="https://img.shields.io/github/v/release/Amal-kphilip/Geekify-App?style=for-the-badge" alt="Latest release" height="40">
-  </a>
-  <a href="https://github.com/Amal-kphilip/Geekify-App/releases/latest/download/Geekify-latest.apk">
-    <img src="https://img.shields.io/badge/download-latest%20APK-7C6CF2?logo=android&amp;logoColor=white&amp;style=for-the-badge" alt="Download latest APK" height="40">
-  </a>
-  <a href="https://github.com/Amal-kphilip/Geekify-App/blob/master/LICENSE">
-    <img src="https://img.shields.io/github/license/Amal-kphilip/Geekify-App?style=for-the-badge" alt="GPL-3.0 License" height="40">
-  </a>
-</p>
+[![Latest release](https://img.shields.io/github/v/release/Amal-kphilip/Geekify-App?style=for-the-badge&labelColor=0d1117)](https://github.com/Amal-kphilip/Geekify-App/releases)
+[![License](https://img.shields.io/github/license/Amal-kphilip/Geekify-App?style=for-the-badge&labelColor=0d1117)](https://github.com/Amal-kphilip/Geekify-App/blob/main/LICENSE)
+[![Download APK](https://img.shields.io/badge/Download-APK-0d1117?style=for-the-badge&logo=android&logoColor=white)](https://github.com/Amal-kphilip/Geekify-App/releases/latest/download/Geekify-latest.apk)
 
 <p align="center">
+<a href="#download-now">Download</a> ·
   <a href="#features">Features</a> ·
   <a href="#tech-stack">Tech stack</a> ·
-  <a href="#run-locally">Run locally</a> ·
-  <a href="#tests">Tests</a> ·
-  <a href="#contributing">Contributing</a> ·
-  <a href="#roadmap">Roadmap</a> ·
   <a href="#open-issues">Open issues</a> ·
   <a href="#releases">Releases</a> ·
-  <a href="#project-notes">Project notes</a> ·
   <a href="#license-and-terms">License and terms</a>
 </p>
 
