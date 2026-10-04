@@ -1,6 +1,6 @@
 # Geekify
 
-<a href="https://github.com/Amal-kphilip/Geekify-App/releases/latest"><img src="https://img.shields.io/github/v/release/Amal-kphilip/Geekify-App?display_name=tag&amp;sort=semver&amp;style=for-the-badge" alt="Latest release" height="40"></a>
+<a href="https://github.com/Amal-kphilip/Geekify-App/releases/latest"><img src="https://img.shields.io/github/v/release/Amal-kphilip/Geekify-App?style=for-the-badge" alt="Latest release" height="40"></a>
 <a href="https://github.com/Amal-kphilip/Geekify-App/releases/latest/download/Geekify-latest.apk"><img src="https://img.shields.io/badge/download-latest%20APK-7C6CF2?logo=android&amp;logoColor=white&amp;style=for-the-badge" alt="Download latest APK" height="40"></a>
 
 **Geekify** is a native Android music player built with Kotlin and Jetpack Compose. Discover music, search songs, build a personal library, and keep listening with background playback and notification controls.
