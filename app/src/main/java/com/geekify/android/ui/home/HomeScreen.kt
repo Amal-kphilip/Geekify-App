@@ -214,13 +214,57 @@ fun HomeScreen(
 
                 if (state.error != null && state.shelves.isEmpty()) {
                     item {
-                        Box(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(32.dp),
-                            contentAlignment = Alignment.Center
+                                .padding(horizontal = 20.dp, vertical = 24.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                                .background(InkPanel)
+                                .padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Text(text = state.error ?: "Could not load feed", color = ErrorRed, fontSize = 14.sp)
+                            Text("Couldn't load your feed", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                state.error ?: "Check your connection and try again.",
+                                color = TextSecondary,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(top = 6.dp, bottom = 16.dp)
+                            )
+                            RetryPill(onClick = { viewModel.loadHome(true) })
+                        }
+                    }
+                }
+
+                // Cached shelves are showing: say so, and offer to refresh.
+                if (state.fromCache || (state.error != null && state.shelves.isNotEmpty())) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 20.dp, end = 20.dp, top = 16.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(InkElevated)
+                                .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                if (state.error != null) "Offline. Showing saved content." else "Showing saved content…",
+                                color = TextSecondary,
+                                fontSize = 13.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (state.error != null) {
+                                Text(
+                                    "Retry",
+                                    color = Lime,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .bouncyClickable { viewModel.loadHome(true) }
+                                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -433,6 +477,20 @@ private fun DiscoverCard(
                 CardAction(Icons.Default.MoreHoriz, "More", onMore)
             }
         }
+    }
+}
+
+@Composable
+private fun RetryPill(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(Lime)
+            .bouncyClickable(pressedScale = 0.96f, onClick = onClick)
+            .padding(horizontal = 28.dp, vertical = 12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text("Try again", color = OnAccent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 

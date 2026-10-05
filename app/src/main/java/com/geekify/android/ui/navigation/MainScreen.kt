@@ -54,7 +54,11 @@ import com.geekify.android.data.model.Card
 import com.geekify.android.data.model.CollectionKind
 import com.geekify.android.data.model.Track
 import com.geekify.android.ui.account.AccountSheet
+import com.geekify.android.audio.AudioSettingsScreen
+import com.geekify.android.listentogether.ListenTogetherScreen
 import com.geekify.android.ui.account.AccountViewModel
+import com.geekify.android.ui.account.AddAccountScreen
+import com.geekify.android.ui.account.EditProfileScreen
 import com.geekify.android.ui.components.CreatePlaylistDialog
 import com.geekify.android.ui.components.LocalBottomInset
 import com.geekify.android.ui.components.LocalNowPlayingId
@@ -134,9 +138,8 @@ fun MainScreen(
         availableUpdate = updateManager.findAvailableUpdate()
     }
 
-    // System back closes the queue first. The expanded player owns its own back handler
-    // so a predictive-back gesture never falls through to the destination underneath it.
-    BackHandler(enabled = showQueue) { showQueue = false }
+    // Back handling lives inside each overlay (ExpandedPlayerScreen, QueueScreen) so the topmost
+    // overlay always wins over the NavHost: Player -> Queue -> Back returns to the Player.
 
     val onTrackClick: (Track, List<Track>) -> Unit = { track, list ->
         playerViewModel.play(track, list)
@@ -330,7 +333,26 @@ fun MainScreen(
                     }
 
                     composable(Screen.Settings.route) {
-                        SettingsScreen(onBack = { navController.popBackStack() })
+                        SettingsScreen(
+                            onBack = { navController.popBackStack() },
+                            onAudioClick = { navController.navigate(Screen.AudioSettings.route) }
+                        )
+                    }
+
+                    composable(Screen.ListenTogether.route) {
+                        ListenTogetherScreen(onBack = { navController.popBackStack() })
+                    }
+
+                    composable(Screen.AudioSettings.route) {
+                        AudioSettingsScreen(onBack = { navController.popBackStack() })
+                    }
+
+                    composable(Screen.EditProfile.route) {
+                        EditProfileScreen(viewModel = accountViewModel, onBack = { navController.popBackStack() })
+                    }
+
+                    composable(Screen.AddAccount.route) {
+                        AddAccountScreen(viewModel = accountViewModel, onBack = { navController.popBackStack() })
                     }
                 }
 
@@ -368,8 +390,7 @@ fun MainScreen(
                     onHome = { navigateToTab(Screen.Home.route) },
                     onSearch = { navigateToTab(Screen.Search.route) },
                     onLibrary = { navigateToTab(Screen.Library.route) },
-                    onCreate = { showCreatePlaylist = true },
-                    onSettings = { navigateToTab(Screen.Settings.route) }
+                    onCreate = { showCreatePlaylist = true }
                 )
             }
         }
@@ -402,7 +423,10 @@ fun MainScreen(
         ) {
             QueueScreen(
                 viewModel = playerViewModel,
-                onBack = { showQueue = false }
+                onBack = {
+                    showQueue = false
+                    showExpandedPlayer = true
+                }
             )
         }
 
@@ -437,6 +461,9 @@ fun MainScreen(
                 onDismiss = { showAccountSheet = false },
                 onRecentsClick = { navController.navigate(Screen.Recents.route) },
                 onSettingsClick = { navController.navigate(Screen.Settings.route) },
+                onEditProfileClick = { navController.navigate(Screen.EditProfile.route) },
+                onAddAccountClick = { navController.navigate(Screen.AddAccount.route) },
+                onListenTogetherClick = { navController.navigate(Screen.ListenTogether.route) },
                 onHealthClick = { navController.navigate(Screen.Health.route) }
             )
         }
@@ -483,15 +510,14 @@ fun MainScreen(
     }
 }
 
-/** Frosted capsule with five icons; the selected one sits in a lime circle. */
+/** Frosted capsule with the primary destinations; the selected one sits in a lime circle. Settings lives in the profile menu. */
 @Composable
 private fun FloatingNavBar(
     currentRoute: String?,
     onHome: () -> Unit,
     onSearch: () -> Unit,
     onLibrary: () -> Unit,
-    onCreate: () -> Unit,
-    onSettings: () -> Unit
+    onCreate: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -529,13 +555,6 @@ private fun FloatingNavBar(
             icon = Icons.Outlined.Add,
             label = "Create playlist",
             onClick = onCreate
-        )
-        NavPillItem(
-            selected = currentRoute == Screen.Settings.route,
-            selectedIcon = Icons.Filled.Settings,
-            icon = Icons.Outlined.Settings,
-            label = "Settings",
-            onClick = onSettings
         )
     }
 }

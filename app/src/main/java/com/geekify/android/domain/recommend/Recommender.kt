@@ -1,5 +1,7 @@
 package com.geekify.android.domain.recommend
 
+import kotlin.random.Random
+
 /**
  * Pure Kotlin port of backend/app/services/recommender.py.
  * No Android imports. Testable with plain JUnit.
@@ -15,8 +17,19 @@ object Recommender {
     const val MAX_SEEDS_PER_ARTIST = 2
     const val MAX_TRACK_SECONDS = 15 * 60
     private const val LANGUAGE_MATCH_BOOST = 1.35
+    /** Weight of a song played often: scaled by ln(1 + plays), so 5 plays outweighs a single like. */
+    const val FREQUENT_WEIGHT = 1.1
+    const val PLAYLIST_WEIGHT = 0.9
+    const val PLAYLIST_DECAY = 0.97
+    const val SAVED_ARTIST_WEIGHT = 0.8
+    /** Candidates that were already offered recently are demoted by this factor, so mixes keep changing. */
+    const val SHOWN_PENALTY = 0.35
+    private const val SCORE_JITTER = 0.15
 
     data class Signal(val videoId: String, val artist: String = "", val title: String = "")
+
+    /** A song with how many times it has been listened to. */
+    data class PlayedSignal(val videoId: String, val artist: String = "", val title: String = "", val plays: Int = 1)
 
     data class Candidate(
         val videoId: String,
@@ -75,10 +88,36 @@ object Recommender {
         val affinity: Map<String, Double>
     )
 
-    fun seedWeights(liked: List<Signal>, recent: List<Signal>): WeightResult {
+    /**
+     * Combines every taste signal into one weight per song and one affinity per artist:
+     * likes, recent plays, frequently played songs, songs placed in playlists, and artists whose
+     * albums / playlists were saved (artist affinity only, there are no songs to seed from).
+     */
+    fun seedWeights(
+        liked: List<Signal>,
+        recent: List<Signal>,
+        frequent: List<PlayedSignal> = emptyList(),
+        playlist: List<Signal> = emptyList(),
+        savedArtists: List<String> = emptyList()
+    ): WeightResult {
         val weights = mutableMapOf<String, Double>()
         val meta = mutableMapOf<String, Signal>()
         val affinity = mutableMapOf<String, Double>()
+        frequent.forEach { s ->
+            val w = FREQUENT_WEIGHT * Math.log(1.0 + s.plays.coerceAtLeast(1))
+            weights[s.videoId] = (weights[s.videoId] ?: 0.0) + w
+            meta.putIfAbsent(s.videoId, Signal(s.videoId, s.artist, s.title))
+            val ak = akey(s.artist); if (ak.isNotEmpty()) affinity[ak] = (affinity[ak] ?: 0.0) + w
+        }
+        playlist.forEachIndexed { i, s ->
+            val w = PLAYLIST_WEIGHT * Math.pow(PLAYLIST_DECAY, i.toDouble())
+            weights[s.videoId] = (weights[s.videoId] ?: 0.0) + w
+            meta.putIfAbsent(s.videoId, s)
+            val ak = akey(s.artist); if (ak.isNotEmpty()) affinity[ak] = (affinity[ak] ?: 0.0) + w
+        }
+        savedArtists.forEach { name ->
+            val ak = akey(name); if (ak.isNotEmpty()) affinity[ak] = (affinity[ak] ?: 0.0) + SAVED_ARTIST_WEIGHT
+        }
         liked.forEachIndexed { i, s ->
             val w = LIKE_WEIGHT * Math.pow(LIKE_DECAY, i.toDouble())
             weights[s.videoId] = (weights[s.videoId] ?: 0.0) + w
@@ -105,6 +144,31 @@ object Recommender {
             if (seeds.size >= limit) break
         }
         return seeds
+    }
+
+    /**
+     * Like [pickSeeds], but always keeps the two strongest seeds and fills the rest by weighted random
+     * choice from the next-best ones. Two refreshes therefore ask YouTube Music for different "radios"
+     * and the mixes stay fresh, while still being driven by what the person actually plays.
+     */
+    fun pickSeedsVaried(
+        weights: Map<String, Double>,
+        meta: Map<String, Signal>,
+        limit: Int = MAX_SEEDS,
+        random: Random = Random.Default
+    ): List<String> {
+        val ranked = pickSeeds(weights, meta, limit * 3)
+        if (ranked.size <= limit) return ranked
+        val picked = ranked.take(2).toMutableList()
+        val pool = ranked.drop(2).toMutableList()
+        while (picked.size < limit && pool.isNotEmpty()) {
+            val total = pool.sumOf { weights[it] ?: 0.0 }
+            var r = random.nextDouble() * total
+            var idx = pool.indexOfFirst { r -= (weights[it] ?: 0.0); r <= 0.0 }
+            if (idx < 0) idx = pool.lastIndex
+            picked.add(pool.removeAt(idx))
+        }
+        return picked
     }
 
     fun diversify(cands: List<Candidate>, n: Int, maxPerArtist: Int = 3, decay: Double = 0.65): List<Candidate> {
@@ -145,14 +209,27 @@ object Recommender {
         duration: (T) -> String?,
         durationSeconds: (T) -> Int?,
         explicit: (T) -> Boolean,
-        type: (T) -> String
+        type: (T) -> String,
+        frequent: List<PlayedSignal> = emptyList(),
+        playlist: List<Signal> = emptyList(),
+        savedArtists: List<String> = emptyList(),
+        /** Songs the person already has (liked, played, in playlists): never recommended back. */
+        exclude: Set<String> = emptySet(),
+        /** Songs offered in recent refreshes: demoted so the same ones don't keep coming back. */
+        shown: Set<String> = emptySet(),
+        /** The seeds that [related] was fetched for. When null the strongest seeds are used. */
+        seeds: List<String>? = null,
+        random: Random = Random.Default
     ): Pair<List<MixResult>, List<String>> {
-        val (weights, meta, affinity) = seedWeights(liked, recent)
-        val preferredLanguage = dominantLanguage(liked, recent)
+        val (weights, meta, affinity) = seedWeights(liked, recent, frequent, playlist, savedArtists)
+        val preferredLanguage = dominantLanguage(
+            liked + playlist,
+            recent + frequent.map { Signal(it.videoId, it.artist, it.title) }
+        )
         if (weights.isEmpty()) return Pair(emptyList(), emptyList())
-        val seeds = pickSeeds(weights, meta)
-        val topW = seeds.maxOfOrNull { weights[it] ?: 0.0 } ?: 1.0
-        val known = weights.keys.toSet()
+        val seeds = seeds ?: pickSeeds(weights, meta)
+        val topW = seeds.maxOfOrNull { weights[it] ?: 0.0 }?.takeIf { it > 0.0 } ?: 1.0
+        val known = weights.keys + exclude
         val knownArtists = affinity.keys.toSet()
         val totalAff = affinity.values.sum().let { if (it == 0.0) 1.0 else it }
 
@@ -180,6 +257,9 @@ object Recommender {
             if (preferredLanguage != null && languageOf(c.title, c.artistDisplay) == preferredLanguage) {
                 c.score *= LANGUAGE_MATCH_BOOST
             }
+            if (c.videoId in shown) c.score *= SHOWN_PENALTY
+            // A little noise so near-equal songs don't always appear in the same order.
+            c.score *= 1 + random.nextDouble() * SCORE_JITTER
         }
 
         val everything = cands.values.toList()

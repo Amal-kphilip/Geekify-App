@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -16,16 +17,21 @@ import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.DefaultMediaNotificationProvider
 import com.geekify.android.MainActivity
+import com.geekify.android.audio.AudioEffectsController
 import com.geekify.android.R
 import com.geekify.android.data.model.Track
 import com.geekify.android.ui.components.bestArtworkUrl
@@ -54,11 +60,13 @@ class PlaybackService : MediaSessionService() {
     }
 
     @Inject lateinit var queueManager: QueueManager
-    @Inject lateinit var streamResolver: StreamResolver
+    @Inject lateinit var streamResolver: InnerTubeXPlayer
+    @Inject lateinit var audioEffects: AudioEffectsController
     @Inject lateinit var innerTube: InnerTubeClient
     @Inject lateinit var musicSource: MusicSource
     @Inject lateinit var historyRepository: com.geekify.android.data.local.HistoryRepository
     @Inject lateinit var http: OkHttpClient
+    @Inject lateinit var syncRepository: com.geekify.android.data.sync.SyncRepository
 
     private lateinit var player: ExoPlayer
     private lateinit var mediaSession: MediaSession
@@ -69,6 +77,9 @@ class PlaybackService : MediaSessionService() {
     private var lastPlayingVideoId: String? = null
     private var resolveRetries = 0
     private var foregroundShownFor: String? = null
+    private var listenedMs = 0L
+    private var playCounted = false
+    private var restoredPositionUsed = false
 
     override fun onCreate() {
         super.onCreate()
@@ -90,7 +101,20 @@ class PlaybackService : MediaSessionService() {
             // googlevideo checks that the URL is fetched with the same User-Agent as the client that issued it.
             .setUserAgent(InnerTubeClient.PLAYER_USER_AGENT)
 
-        player = ExoPlayer.Builder(this)
+        // The audio sink runs our equalizer and normaliser before ExoPlayer's own tempo / silence processors.
+        val renderersFactory = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean
+            ): AudioSink? = DefaultAudioSink.Builder(context)
+                .setEnableFloatOutput(enableFloatOutput)
+                .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                .setAudioProcessors(audioEffects.processors)
+                .build()
+        }
+
+        player = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .setLoadControl(
                 DefaultLoadControl.Builder()
@@ -122,6 +146,15 @@ class PlaybackService : MediaSessionService() {
             .setSessionActivity(pendingIntent)
             .build()
 
+        // Tempo, pitch and silence skipping change on the running player (no re-initialisation).
+        audioEffects.settings.onEach { s ->
+            val current = player.playbackParameters
+            if (current.speed != s.speed || current.pitch != s.pitch) {
+                player.playbackParameters = PlaybackParameters(s.speed, s.pitch)
+            }
+            if (player.skipSilenceEnabled != s.skipSilence) player.skipSilenceEnabled = s.skipSilence
+        }.launchIn(scope)
+
         player.addListener(object : Player.Listener {
             // The queue's `isPlaying` is the user's *intent* to play, so it follows playWhenReady.
             // It must not follow ExoPlayer's momentary isPlaying: when a song ends, STATE_ENDED
@@ -130,6 +163,8 @@ class PlaybackService : MediaSessionService() {
             // off, so the next song was loaded paused and auto-advance never started playback.
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 queueManager.setPlaying(playWhenReady)
+                // Remember where a pause happened so reopening the app can offer to continue from here.
+                if (!playWhenReady) queueManager.persistProgress()
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -138,7 +173,13 @@ class PlaybackService : MediaSessionService() {
                     val current = queueManager.state.value.current ?: return
                     if (current.videoId != lastPlayingVideoId) {
                         lastPlayingVideoId = current.videoId
-                        scope.launch { historyRepository.add(current) }
+                        listenedMs = 0L
+                        playCounted = false
+                        scope.launch {
+                            historyRepository.add(current)
+                            // Plays are written locally first, so push them (debounced) to the cloud copy too.
+                            syncRepository.schedulePush()
+                        }
                         startPrefetch(current.videoId)
                         startAutoplay(current)
                     }
@@ -148,7 +189,11 @@ class PlaybackService : MediaSessionService() {
                 when (playbackState) {
                     Player.STATE_BUFFERING -> queueManager.setBuffering(true)
                     Player.STATE_READY -> queueManager.setBuffering(false)
-                    Player.STATE_ENDED -> queueManager.next()
+                    Player.STATE_ENDED -> {
+                        // Forget the finished play so a replay (repeat, or play again) is recorded again.
+                        lastPlayingVideoId = null
+                        queueManager.next()
+                    }
                     else -> Unit
                 }
             }
@@ -160,11 +205,24 @@ class PlaybackService : MediaSessionService() {
 
         // Periodically update progress in QueueManager for UI seekers
         progressJob = scope.launch {
+            var tick = 0
             while (isActive) {
                 if (player.isPlaying) {
                     val pos = player.currentPosition
                     val dur = player.duration.coerceAtLeast(0L)
                     queueManager.setProgress(pos, dur)
+
+                    // Count a play only after a real listen (30 s, or half of a short song), not on a skip.
+                    if (!playCounted) {
+                        listenedMs += 500
+                        val threshold = if (dur > 0L) minOf(30_000L, dur / 2) else 30_000L
+                        val current = queueManager.state.value.current
+                        if (current != null && current.videoId == lastPlayingVideoId && listenedMs >= threshold) {
+                            playCounted = true
+                            scope.launch { historyRepository.countPlay(current) }
+                        }
+                    }
+                    if (++tick % 10 == 0) queueManager.persistProgress()
                 }
                 delay(500)
             }
@@ -291,10 +349,20 @@ class PlaybackService : MediaSessionService() {
         loadJob?.cancel()
         loadingId = track.videoId
         resolveRetries = 0
+        lastPlayingVideoId = null
+        // Only the very first load after the app starts is a restored queue; it resumes at the saved position.
+        val pendingStart = queueManager.takePendingStart()
+        val startMs = when {
+            pendingStart > 0L -> pendingStart
+            !restoredPositionUsed -> queueManager.state.value.progressMs.coerceAtLeast(0L)
+            else -> 0L
+        }
+        restoredPositionUsed = true
         if (autoPlay) queueManager.setBuffering(true)
         loadJob = scope.launch {
             try {
                 val stream = streamResolver.resolve(track.videoId)
+                audioEffects.setTrackLoudness(stream.loudnessDb)
                 val item = MediaItem.Builder()
                     .setMediaId(track.videoId)
                     .setUri(stream.url)
@@ -308,16 +376,18 @@ class PlaybackService : MediaSessionService() {
                             .build()
                     )
                     .build()
-                player.setMediaItem(item)
+                player.setMediaItem(item, startMs)
                 // The user may have pressed play/pause while the stream was being resolved.
                 player.playWhenReady = queueManager.state.value.isPlaying
                 player.prepare()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // Show the reason instead of failing silently, then move on after a moment.
-                queueManager.setError(e.message ?: "This track could not be played.")
-                skipAfterError(track)
+                // Show the reason instead of failing silently. Only move on to the next song when the
+                // person was actually listening: a restored, paused queue must never start by itself.
+                val wasPlaying = queueManager.state.value.isPlaying
+                queueManager.setError(PlaybackErrors.message(e))
+                if (wasPlaying) skipAfterError(track)
             } finally {
                 if (loadingId == track.videoId) loadingId = null
             }
@@ -335,6 +405,7 @@ class PlaybackService : MediaSessionService() {
 
     private fun handlePlaybackError(error: PlaybackException) {
         val track = queueManager.state.value.current ?: return
+        val wasPlaying = queueManager.state.value.isPlaying
         val urlProblem = error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
             error.errorCode == PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE ||
             error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
@@ -350,6 +421,7 @@ class PlaybackService : MediaSessionService() {
                 delay(400)
                 try {
                     val stream = streamResolver.resolve(track.videoId, forceRefresh = true)
+                    audioEffects.setTrackLoudness(stream.loudnessDb)
                     val item = MediaItem.Builder()
                         .setMediaId(track.videoId)
                         .setUri(stream.url)
@@ -369,14 +441,14 @@ class PlaybackService : MediaSessionService() {
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    queueManager.setError(e.message ?: "This track could not be played.")
-                    skipAfterError(track)
+                    queueManager.setError(PlaybackErrors.message(e))
+                    if (wasPlaying) skipAfterError(track)
                 }
             }
         } else {
             resolveRetries = 0
-            queueManager.setError("Playback failed (${error.errorCodeName}). Check your connection and try again.")
-            skipAfterError(track)
+            queueManager.setError(PlaybackErrors.message(error))
+            if (wasPlaying) skipAfterError(track)
         }
     }
 
@@ -394,8 +466,15 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    /**
+     * Endless "Up next": whenever fewer than two songs remain after the current one, ask YouTube Music's
+     * `next` (radio) endpoint for related songs and append them. Skipped for repeat and shuffle, where the
+     * queue already loops by itself.
+     */
     private fun startAutoplay(track: Track) {
-        if (queueManager.state.value.queue.size > 1) return
+        val s = queueManager.state.value
+        val upcoming = s.queue.size - s.index - 1
+        if (upcoming >= 2 || s.repeat != RepeatMode.OFF || s.shuffle) return
         autoplayJob?.cancel()
         autoplayJob = scope.launch {
             val result = musicSource.related(track.videoId)
@@ -408,6 +487,7 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = mediaSession
 
     override fun onDestroy() {
+        queueManager.persistProgress()
         progressJob?.cancel()
         mediaSession.release()
         player.release()

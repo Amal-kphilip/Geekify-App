@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.geekify.android.data.model.Track
 import kotlinx.coroutines.CoroutineScope
@@ -65,6 +66,7 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
         private val KEY_SHUFFLE = stringPreferencesKey("player_shuffle")
         private val KEY_REPEAT = stringPreferencesKey("player_repeat")
         private val KEY_VOLUME = floatPreferencesKey("player_volume")
+        private val KEY_PROGRESS = longPreferencesKey("player_progress_ms")
     }
 
     init {
@@ -81,7 +83,10 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
                 val shuffle = prefs[KEY_SHUFFLE] == "true"
                 val repeat = prefs[KEY_REPEAT]?.let { runCatching { RepeatMode.valueOf(it) }.getOrNull() } ?: RepeatMode.OFF
                 val volume = prefs[KEY_VOLUME] ?: 0.85f
-                _state.value = QueueState(queue, index.coerceIn(-1, queue.size - 1), false, false, 0L, 0L, shuffle, repeat, volume)
+                val progress = (prefs[KEY_PROGRESS] ?: 0L).coerceAtLeast(0L)
+                // A restored queue is always PAUSED (isPlaying = false): reopening the app never starts
+                // music by itself. The track and the position are kept so Play continues where it stopped.
+                _state.value = QueueState(queue, index.coerceIn(-1, queue.size - 1), false, false, progress, 0L, shuffle, repeat, volume)
             } catch (_: Exception) {}
         }
     }
@@ -97,6 +102,21 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
         if (tracks.isEmpty()) return
         val idx = tracks.indices.random()
         update(_state.value.copy(queue = tracks, index = idx, isPlaying = true, isBuffering = true, progressMs = 0L, shuffle = true, error = null))
+    }
+
+    @Volatile private var pendingStartMs = 0L
+
+    /** Starts [track] from [startMs] (used to join a listening room mid-song). */
+    fun playAt(track: Track, startMs: Long) {
+        pendingStartMs = startMs.coerceAtLeast(0L)
+        play(track, listOf(track))
+    }
+
+    /** Read once by the player when it loads a track: where that track should start (0 = the beginning). */
+    fun takePendingStart(): Long {
+        val v = pendingStartMs
+        pendingStartMs = 0L
+        return v
     }
 
     fun togglePlay() {
@@ -219,9 +239,16 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
         persist(newState)
     }
 
+    /** Saves just the playback position (called every few seconds while playing and on pause). */
+    fun persistProgress() {
+        val progress = _state.value.progressMs
+        scope.launch { dataStore.edit { it[KEY_PROGRESS] = progress } }
+    }
+
     private fun persist(s: QueueState) {
         scope.launch {
             dataStore.edit { prefs ->
+                prefs[KEY_PROGRESS] = s.progressMs
                 prefs[KEY_QUEUE] = json.encodeToString(s.queue)
                 prefs[KEY_INDEX] = s.index
                 prefs[KEY_SHUFFLE] = s.shuffle.toString()

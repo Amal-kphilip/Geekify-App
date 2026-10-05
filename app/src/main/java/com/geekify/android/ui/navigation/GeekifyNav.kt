@@ -17,4 +17,8 @@ sealed class Screen(val route: String) {
     object Health : Screen("health")
     object Recents : Screen("recents")
     object Settings : Screen("settings")
+    object EditProfile : Screen("edit_profile")
+    object AudioSettings : Screen("audio_settings")
+    object ListenTogether : Screen("listen_together")
+    object AddAccount : Screen("add_account")
 }

@@ -39,7 +39,7 @@ fun RecentsScreen(viewModel: RecentsViewModel, onBack: () -> Unit, onPlay: (Trac
             if (tracks.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.History, null, tint = BrandMint, modifier = Modifier.size(40.dp))
+                        Icon(Icons.Default.History, null, tint = Lime, modifier = Modifier.size(40.dp))
                         Spacer(Modifier.height(12.dp))
                         Text("Your listening trail starts here", color = TextSecondary)
                     }

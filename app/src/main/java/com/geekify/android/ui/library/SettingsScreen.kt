@@ -4,11 +4,16 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -16,10 +21,11 @@ import androidx.compose.ui.unit.sp
 import com.geekify.android.BuildConfig
 import com.geekify.android.ui.components.AuroraBackground
 import com.geekify.android.ui.components.CircleIconButton
+import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.theme.*
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, onAudioClick: () -> Unit = {}) {
     AuroraBackground {
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 20.dp)) {
             Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -28,10 +34,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Spacer(Modifier.size(50.dp))
             }
             Spacer(Modifier.height(20.dp))
+            SettingsEntry(Icons.Default.GraphicEq, "Audio & equalizer", "Equalizer, tempo, pitch, normalization", onAudioClick)
+            Spacer(Modifier.height(14.dp))
             Surface(color = InkElevated, shape = RoundedCornerShape(28.dp)) {
                 Column(Modifier.padding(18.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.AutoAwesome, null, tint = BrandMint)
+                        Icon(Icons.Default.AutoAwesome, null, tint = Lime)
                         Spacer(Modifier.width(10.dp))
                         Text("Geekify", color = TextPrimary, fontWeight = FontWeight.Bold)
                     }
@@ -42,5 +50,32 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+/** A tappable Settings row: round icon chip, title, one-line description and a chevron. */
+@Composable
+private fun SettingsEntry(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(28.dp))
+            .background(InkPanel)
+            .bouncyClickable(pressedScale = 0.98f, onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier.size(46.dp).clip(CircleShape).background(InkElevated),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, null, tint = Lime, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+            Text(subtitle, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
+        }
+        Icon(Icons.Default.ChevronRight, null, tint = TextMuted)
     }
 }

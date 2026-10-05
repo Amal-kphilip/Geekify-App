@@ -41,4 +41,55 @@ class RecommenderTest {
         val artistACount = diversified.count { it.artist == "artist a" }
         assertTrue(artistACount <= 2)
     }
+
+    @Test
+    fun frequentlyPlayedSongsOutweighASingleLike() {
+        val res = Recommender.seedWeights(
+            liked = listOf(Recommender.Signal("liked", "Artist A", "Liked")),
+            recent = emptyList(),
+            frequent = listOf(Recommender.PlayedSignal("often", "Artist B", "Often", plays = 8))
+        )
+        assertTrue((res.weights["often"] ?: 0.0) > (res.weights["liked"] ?: 0.0))
+    }
+
+    @Test
+    fun variedSeedsKeepTheStrongestTwoAndStayWithinTheLimit() {
+        val liked = (1..12).map { Recommender.Signal("v$it", "Artist $it", "Song $it") }
+        val res = Recommender.seedWeights(liked, emptyList())
+        repeat(20) { run ->
+            val seeds = Recommender.pickSeedsVaried(res.weights, res.meta, 5, kotlin.random.Random(run))
+            assertEquals(5, seeds.size)
+            assertEquals(seeds.size, seeds.toSet().size)
+            assertTrue("v1" in seeds && "v2" in seeds)
+        }
+    }
+
+    private data class T(val id: String, val artist: String)
+
+    @Test
+    fun recentlyShownSongsAreDemotedAndOwnedSongsNeverReturn() {
+        val related = mapOf("seed" to (1..12).map { T("t$it", "artist $it") })
+        val mixes = Recommender.buildMixes(
+            liked = listOf(Recommender.Signal("seed", "Seed Artist", "Seed")),
+            recent = emptyList(),
+            related = related,
+            videoId = { it.id },
+            artist = { it.artist },
+            artistDisplay = { it.artist },
+            title = { it.id },
+            thumbs = { emptyList<Any>() },
+            duration = { null },
+            durationSeconds = { 180 },
+            explicit = { false },
+            type = { "song" },
+            exclude = setOf("t12"),
+            shown = setOf("t1"),
+            seeds = listOf("seed"),
+            random = kotlin.random.Random(0)
+        ).first
+        val main = mixes.first { it.id == "for-you" }
+        assertTrue("t1" in main.videoIds)                 // demoted, not removed
+        assertTrue(main.videoIds.first() != "t1")         // no longer at the top
+        assertTrue("t12" !in main.videoIds)               // already owned: never recommended back
+    }
 }

@@ -2,6 +2,7 @@ package com.geekify.android.player
 
 import com.geekify.android.data.source.innertube.InnerTubeClient
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
@@ -26,9 +27,11 @@ import javax.inject.Singleton
  */
 @Singleton
 class StreamResolver @Inject constructor(
-    private val innerTube: InnerTubeClient
-) {
-    data class ResolvedStream(val url: String, val mimeType: String, val expiresAt: Long)
+    private val innerTube: InnerTubeClient,
+    private val cipher: StreamCipher
+) : InnerTubeXPlayer {
+    /** [loudnessDb] is YouTube's measured loudness for the track (dB relative to its target), when it reports one. */
+    data class ResolvedStream(val url: String, val mimeType: String, val expiresAt: Long, val loudnessDb: Float? = null)
 
     private val cache = HashMap<String, ResolvedStream>()
     private val inFlight = HashMap<String, Deferred<ResolvedStream>>()
@@ -40,7 +43,7 @@ class StreamResolver @Inject constructor(
      * very song the user just tapped) is shared instead of starting a second request. Cancelling the
      * caller never cancels the shared lookup.
      */
-    suspend fun resolve(videoId: String, forceRefresh: Boolean = false): ResolvedStream {
+    override suspend fun resolve(videoId: String, forceRefresh: Boolean): ResolvedStream {
         val job: Deferred<ResolvedStream> = synchronized(lock) {
             if (!forceRefresh) {
                 val cached = cache[videoId]
@@ -60,11 +63,11 @@ class StreamResolver @Inject constructor(
     }
 
     /** Fire-and-forget warm-up so a later tap finds the URL already resolved. Errors are ignored. */
-    fun prefetch(videoIds: List<String>) {
+    override fun prefetch(videoIds: List<String>) {
         videoIds.forEach { id -> scope.launch { runCatching { resolve(id) } } }
     }
 
-    fun invalidate(videoId: String) {
+    override fun invalidate(videoId: String) {
         synchronized(lock) { cache.remove(videoId) }
     }
 
@@ -92,10 +95,17 @@ class StreamResolver @Inject constructor(
         fun bitrate(f: JsonObject): Int =
             f["averageBitrate"]?.jsonPrimitive?.intOrNull ?: f["bitrate"]?.jsonPrimitive?.intOrNull ?: 0
 
-        // Audio-only formats that come with a plain URL (no signatureCipher).
-        val audio = adaptive.filter { f ->
-            f["url"] != null && (f["mimeType"]?.jsonPrimitive?.contentOrNull ?: "").startsWith("audio/")
+        // Audio-only formats. Most carry a plain URL; one that only has a signatureCipher is handed to the
+        // installed [StreamCipher] (a no-op unless a cipher library was plugged in) and skipped if it fails.
+        val audioFormats = adaptive.filter { f ->
+            (f["mimeType"]?.jsonPrimitive?.contentOrNull ?: "").startsWith("audio/")
         }
+        val urlByFormat = HashMap<JsonObject, String>()
+        for (f in audioFormats) {
+            val u = f["url"]?.jsonPrimitive?.contentOrNull ?: runCatching { cipher.decipher(videoId, f) }.getOrNull()
+            if (!u.isNullOrBlank()) urlByFormat[f] = u
+        }
+        val audio = audioFormats.filter { it in urlByFormat }
         // Dubbed videos list several audio tracks: prefer the original/default one.
         val defaultTrack = audio.filter { f ->
             f["audioTrack"]?.jsonObject?.get("audioIsDefault")?.jsonPrimitive?.booleanOrNull != false
@@ -107,11 +117,18 @@ class StreamResolver @Inject constructor(
             ?: muxed.filter { it["url"] != null }.maxByOrNull(::bitrate)
             ?: throw StreamException("No playable audio format was returned for this track.")
 
-        val url = best["url"]?.jsonPrimitive?.contentOrNull
+        val url = urlByFormat[best] ?: best["url"]?.jsonPrimitive?.contentOrNull
             ?: throw StreamException("The audio format has no URL.")
         val mime = (best["mimeType"]?.jsonPrimitive?.contentOrNull ?: "audio/mp4").substringBefore(";")
 
-        return ResolvedStream(url, mime, expiryOf(streaming, url))
+        return ResolvedStream(url, mime, expiryOf(streaming, url), loudnessOf(raw))
+    }
+
+    /** `playerConfig.audioConfig.loudnessDb`: used by volume normalisation. Any missing / odd value is just null. */
+    private fun loudnessOf(raw: JsonObject): Float? {
+        val config = (raw["playerConfig"] as? JsonObject)?.get("audioConfig") as? JsonObject
+        val value = config?.get("loudnessDb") as? JsonPrimitive ?: return null
+        return (value.doubleOrNull ?: value.contentOrNull?.toDoubleOrNull())?.toFloat()?.takeIf { it.isFinite() }
     }
 
     /** URLs expire (about 6 h). Prefer YouTube's own value, then the `expire` URL parameter. */

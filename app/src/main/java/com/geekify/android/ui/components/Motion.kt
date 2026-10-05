@@ -10,7 +10,9 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -74,6 +76,37 @@ fun Modifier.bouncyClickable(
             scaleY = scale
         }
         .clickable(interactionSource = source, indication = null, onClick = onClick)
+}
+
+/**
+ * [bouncyClickable] that also reacts to a long press (e.g. to remove a saved album or playlist).
+ * Gives the same spring press-in, no ripple.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun Modifier.bouncyCombinedClickable(
+    pressedScale: Float = 0.96f,
+    onLongClick: (() -> Unit)? = null,
+    onClick: () -> Unit
+): Modifier {
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) pressedScale else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "pressScaleLong"
+    )
+    return this
+        .graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+        }
+        .combinedClickable(
+            interactionSource = source,
+            indication = null,
+            onClick = onClick,
+            onLongClick = onLongClick
+        )
 }
 
 // ---------------------------------------------------------------------------------------------

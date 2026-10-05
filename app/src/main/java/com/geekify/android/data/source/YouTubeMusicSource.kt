@@ -1,6 +1,11 @@
 package com.geekify.android.data.source
 
 import com.geekify.android.data.cache.TtlLruCache
+import com.geekify.android.data.local.CatalogRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import com.geekify.android.data.model.*
 import com.geekify.android.data.source.innertube.InnerTubeClient
 import com.geekify.android.data.source.innertube.Parsers
@@ -15,14 +20,27 @@ import kotlin.random.Random
 @Singleton
 class YouTubeMusicSource @Inject constructor(
     private val innerTube: InnerTubeClient,
-    private val cache: TtlLruCache
+    private val cache: TtlLruCache,
+    private val catalog: CatalogRepository
 ) : MusicSource {
+    /** Write-through to the offline catalog never blocks (or fails) the request that triggered it. */
+    private val cacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     override suspend fun search(query: String, type: SearchType?): MusicResult<SearchResponse> = guarded {
         require(query.isNotBlank()) { "Enter a search term." }
         val kind = type?.name?.lowercase(); val key = "search:$query:$kind"
-        cache.get<SearchResponse>(key) ?: parseSearch(innerTube.search(query, kind), query, kind).also { cache.put(key, it, FIFTEEN_MINUTES) }
+        cache.get<SearchResponse>(key) ?: parseSearch(innerTube.search(query, kind), query, kind).also {
+            cache.put(key, it, FIFTEEN_MINUTES)
+            cacheScope.launch { catalog.cacheTracks(it.songs) }
+        }
     }
-    override suspend fun track(videoId: String): MusicResult<Track> = guarded {
+    override suspend fun track(videoId: String): MusicResult<Track> {
+        val live = trackLive(videoId)
+        // Offline or blocked: fall back to metadata remembered from earlier browsing.
+        if (live is MusicResult.Failure) catalog.cachedTrack(videoId)?.let { return MusicResult.Success(it) }
+        return live
+    }
+    private suspend fun trackLive(videoId: String): MusicResult<Track> = guarded {
         val key = "track:$videoId"; cache.get<Track>(key) ?: run {
             val raw = innerTube.player(videoId); val details = raw["videoDetails"] as? JsonObject ?: error("Track metadata is unavailable.")
             val seconds = details["lengthSeconds"]?.toString()?.trim('"')?.toIntOrNull()
@@ -37,7 +55,10 @@ class YouTubeMusicSource @Inject constructor(
         }
     }
     override suspend fun artist(channelId: String): MusicResult<ArtistPage> = guarded {
-        val key = "artist:$channelId"; cache.get<ArtistPage>(key) ?: parseArtist(innerTube.browse(channelId), channelId).also { cache.put(key, it, FIFTEEN_MINUTES) }
+        val key = "artist:$channelId"; cache.get<ArtistPage>(key) ?: parseArtist(innerTube.browse(channelId), channelId).also {
+            cache.put(key, it, FIFTEEN_MINUTES)
+            cacheScope.launch { catalog.cacheArtist(it) }
+        }
     }
     override suspend fun collection(id: String, kind: CollectionKind): MusicResult<CollectionPage> = guarded {
         val key = "${kind.name}:$id"; cache.get<CollectionPage>(key) ?: run {
@@ -47,7 +68,11 @@ class YouTubeMusicSource @Inject constructor(
                 runCatching { innerTube.browse(candidate) }.onSuccess { raw = it }.onFailure { last = it }
                 if (raw != null) break
             }
-            parseCollection(raw ?: throw (last ?: IllegalStateException("Collection not found")), id, kind).also { if (it.tracks.isEmpty()) error("Collection not found."); cache.put(key, it, FIFTEEN_MINUTES) }
+            parseCollection(raw ?: throw (last ?: IllegalStateException("Collection not found")), id, kind).also {
+                if (it.tracks.isEmpty()) error("Collection not found.")
+                cache.put(key, it, FIFTEEN_MINUTES)
+                cacheScope.launch { catalog.cacheCollection(it) }
+            }
         }
     }
     override suspend fun home(): MusicResult<HomeResponse> = guarded {

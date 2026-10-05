@@ -1,5 +1,6 @@
 package com.geekify.android.ui.player
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -33,6 +34,10 @@ fun QueueScreen(
     onBack: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
+
+    // Registered here (inside the overlay) so it outranks the NavHost's own back handler: Back always
+    // closes the queue first and never pops a screen underneath it.
+    BackHandler(onBack = onBack)
 
     AuroraBackground {
         Scaffold(

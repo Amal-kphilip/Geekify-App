@@ -133,6 +133,14 @@ class SyncRepository @Inject constructor(
         return (first + second).filter { it.videoId.isNotEmpty() && seen.add(it.videoId) }
     }
 
+    /** Union by song, keeping the most recent play time, newest first. */
+    private fun mergeHistory(first: List<Pair<Track, Long>>, second: List<Pair<Track, Long>>): List<Pair<Track, Long>> =
+        (first + second)
+            .filter { it.first.videoId.isNotEmpty() }
+            .groupBy { it.first.videoId }
+            .map { (_, entries) -> entries.maxByOrNull { it.second }!! }
+            .sortedByDescending { it.second }
+
     private fun mergePlaylists(local: List<LocalPlaylist>, cloud: List<LocalPlaylist>): List<LocalPlaylist> {
         val byId = cloud.associateBy { it.id }.toMutableMap()
         for (p in local) {
@@ -157,12 +165,12 @@ class SyncRepository @Inject constructor(
             } else if (firstTime) {
                 val localLiked = library.likedOnce()
                 val localPlaylists = library.playlistsOnce()
-                val localHistory = history.allOnce()
+                val localHistory = history.allTimed()
                 val localSaved = library.savedCollectionsOnce()
                 applyCloud(CloudData(
                     mergeTracks(localLiked, cloud?.liked ?: emptyList()),
                     mergePlaylists(localPlaylists, cloud?.playlists ?: emptyList()),
-                    mergeTracks(localHistory, cloud?.history ?: emptyList()),
+                    mergeHistory(localHistory, cloud?.history ?: emptyList()),
                     mergeSaved(localSaved, cloud?.saved ?: emptyList())
                 ))
             }
@@ -218,7 +226,8 @@ class SyncRepository @Inject constructor(
         }
         stopSync()
         auth.signOut()
-        applyCloud(CloudData(emptyList(), emptyList(), emptyList(), emptyList()))
+        applyCloud(CloudData(emptyList(), emptyList(), emptyList(), emptyList()), wipeHistory = true)
+        history.clearStats()
         dataStore.edit { it.remove(KEY_LAST_UID) }
     }
 
@@ -227,7 +236,7 @@ class SyncRepository @Inject constructor(
         try {
             val liked = library.likedOnce().map { it.toMap() }
             val playlists = library.playlistsOnce().map { it.toMap() }
-            val hist = history.allOnce().take(MAX_HISTORY).map { it.toMap() }
+            val hist = history.allTimed().take(MAX_HISTORY).map { (track, at) -> track.toMap() + ("playedAt" to at) }
             val saved = library.savedCollectionsOnce().map { it.toMap() }
             val payload = mapOf("liked" to liked, "playlists" to playlists, "history" to hist, "savedCollections" to saved, "updatedAt" to System.currentTimeMillis())
             db.collection("users").document(uid).set(payload, SetOptions.merge()).await()
@@ -244,23 +253,31 @@ class SyncRepository @Inject constructor(
         val data = snap.data ?: return null
         val liked = (data["liked"] as? List<Map<String, Any?>>)?.mapNotNull { it.toTrack() } ?: emptyList()
         val pls = (data["playlists"] as? List<Map<String, Any?>>)?.mapNotNull { it.toLocalPlaylist() } ?: emptyList()
-        val hist = (data["history"] as? List<Map<String, Any?>>)?.mapNotNull { it.toTrack() } ?: emptyList()
+        val hist = (data["history"] as? List<Map<String, Any?>>)?.mapNotNull { row ->
+            row.toTrack()?.let { it to ((row["playedAt"] as? Long) ?: 0L) }
+        } ?: emptyList()
         // null = this account's cloud copy predates the feature: keep whatever is saved on the phone.
         val saved = (data["savedCollections"] as? List<Map<String, Any?>>)?.mapNotNull { it.toSavedCollection() }
         return CloudData(liked, pls, hist, saved)
     }
 
-    private suspend fun applyCloud(cloud: CloudData) {
+    /**
+     * Cloud wins for liked songs, playlists and saved albums. History is merged by play time instead,
+     * because plays are written locally first: replacing it with a slightly older cloud copy made
+     * newly played songs vanish from Recents.
+     */
+    private suspend fun applyCloud(cloud: CloudData, wipeHistory: Boolean = false) {
         applying = true
         try {
             library.replaceAllLiked(cloud.liked)
             library.replaceAllPlaylists(cloud.playlists)
-            history.replaceAll(cloud.history.take(MAX_HISTORY))
+            val mergedHistory = if (wipeHistory) cloud.history else mergeHistory(history.allTimed(), cloud.history)
+            history.replaceAllTimed(mergedHistory.take(MAX_HISTORY))
             cloud.saved?.let { library.replaceAllSavedCollections(it) }
         } finally {
             applying = false
         }
     }
 
-    private data class CloudData(val liked: List<Track>, val playlists: List<LocalPlaylist>, val history: List<Track>, val saved: List<SavedCollection>?)
+    private data class CloudData(val liked: List<Track>, val playlists: List<LocalPlaylist>, val history: List<Pair<Track, Long>>, val saved: List<SavedCollection>?)
 }

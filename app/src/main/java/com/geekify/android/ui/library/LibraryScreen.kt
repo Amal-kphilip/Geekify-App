@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -23,13 +24,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.geekify.android.data.local.SavedCollection
 import com.geekify.android.data.model.Track
 import com.geekify.android.ui.components.*
 import com.geekify.android.ui.theme.*
@@ -53,6 +57,8 @@ fun LibraryScreen(
     var showCreateDialog by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf("All") }
+    var removeTarget by remember { mutableStateOf<RemoveTarget?>(null) }
+    val haptic = LocalHapticFeedback.current
     val filters = listOf("All", "Playlists", "Liked Songs", "Albums")
 
     val showLiked = filter == "All" || filter == "Liked Songs"
@@ -159,6 +165,10 @@ fun LibraryScreen(
                         title = playlist.name,
                         subtitle = "By You  •  ${playlist.tracks.size} songs",
                         onClick = { onPlaylistClick(playlist.id, playlist.name) },
+                        onLongClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            removeTarget = RemoveTarget.Playlist(playlist.id, playlist.name)
+                        },
                         trailing = if (playlist.tracks.isNotEmpty()) TrailingAction.Play { onPlayTracks(playlist.tracks) } else TrailingAction.Chevron,
                         art = {
                             if (cover != null) {
@@ -184,6 +194,10 @@ fun LibraryScreen(
                         title = saved.title,
                         subtitle = listOfNotNull(label, saved.subtitle?.takeIf { it.isNotBlank() }).joinToString("  •  "),
                         onClick = { onCollectionClick(saved.id, saved.kind) },
+                        onLongClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            removeTarget = RemoveTarget.Saved(saved)
+                        },
                         trailing = TrailingAction.Chevron,
                         art = {
                             if (saved.thumbnailUrl != null) {
@@ -220,6 +234,37 @@ fun LibraryScreen(
             }
         }
 
+        removeTarget?.let { target ->
+            when (target) {
+                is RemoveTarget.Saved -> ConfirmDialog(
+                    title = "Remove from My Music?",
+                    message = "\"${target.item.title}\" will be removed from your saved " +
+                        (if (target.item.kind == "ALBUM") "albums" else "playlists") +
+                        ". You can add it again any time.",
+                    confirmLabel = "Remove",
+                    icon = Icons.Default.Delete,
+                    destructive = true,
+                    onConfirm = {
+                        viewModel.toggleSavedCollection(target.item)
+                        removeTarget = null
+                    },
+                    onDismiss = { removeTarget = null }
+                )
+                is RemoveTarget.Playlist -> ConfirmDialog(
+                    title = "Delete playlist?",
+                    message = "\"${target.name}\" and its song list will be deleted from your library.",
+                    confirmLabel = "Delete",
+                    icon = Icons.Default.Delete,
+                    destructive = true,
+                    onConfirm = {
+                        viewModel.deletePlaylist(target.id)
+                        removeTarget = null
+                    },
+                    onDismiss = { removeTarget = null }
+                )
+            }
+        }
+
         if (showCreateDialog) {
             CreatePlaylistDialog(
                 onDismiss = { showCreateDialog = false },
@@ -230,6 +275,12 @@ fun LibraryScreen(
             )
         }
     }
+}
+
+/** What a long press on a My Music row is about to remove. */
+private sealed interface RemoveTarget {
+    class Saved(val item: SavedCollection) : RemoveTarget
+    class Playlist(val id: String, val name: String) : RemoveTarget
 }
 
 private sealed interface TrailingAction {
@@ -245,12 +296,13 @@ private fun LibraryRow(
     subtitle: String,
     onClick: () -> Unit,
     trailing: TrailingAction,
+    onLongClick: (() -> Unit)? = null,
     art: @Composable BoxScope.() -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .bouncyClickable(pressedScale = 0.985f, onClick = onClick)
+            .bouncyCombinedClickable(pressedScale = 0.985f, onLongClick = onLongClick, onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

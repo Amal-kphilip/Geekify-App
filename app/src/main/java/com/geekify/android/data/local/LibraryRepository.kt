@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.geekify.android.data.model.Track
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -64,9 +65,12 @@ class LibraryRepository @Inject constructor(
 
     val liked: Flow<List<Track>> = likedDao.all().map { it.map(LikedTrackEntity::toTrack) }
 
-    val playlists: Flow<List<LocalPlaylist>> = dao.allPlaylists().map { pls ->
-        pls  // tracks loaded per-playlist when needed
-            .map { pl -> LocalPlaylist(pl.id, pl.name, pl.createdAt, emptyList()) }
+    /** All playlists with their songs (so lists can show a cover and a real song count). */
+    val playlists: Flow<List<LocalPlaylist>> = combine(dao.allPlaylists(), dao.allTracks()) { pls, tracks ->
+        val byPlaylist = tracks.groupBy { it.playlistId }
+        pls.map { pl ->
+            LocalPlaylist(pl.id, pl.name, pl.createdAt, byPlaylist[pl.id].orEmpty().map(PlaylistTrackEntity::toTrack))
+        }
     }
 
     suspend fun isLiked(videoId: String) = likedDao.isLiked(videoId)

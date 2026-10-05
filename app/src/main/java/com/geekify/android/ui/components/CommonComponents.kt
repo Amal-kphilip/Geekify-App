@@ -10,6 +10,11 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -295,44 +300,64 @@ fun TrackActionsDialog(
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = InkElevated,
-        shape = RoundedCornerShape(28.dp),
-        title = {
-            Text(
-                track.title,
-                color = TextPrimary,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        },
-        text = {
-            Column {
-                TextButton(onClick = { onToggleLike(); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (liked) "Remove from Liked Songs" else "Add to Liked Songs", color = TextPrimary)
-                }
-                Spacer(Modifier.height(8.dp))
-                Text("Add to playlist", color = TextSecondary, fontSize = 14.sp)
-                if (playlists.isEmpty()) {
-                    Text("Create a playlist to save this song.", color = TextMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+    GeekifyDialog(onDismissRequest = onDismiss) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            val thumbUrl = track.thumbnails.bestArtworkUrl(240)
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(InkElevated),
+                contentAlignment = Alignment.Center
+            ) {
+                if (thumbUrl != null) {
+                    AsyncImage(
+                        model = thumbUrl,
+                        contentDescription = track.title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
                 } else {
-                    playlists.forEach { playlist ->
-                        TextButton(
-                            onClick = { onAddToPlaylist(playlist.id); onDismiss() },
-                            modifier = Modifier.fillMaxWidth()
-                        ) { Text(playlist.name, color = TextPrimary) }
-                    }
-                }
-                TextButton(onClick = { showCreateDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text("New playlist", color = Lime, fontWeight = FontWeight.SemiBold)
+                    Icon(Icons.Default.MusicNote, contentDescription = null, tint = TextSecondary)
                 }
             }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = TextSecondary) } }
-    )
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(track.title, color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(2.dp))
+                Text(track.artist, color = TextSecondary, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        ActionRow(
+            icon = if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+            label = if (liked) "Remove from Liked Songs" else "Add to Liked Songs",
+            iconTint = if (liked) Lime else TextPrimary
+        ) { onToggleLike(); onDismiss() }
+
+        Text(
+            "Add to playlist",
+            color = TextMuted,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(start = 4.dp, top = 14.dp, bottom = 4.dp)
+        )
+        Column(modifier = Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
+            if (playlists.isEmpty()) {
+                Text("Create a playlist to save this song.", color = TextMuted, fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp, top = 6.dp, bottom = 6.dp))
+            }
+            playlists.forEach { playlist ->
+                ActionRow(icon = Icons.Default.QueueMusic, label = playlist.name) {
+                    onAddToPlaylist(playlist.id); onDismiss()
+                }
+            }
+        }
+        ActionRow(icon = Icons.Default.PlaylistAdd, label = "New playlist", iconTint = Lime, labelColor = Lime) {
+            showCreateDialog = true
+        }
+    }
 
     if (showCreateDialog) {
         CreatePlaylistDialog(
@@ -343,6 +368,34 @@ fun TrackActionsDialog(
                 onDismiss()
             }
         )
+    }
+}
+
+/** Row inside a dialog: round icon chip + label. */
+@Composable
+private fun ActionRow(
+    icon: ImageVector,
+    label: String,
+    iconTint: Color = TextPrimary,
+    labelColor: Color = TextPrimary,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .bouncyClickable(pressedScale = 0.98f, onClick = onClick)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier.size(42.dp).clip(CircleShape).background(InkElevated),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(21.dp))
+        }
+        Spacer(Modifier.width(14.dp))
+        Text(label, color = labelColor, fontSize = 15.5.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

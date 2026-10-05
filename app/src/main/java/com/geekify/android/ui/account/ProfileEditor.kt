@@ -24,6 +24,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.geekify.android.ui.components.CircleIconButton
+import com.geekify.android.ui.components.DialogButtonStyle
+import com.geekify.android.ui.components.DialogPillButton
+import com.geekify.android.ui.components.GeekifyDialog
+import com.geekify.android.ui.components.LocalBottomInset
 import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.theme.*
 
@@ -55,7 +59,7 @@ internal fun ProfileEditor(
         Row(verticalAlignment = Alignment.CenterVertically) {
             CircleIconButton(
                 icon = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back to profile menu",
+                contentDescription = "Back",
                 onClick = onBack,
                 size = 46.dp
             )
@@ -213,68 +217,70 @@ internal fun ProfileEditor(
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
         )
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(24.dp + LocalBottomInset.current))
     }
 
     if (showDelete) {
         var password by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { if (!state.isLoading) showDelete = false },
-            containerColor = InkElevated,
-            shape = RoundedCornerShape(28.dp),
-            title = { Text("Delete account?", color = TextPrimary, fontWeight = FontWeight.SemiBold) },
-            text = {
-                Column {
-                    Text(
-                        "This permanently deletes your account and your backed-up liked songs, playlists and history. This can't be undone.",
-                        color = TextSecondary,
-                        fontSize = 14.sp,
-                        lineHeight = 20.sp
-                    )
-                    Spacer(Modifier.height(14.dp))
-                    if (user.hasPassword) {
-                        OutlinedTextField(
-                            value = password,
-                            onValueChange = { password = it },
-                            label = { Text("Confirm your password") },
-                            singleLine = true,
-                            visualTransformation = PasswordVisualTransformation(),
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = ErrorRed,
-                                unfocusedBorderColor = InkGlassBorder,
-                                focusedLabelColor = ErrorRed,
-                                cursorColor = ErrorRed,
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary
-                            )
-                        )
-                    } else {
-                        Text("You'll be asked to confirm with your Google account.", color = TextMuted, fontSize = 13.sp)
-                    }
-                    state.error?.let { Text(it, color = ErrorRed, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp)) }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = { onDeleteAccount(if (user.hasPassword) password else null) },
-                    enabled = !state.isLoading && (!user.hasPassword || password.isNotEmpty()),
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(containerColor = ErrorRed, contentColor = Color.White)
+        GeekifyDialog(onDismissRequest = { if (!state.isLoading) showDelete = false }, dismissible = !state.isLoading) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier.size(46.dp).clip(CircleShape).background(ErrorRed.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    if (state.isLoading) {
-                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        Text("Delete", fontWeight = FontWeight.SemiBold)
-                    }
+                    Icon(Icons.Default.DeleteForever, contentDescription = null, tint = ErrorRed, modifier = Modifier.size(24.dp))
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDelete = false }, enabled = !state.isLoading) {
-                    Text("Cancel", color = TextSecondary)
-                }
+                Spacer(Modifier.width(14.dp))
+                Text("Delete account?", color = TextPrimary, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
             }
-        )
+            Spacer(Modifier.height(14.dp))
+            Text(
+                "This permanently deletes your account and your backed-up liked songs, playlists and history. This can't be undone.",
+                color = TextSecondary,
+                fontSize = 14.5.sp,
+                lineHeight = 21.sp
+            )
+            Spacer(Modifier.height(16.dp))
+            if (user.hasPassword) {
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Confirm your password") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = ErrorRed,
+                        unfocusedBorderColor = InkGlassBorder,
+                        focusedLabelColor = ErrorRed,
+                        cursorColor = ErrorRed,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary
+                    )
+                )
+            } else {
+                Text("You'll be asked to confirm with your Google account.", color = TextMuted, fontSize = 13.sp)
+            }
+            state.error?.let { Text(it, color = ErrorRed, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp)) }
+            Spacer(Modifier.height(24.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                DialogPillButton(
+                    "Cancel",
+                    { showDelete = false },
+                    Modifier.weight(1f),
+                    DialogButtonStyle.Secondary,
+                    enabled = !state.isLoading
+                )
+                DialogPillButton(
+                    "Delete",
+                    { onDeleteAccount(if (user.hasPassword) password else null) },
+                    Modifier.weight(1.4f),
+                    DialogButtonStyle.Destructive,
+                    enabled = !user.hasPassword || password.isNotEmpty(),
+                    loading = state.isLoading
+                )
+            }
+        }
     }
 }
