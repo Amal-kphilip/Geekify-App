@@ -59,6 +59,7 @@ import coil3.compose.AsyncImage
 import com.geekify.android.data.model.Track
 import com.geekify.android.player.RepeatMode
 import com.geekify.android.ui.components.CircleIconButton
+import com.geekify.android.ui.components.MarqueeText
 import com.geekify.android.ui.components.SeekBar
 import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.components.rememberArtColor
@@ -240,14 +241,12 @@ fun ExpandedPlayerScreen(
             Spacer(Modifier.weight(0.6f))
 
             // ---- Title / artist ----
-            Text(
+            MarqueeText(
                 text = track.title,
                 color = TextPrimary,
                 fontSize = 27.sp,
                 lineHeight = 32.sp,
                 fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
