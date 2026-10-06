@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Explicit
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
@@ -211,7 +212,9 @@ fun TrackRow(
     modifier: Modifier = Modifier,
     isPlaying: Boolean = LocalNowPlayingId.current == track.videoId,
     onClick: () -> Unit,
-    onMoreClick: (() -> Unit)? = null
+    onMoreClick: (() -> Unit)? = null,
+    moreIcon: ImageVector = Icons.Default.MoreHoriz,
+    moreContentDescription: String = "More"
 ) {
     Row(
         modifier = modifier
@@ -277,8 +280,8 @@ fun TrackRow(
         if (onMoreClick != null) {
             Spacer(Modifier.width(8.dp))
             CircleIconButton(
-                icon = Icons.Default.MoreHoriz,
-                contentDescription = "More",
+                icon = moreIcon,
+                contentDescription = moreContentDescription,
                 onClick = onMoreClick,
                 size = 40.dp,
                 iconSize = 20.dp

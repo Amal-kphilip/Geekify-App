@@ -63,6 +63,8 @@ class PlaybackService : MediaSessionService() {
         private const val MAX_STREAM_RETRIES = 3
         /** Continuous playback after a retry that proves the new link works and refills the retry budget. */
         private const val RETRY_RESET_AFTER_MS = 15_000L
+        /** A broken/stalled googlevideo stream must not leave the player buffering forever. */
+        private const val BUFFERING_TIMEOUT_MS = 12_000L
     }
 
     @Inject lateinit var queueManager: QueueManager
@@ -80,6 +82,7 @@ class PlaybackService : MediaSessionService() {
     private var prefetchJob: Job? = null
     private var autoplayJob: Job? = null
     private var progressJob: Job? = null
+    private var bufferingWatchdogJob: Job? = null
     private var lastPlayingVideoId: String? = null
     private var resolveRetries = 0
     private var playedSinceRetryMs = 0L
@@ -205,9 +208,18 @@ class PlaybackService : MediaSessionService() {
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 when (playbackState) {
-                    Player.STATE_BUFFERING -> queueManager.setBuffering(true)
-                    Player.STATE_READY -> queueManager.setBuffering(false)
+                    Player.STATE_BUFFERING -> {
+                        queueManager.setBuffering(true)
+                        startBufferingWatchdog()
+                    }
+                    Player.STATE_READY -> {
+                        bufferingWatchdogJob?.cancel()
+                        bufferingWatchdogJob = null
+                        queueManager.setBuffering(false)
+                    }
                     Player.STATE_ENDED -> {
+                        bufferingWatchdogJob?.cancel()
+                        bufferingWatchdogJob = null
                         // Forget the finished play so a replay (repeat, or play again) is recorded again.
                         lastPlayingVideoId = null
                         queueManager.next()
@@ -216,6 +228,8 @@ class PlaybackService : MediaSessionService() {
                 }
             }
             override fun onPlayerError(error: PlaybackException) {
+                bufferingWatchdogJob?.cancel()
+                bufferingWatchdogJob = null
                 queueManager.setBuffering(false)
                 handlePlaybackError(error)
             }
@@ -417,6 +431,70 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    private fun startBufferingWatchdog() {
+        bufferingWatchdogJob?.cancel()
+        val track = queueManager.state.value.current ?: return
+        if (!queueManager.state.value.isPlaying) return
+        val trackId = track.videoId
+        bufferingWatchdogJob = scope.launch {
+            delay(BUFFERING_TIMEOUT_MS)
+            val state = queueManager.state.value
+            if (state.current?.videoId != trackId || !state.isPlaying || player.playbackState != Player.STATE_BUFFERING) return@launch
+
+            // A stream that never becomes READY is normally a stale/rejected googlevideo URL. Refresh it instead
+            // of leaving the user on an endless loading animation. The normal retry/error path is reused.
+            if (resolveRetries < MAX_STREAM_RETRIES) {
+                retryCurrentStream(
+                    track = track,
+                    resumeAt = player.currentPosition.coerceAtLeast(0L),
+                    wasPlaying = true,
+                    markFailed = false
+                )
+            } else {
+                queueManager.setBuffering(false)
+                queueManager.setError("This track took too long to start.")
+                skipAfterError(track)
+            }
+        }
+    }
+
+    private fun retryCurrentStream(track: Track, resumeAt: Long, wasPlaying: Boolean, markFailed: Boolean) {
+        if (resolveRetries >= MAX_STREAM_RETRIES) {
+            queueManager.setBuffering(false)
+            queueManager.setError("Could not start this track.")
+            if (wasPlaying) skipAfterError(track)
+            return
+        }
+
+        resolveRetries++
+        playedSinceRetryMs = 0L
+        val attempt = resolveRetries
+        if (markFailed) streamResolver.markFailed(track.videoId) else streamResolver.invalidate(track.videoId)
+        loadJob?.cancel()
+        loadingId = null
+        player.stop()
+        queueManager.setBuffering(true)
+
+        scope.launch {
+            delay(400L * attempt)
+            try {
+                val stream = streamResolver.resolve(track.videoId, forceRefresh = true)
+                if (queueManager.state.value.current?.videoId != track.videoId) return@launch
+                audioEffects.setTrackLoudness(stream.loudnessDb)
+                val item = buildMediaItem(track, stream.url, stream.mimeType)
+                player.setMediaItem(item, resumeAt)
+                player.playWhenReady = queueManager.state.value.isPlaying
+                player.prepare()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                queueManager.setBuffering(false)
+                queueManager.setError(PlaybackErrors.message(e))
+                if (wasPlaying) skipAfterError(track)
+            }
+        }
+    }
+
     private fun handlePlaybackError(error: PlaybackException) {
         val track = queueManager.state.value.current ?: return
         val wasPlaying = queueManager.state.value.isPlaying
@@ -433,35 +511,14 @@ class PlaybackService : MediaSessionService() {
             PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> true
             else -> false
         }
-        if (urlProblem && resolveRetries < MAX_STREAM_RETRIES) {
+        if (urlProblem) {
             // Rejected or expired URL: get a fresh one and try again from the same position.
-            resolveRetries++
-            playedSinceRetryMs = 0L
-            val attempt = resolveRetries
-            val resumeAt = player.currentPosition.coerceAtLeast(0L)
-            // A 403 can be specific to one audio format: remember it so the next lookup picks another format.
-            if (httpCode == 403) streamResolver.markFailed(track.videoId) else streamResolver.invalidate(track.videoId)
-            loadJob?.cancel()
-            loadingId = null
-            scope.launch {
-                // Short, growing pause so a fresh lookup is not answered with the very same refusal.
-                delay(400L * attempt)
-                try {
-                    val stream = streamResolver.resolve(track.videoId, forceRefresh = true)
-                    // The user may have skipped to another song while the new link was being fetched.
-                    if (queueManager.state.value.current?.videoId != track.videoId) return@launch
-                    audioEffects.setTrackLoudness(stream.loudnessDb)
-                    val item = buildMediaItem(track, stream.url, stream.mimeType)
-                    player.setMediaItem(item, resumeAt)
-                    player.playWhenReady = queueManager.state.value.isPlaying
-                    player.prepare()
-                } catch (e: kotlinx.coroutines.CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    queueManager.setError(PlaybackErrors.message(e))
-                    if (wasPlaying) skipAfterError(track)
-                }
-            }
+            retryCurrentStream(
+                track = track,
+                resumeAt = player.currentPosition.coerceAtLeast(0L),
+                wasPlaying = wasPlaying,
+                markFailed = httpCode == 403
+            )
         } else {
             resolveRetries = 0
             playedSinceRetryMs = 0L
@@ -507,6 +564,7 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         queueManager.persistProgress()
         progressJob?.cancel()
+        bufferingWatchdogJob?.cancel()
         mediaSession.release()
         artworkLoader.close()
         player.release()

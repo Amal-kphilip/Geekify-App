@@ -48,7 +48,7 @@ private data class DiscoverItem(
     val onPlay: () -> Unit
 )
 
-/** One row in the "Top daily playlists" list. */
+/** One row in the filtered daily content list. */
 private data class ListRowItem(
     val title: String,
     val subtitle: String,
@@ -127,6 +127,13 @@ fun HomeScreen(
         }
     }
     val visibleList = if (showAllPlaylists) listItems.take(20) else listItems.take(5)
+    val listSectionTitle = when (state.selectedFilter) {
+        "Songs" -> "Top daily songs"
+        "Albums" -> "Top daily albums"
+        "Playlists" -> "Top daily playlists"
+        "Artists" -> "Top daily artists"
+        else -> "Top daily picks"
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(InkBackground)) {
         PullToRefreshBox(
@@ -306,7 +313,7 @@ fun HomeScreen(
                                 .padding(top = 32.dp, end = 20.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            SectionTitle("Top daily playlists", modifier = Modifier.weight(1f))
+                            SectionTitle(listSectionTitle, modifier = Modifier.weight(1f))
                             if (listItems.size > 5) {
                                 Text(
                                     text = if (showAllPlaylists) "Show less" else "See all",

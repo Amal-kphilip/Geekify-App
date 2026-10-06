@@ -109,9 +109,28 @@ object Parsers {
         walk(data).forEach { n ->
             val o = objectOrNull(n["musicTwoRowItemRenderer"]) ?: return@forEach
             val title = text(o["title"]); if (title.isBlank()) return@forEach
-            val (bid, page) = browse(o); val vid = videoId(o); val playlist = walk(o).firstNotNullOfOrNull { x -> objectOrNull(x["watchEndpoint"])?.str("playlistId") }
-            val kind = when { page == "MUSIC_PAGE_TYPE_ARTIST" || bid?.startsWith("UC") == true -> "artist"; page == "MUSIC_PAGE_TYPE_PLAYLIST" || playlist != null -> "playlist"; page == "MUSIC_PAGE_TYPE_ALBUM" || bid?.startsWith("MPRE") == true -> "album"; vid != null -> "song"; else -> "album" }
-            val card = Card(bid ?: playlist ?: vid ?: title, title, text(o["subtitle"]).ifBlank { null }, findThumbnails(o), kind, vid, playlist, bid)
+            val navigation = objectOrNull(o["navigationEndpoint"])
+            val directBrowse = objectOrNull(navigation?.get("browseEndpoint"))
+            val fallbackBrowse = if (navigation == null) browse(o) else Pair(null, null)
+            val bid = directBrowse?.str("browseId") ?: fallbackBrowse.first
+            val page = objectOrNull(objectOrNull(directBrowse?.get("browseEndpointContextSupportedConfigs"))?.get("browseEndpointContextMusicConfig"))
+                ?.str("pageType") ?: fallbackBrowse.second
+            val vid = videoId(o)
+            val playlist = walk(o).firstNotNullOfOrNull { x -> objectOrNull(x["watchEndpoint"])?.str("playlistId") }
+            val kind = when {
+                page == "MUSIC_PAGE_TYPE_ARTIST" || bid?.startsWith("UC") == true -> "artist"
+                page == "MUSIC_PAGE_TYPE_ALBUM" || bid?.startsWith("MPRE") == true -> "album"
+                page == "MUSIC_PAGE_TYPE_PLAYLIST" -> "playlist"
+                vid != null -> "song"
+                playlist != null -> "playlist"
+                else -> "album"
+            }
+            val id = when (kind) {
+                "song" -> vid ?: bid ?: playlist ?: title
+                "playlist" -> bid ?: playlist ?: vid ?: title
+                else -> bid ?: playlist ?: vid ?: title
+            }
+            val card = Card(id, title, text(o["subtitle"]).ifBlank { null }, findThumbnails(o), kind, vid, playlist, bid)
             if ((preferred == null || preferred == kind) && none { it.id == card.id } && size < limit) add(card)
         }
     }

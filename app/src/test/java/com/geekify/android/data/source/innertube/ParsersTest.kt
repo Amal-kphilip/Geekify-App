@@ -20,4 +20,14 @@ class ParsersTest {
         assertEquals(225, track.durationSeconds)
         assertNotNull(track.thumbnails.firstOrNull())
     }
+    @Test fun `two row song card with playlist and artist context stays distinct song`() {
+        val raw = Json.parseToJsonElement(
+            """{"musicTwoRowItemRenderer":{"title":{"simpleText":"Song"},"subtitle":{"runs":[{"text":"Artist","navigationEndpoint":{"browseEndpoint":{"browseId":"UCartist","browseEndpointContextSupportedConfigs":{"browseEndpointContextMusicConfig":{"pageType":"MUSIC_PAGE_TYPE_ARTIST"}}}}}]},"thumbnail":{"thumbnails":[{"url":"https://i.ytimg.com/a.jpg"}]},"navigationEndpoint":{"watchEndpoint":{"videoId":"song1234567","playlistId":"PLcontext"}}}}"""
+        )
+        val card = Parsers.cards(raw).single()
+        assertEquals("song", card.type)
+        assertEquals("song1234567", card.videoId)
+        assertEquals("song1234567", card.id)
+    }
+
 }

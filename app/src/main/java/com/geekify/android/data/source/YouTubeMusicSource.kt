@@ -111,8 +111,11 @@ class YouTubeMusicSource @Inject constructor(
         return SearchResponse(query, allTracks, if (type == "album") cards("album") else cards("album"), if (type == "artist") cards("artist") else cards("artist"), if (type == "playlist") cards("playlist") else cards("playlist"), shelves)
     }
     private fun parseHome(raw: JsonObject) = HomeResponse(Parsers.shelves(raw).mapNotNull { (title, block) ->
-        val tracks = Parsers.tracks(block, 24); val cards = Parsers.cards(block, limit = 24)
-        val items = if (tracks.isNotEmpty() && cards.isEmpty()) tracks.map(::ShelfTrack) else cards.map(::ShelfCard)
+        val tracks = Parsers.tracks(block, 24)
+        val cards = Parsers.cards(block, limit = 24)
+        // Home shelves can legitimately contain both song rows and entity cards. Keep both so the
+        // Home filters have real songs/albums/artists to work with instead of silently discarding tracks.
+        val items = (tracks.map(::ShelfTrack) + cards.map(::ShelfCard)).distinctBy { it.id }
         items.takeIf { it.isNotEmpty() }?.let { Shelf(title, it) }
     }.take(16))
     private fun parseArtist(raw: JsonObject, id: String): ArtistPage {

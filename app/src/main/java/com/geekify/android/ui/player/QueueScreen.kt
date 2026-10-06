@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -149,7 +150,9 @@ fun QueueScreen(
                                         track = track,
                                         modifier = Modifier.weight(1f),
                                         onClick = { viewModel.play(track, state.queue) },
-                                        onMoreClick = { viewModel.removeFromQueue(index) }
+                                        onMoreClick = { viewModel.removeFromQueue(index) },
+                                        moreIcon = Icons.Default.Close,
+                                        moreContentDescription = "Remove from queue"
                                     )
                                 }
                             }
