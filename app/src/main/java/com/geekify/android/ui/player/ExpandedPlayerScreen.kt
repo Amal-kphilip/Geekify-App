@@ -47,7 +47,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.launch
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import com.geekify.android.R
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -61,6 +64,14 @@ import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.components.rememberArtColor
 import com.geekify.android.ui.components.bestArtworkUrl
 import com.geekify.android.ui.theme.*
+
+/** Montserrat is used on the Now Playing screen only; the rest of the app keeps [AppFont]. */
+private val MontserratFamily = FontFamily(
+    Font(R.font.montserrat_regular, FontWeight.Normal),
+    Font(R.font.montserrat_medium, FontWeight.Medium),
+    Font(R.font.montserrat_semibold, FontWeight.SemiBold),
+    Font(R.font.montserrat_bold, FontWeight.Bold)
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -154,6 +165,9 @@ fun ExpandedPlayerScreen(
     ) {
         PlayerBackdrop(thumbUrl = thumbUrl, tint = artColor)
 
+        CompositionLocalProvider(
+            LocalTextStyle provides LocalTextStyle.current.copy(fontFamily = MontserratFamily)
+        ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -371,6 +385,7 @@ fun ExpandedPlayerScreen(
             }
 
             Spacer(Modifier.height(20.dp))
+        }
         }
     }
 }

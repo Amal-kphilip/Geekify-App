@@ -115,6 +115,35 @@ object Parsers {
             if ((preferred == null || preferred == kind) && none { it.id == card.id } && size < limit) add(card)
         }
     }
+    /**
+     * Album / artist / playlist rows of a *search* result. YouTube Music lists these as
+     * `musicResponsiveListItemRenderer` rows (the same renderer songs use), not as the
+     * `musicTwoRowItemRenderer` cards that [cards] reads, so the filtered tabs came back empty.
+     * The row's own `navigationEndpoint` says what it is; the artist links inside its subtitle are ignored.
+     */
+    fun searchEntities(data: JsonElement, preferred: String? = null, limit: Int = 100): List<Card> = buildList {
+        walk(data).forEach { n ->
+            val o = objectOrNull(n["musicResponsiveListItemRenderer"]) ?: return@forEach
+            val endpoint = objectOrNull(objectOrNull(o["navigationEndpoint"])?.get("browseEndpoint")) ?: return@forEach
+            val bid = endpoint.str("browseId") ?: return@forEach
+            val page = objectOrNull(objectOrNull(endpoint["browseEndpointContextSupportedConfigs"])?.get("browseEndpointContextMusicConfig"))?.str("pageType")
+            val kind = when {
+                page == "MUSIC_PAGE_TYPE_ARTIST" || bid.startsWith("UC") -> "artist"
+                page == "MUSIC_PAGE_TYPE_PLAYLIST" || bid.startsWith("VL") -> "playlist"
+                page == "MUSIC_PAGE_TYPE_ALBUM" || bid.startsWith("MPRE") -> "album"
+                else -> return@forEach
+            }
+            if (preferred != null && preferred != kind) return@forEach
+            val columns = (o["flexColumns"] as? JsonArray).orEmpty().map { c ->
+                val col = objectOrNull(c)
+                objectOrNull(col?.get("musicResponsiveListItemFlexColumnRenderer")) ?: objectOrNull(col?.values?.firstOrNull())
+            }
+            val title = text(columns.firstOrNull()?.get("text")).trim(); if (title.isBlank()) return@forEach
+            val subtitle = columns.drop(1).joinToString(" • ") { text(it?.get("text")).trim() }.trim().ifBlank { null }
+            val card = Card(bid, title, subtitle, findThumbnails(o), kind, null, if (kind == "playlist") bid.removePrefix("VL") else null, bid)
+            if (none { it.id == card.id } && size < limit) add(card)
+        }
+    }
     fun shelves(data: JsonElement): List<Pair<String, JsonObject>> = buildList {
         walk(data).forEach { n -> listOf("musicShelfRenderer", "musicCarouselShelfRenderer", "musicPlaylistShelfRenderer").forEach { key ->
             objectOrNull(n[key])?.let { block ->

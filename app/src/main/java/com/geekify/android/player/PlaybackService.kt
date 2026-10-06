@@ -18,6 +18,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -58,6 +59,10 @@ class PlaybackService : MediaSessionService() {
     companion object {
         private const val PLAYBACK_CHANNEL_ID = NotificationChannels.PLAYBACK
         private const val PLAYBACK_NOTIFICATION_ID = 1001
+        /** Fresh-link attempts for one track before the error is shown. */
+        private const val MAX_STREAM_RETRIES = 3
+        /** Continuous playback after a retry that proves the new link works and refills the retry budget. */
+        private const val RETRY_RESET_AFTER_MS = 15_000L
     }
 
     @Inject lateinit var queueManager: QueueManager
@@ -77,6 +82,7 @@ class PlaybackService : MediaSessionService() {
     private var progressJob: Job? = null
     private var lastPlayingVideoId: String? = null
     private var resolveRetries = 0
+    private var playedSinceRetryMs = 0L
     private var placeholderShown = false
     private lateinit var artworkLoader: CoilBitmapLoader
     private var listenedMs = 0L
@@ -153,6 +159,10 @@ class PlaybackService : MediaSessionService() {
             .setSessionActivity(pendingIntent)
             .setBitmapLoader(CacheBitmapLoader(artworkLoader))
             .build()
+        // Media3 only manages the notification (and the foreground state) for sessions that were added to the
+        // service. The app never creates a MediaController, so onGetSession() is not called by anything and the
+        // session was never added: no media notification was ever posted. Adding it here makes Media3 show it.
+        addSession(mediaSession)
 
         // Tempo, pitch and silence skipping change on the running player (no re-initialisation).
         audioEffects.settings.onEach { s ->
@@ -219,6 +229,12 @@ class PlaybackService : MediaSessionService() {
                     val pos = player.currentPosition
                     val dur = player.duration.coerceAtLeast(0L)
                     queueManager.setProgress(pos, dur)
+
+                    // A link that has played for a while is good: allow fresh-link retries again for later failures.
+                    if (resolveRetries > 0) {
+                        playedSinceRetryMs += 500
+                        if (playedSinceRetryMs >= RETRY_RESET_AFTER_MS) { resolveRetries = 0; playedSinceRetryMs = 0L }
+                    }
 
                     // Count a play only after a real listen (30 s, or half of a short song), not on a skip.
                     if (!playCounted) {
@@ -404,21 +420,36 @@ class PlaybackService : MediaSessionService() {
     private fun handlePlaybackError(error: PlaybackException) {
         val track = queueManager.state.value.current ?: return
         val wasPlaying = queueManager.state.value.isPlaying
-        val urlProblem = error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
-            error.errorCode == PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE ||
-            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
-            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT
-        if (urlProblem && resolveRetries < 1) {
-            // Expired or rejected URL: get a fresh one once and try again from the same position.
+        val httpCode = generateSequence<Throwable>(error) { it.cause }
+            .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
+            .firstOrNull()?.responseCode
+        // 403 / 404 / 410 (and 5xx) mean this particular link is no good; network hiccups are worth a fresh try too.
+        // 429 is left alone: hammering YouTube again right away only makes the rate limit last longer.
+        val urlProblem = when (error.errorCode) {
+            PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ->
+                httpCode == null || httpCode == 403 || httpCode == 404 || httpCode == 410 || httpCode >= 500
+            PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE,
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> true
+            else -> false
+        }
+        if (urlProblem && resolveRetries < MAX_STREAM_RETRIES) {
+            // Rejected or expired URL: get a fresh one and try again from the same position.
             resolveRetries++
+            playedSinceRetryMs = 0L
+            val attempt = resolveRetries
             val resumeAt = player.currentPosition.coerceAtLeast(0L)
-            streamResolver.invalidate(track.videoId)
+            // A 403 can be specific to one audio format: remember it so the next lookup picks another format.
+            if (httpCode == 403) streamResolver.markFailed(track.videoId) else streamResolver.invalidate(track.videoId)
             loadJob?.cancel()
             loadingId = null
             scope.launch {
-                delay(400)
+                // Short, growing pause so a fresh lookup is not answered with the very same refusal.
+                delay(400L * attempt)
                 try {
                     val stream = streamResolver.resolve(track.videoId, forceRefresh = true)
+                    // The user may have skipped to another song while the new link was being fetched.
+                    if (queueManager.state.value.current?.videoId != track.videoId) return@launch
                     audioEffects.setTrackLoudness(stream.loudnessDb)
                     val item = buildMediaItem(track, stream.url, stream.mimeType)
                     player.setMediaItem(item, resumeAt)
@@ -433,6 +464,7 @@ class PlaybackService : MediaSessionService() {
             }
         } else {
             resolveRetries = 0
+            playedSinceRetryMs = 0L
             queueManager.setError(PlaybackErrors.message(error))
             if (wasPlaying) skipAfterError(track)
         }

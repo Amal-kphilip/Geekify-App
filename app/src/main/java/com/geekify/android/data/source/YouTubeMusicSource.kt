@@ -29,7 +29,7 @@ class YouTubeMusicSource @Inject constructor(
     override suspend fun search(query: String, type: SearchType?): MusicResult<SearchResponse> = guarded {
         require(query.isNotBlank()) { "Enter a search term." }
         val kind = type?.name?.lowercase(); val key = "search:$query:$kind"
-        cache.get<SearchResponse>(key) ?: parseSearch(innerTube.search(query, kind), query, kind).also {
+        cache.get<SearchResponse>(key) ?: searchAndParse(query, kind).also {
             cache.put(key, it, FIFTEEN_MINUTES)
             cacheScope.launch { catalog.cacheTracks(it.songs) }
         }
@@ -90,13 +90,24 @@ class YouTubeMusicSource @Inject constructor(
         if (shuffled.isEmpty()) error("Could not load the YouTube Music home feed. Try again shortly.")
         HomeResponse(shuffled.take(18))
     }
+    /** A filtered tab (albums / artists / playlists) that comes back empty falls back to the unfiltered results, which list those too. */
+    private suspend fun searchAndParse(query: String, kind: String?): SearchResponse {
+        val parsed = parseSearch(innerTube.search(query, kind), query, kind)
+        val empty = when (kind) {
+            "album" -> parsed.albums.isEmpty()
+            "artist" -> parsed.artists.isEmpty()
+            "playlist" -> parsed.playlists.isEmpty()
+            else -> false
+        }
+        return if (empty) runCatching { parseSearch(innerTube.search(query, null), query, null) }.getOrDefault(parsed) else parsed
+    }
     private fun parseSearch(raw: JsonObject, query: String, type: String?): SearchResponse {
         val shelves = Parsers.shelves(raw).mapNotNull { (title, block) ->
             val tracks = Parsers.tracks(block); val cards = Parsers.cards(block)
             val items = (if (tracks.isNotEmpty() && cards.isEmpty()) tracks.map(::ShelfTrack) else cards.map(::ShelfCard)); items.takeIf { it.isNotEmpty() }?.let { Shelf(title, it) }
         }
         val allTracks = shelves.flatMap { it.items }.filterIsInstance<ShelfTrack>().map { it.value }.distinctBy { it.videoId }.ifEmpty { Parsers.tracks(raw) }
-        fun cards(kind: String) = Parsers.cards(raw, kind).distinctBy { it.id }
+        fun cards(kind: String) = (Parsers.searchEntities(raw, kind) + Parsers.cards(raw, kind)).distinctBy { it.id }
         return SearchResponse(query, allTracks, if (type == "album") cards("album") else cards("album"), if (type == "artist") cards("artist") else cards("artist"), if (type == "playlist") cards("playlist") else cards("playlist"), shelves)
     }
     private fun parseHome(raw: JsonObject) = HomeResponse(Parsers.shelves(raw).mapNotNull { (title, block) ->

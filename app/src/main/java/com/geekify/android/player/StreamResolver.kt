@@ -31,10 +31,12 @@ class StreamResolver @Inject constructor(
     private val cipher: StreamCipher
 ) : InnerTubeXPlayer {
     /** [loudnessDb] is YouTube's measured loudness for the track (dB relative to its target), when it reports one. */
-    data class ResolvedStream(val url: String, val mimeType: String, val expiresAt: Long, val loudnessDb: Float? = null)
+    data class ResolvedStream(val url: String, val mimeType: String, val expiresAt: Long, val loudnessDb: Float? = null, val itag: Int? = null)
 
     private val cache = HashMap<String, ResolvedStream>()
     private val inFlight = HashMap<String, Deferred<ResolvedStream>>()
+    /** Formats (itags) the server rejected for a video; skipped on the next lookup so a retry does not hit the same 403 again. */
+    private val failedItags = HashMap<String, MutableSet<Int>>()
     private val lock = Any()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -71,6 +73,12 @@ class StreamResolver @Inject constructor(
         synchronized(lock) { cache.remove(videoId) }
     }
 
+    override fun markFailed(videoId: String) {
+        synchronized(lock) {
+            cache.remove(videoId)?.itag?.let { failedItags.getOrPut(videoId) { HashSet() }.add(it) }
+        }
+    }
+
     private suspend fun doResolve(videoId: String): ResolvedStream {
         val raw: JsonObject = try {
             innerTube.playerStreams(videoId)
@@ -105,7 +113,13 @@ class StreamResolver @Inject constructor(
             val u = f["url"]?.jsonPrimitive?.contentOrNull ?: runCatching { cipher.decipher(videoId, f) }.getOrNull()
             if (!u.isNullOrBlank()) urlByFormat[f] = u
         }
-        val audio = audioFormats.filter { it in urlByFormat }
+        val usable = audioFormats.filter { it in urlByFormat }
+        // Skip formats the server already refused for this video; if that leaves nothing, start over with all of them.
+        val failed = synchronized(lock) { failedItags[videoId]?.toSet().orEmpty() }
+        val audio = usable.filter { itagOf(it) !in failed }.ifEmpty {
+            synchronized(lock) { failedItags.remove(videoId) }
+            usable
+        }
         // Dubbed videos list several audio tracks: prefer the original/default one.
         val defaultTrack = audio.filter { f ->
             f["audioTrack"]?.jsonObject?.get("audioIsDefault")?.jsonPrimitive?.booleanOrNull != false
@@ -121,8 +135,10 @@ class StreamResolver @Inject constructor(
             ?: throw StreamException("The audio format has no URL.")
         val mime = (best["mimeType"]?.jsonPrimitive?.contentOrNull ?: "audio/mp4").substringBefore(";")
 
-        return ResolvedStream(url, mime, expiryOf(streaming, url), loudnessOf(raw))
+        return ResolvedStream(url, mime, expiryOf(streaming, url), loudnessOf(raw), itagOf(best))
     }
+
+    private fun itagOf(format: JsonObject): Int? = format["itag"]?.jsonPrimitive?.intOrNull
 
     /** `playerConfig.audioConfig.loudnessDb`: used by volume normalisation. Any missing / odd value is just null. */
     private fun loudnessOf(raw: JsonObject): Float? {
