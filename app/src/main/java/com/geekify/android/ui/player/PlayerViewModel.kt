@@ -2,6 +2,7 @@ package com.geekify.android.ui.player
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.geekify.android.audio.AudioEffectsController
 import com.geekify.android.data.local.LibraryRepository
 import com.geekify.android.data.model.Track
 import com.geekify.android.player.PlayerController
@@ -14,10 +15,12 @@ import javax.inject.Inject
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
     private val controller: PlayerController,
-    private val library: LibraryRepository
+    private val library: LibraryRepository,
+    private val audioEffects: AudioEffectsController
 ) : ViewModel() {
 
     val state: StateFlow<QueueState> = controller.state
+    val artworkBeatIntensity: StateFlow<Float> = audioEffects.beatIntensity
 
     private val _isCurrentLiked = MutableStateFlow(false)
     val isCurrentLiked: StateFlow<Boolean> = _isCurrentLiked.asStateFlow()
@@ -48,6 +51,7 @@ class PlayerViewModel @Inject constructor(
     fun removeFromQueue(index: Int) = controller.removeFromQueue(index)
     fun reorder(from: Int, to: Int) = controller.reorder(from, to)
     fun clearQueue() = controller.clearQueue()
+    fun setArtworkReactiveEnabled(enabled: Boolean) = audioEffects.setArtworkReactiveEnabled(enabled)
 
     fun toggleLikeCurrent() {
         val current = state.value.current ?: return

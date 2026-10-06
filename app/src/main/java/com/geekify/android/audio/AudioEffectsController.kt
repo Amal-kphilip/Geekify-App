@@ -37,9 +37,13 @@ class AudioEffectsController @Inject constructor(
 ) {
     val equalizer = BiquadEqualizerProcessor()
     val normalizer = NormalizationProcessor()
+    val reactiveMeter = MusicReactiveMeterProcessor()
+
+    /** Read-only visual intensity derived from the existing PCM audio path. */
+    val beatIntensity: StateFlow<Float> = reactiveMeter.beatIntensity
 
     /** The processors in the order the audio sink runs them. */
-    val processors: Array<AudioProcessor> get() = arrayOf(equalizer, normalizer)
+    val processors: Array<AudioProcessor> get() = arrayOf(equalizer, normalizer, reactiveMeter)
 
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
     private val _settings = MutableStateFlow(AudioSettings())
@@ -65,6 +69,9 @@ class AudioEffectsController @Inject constructor(
 
     /** Called when a new stream is about to play; feeds the volume normaliser (null = loudness unknown). */
     fun setTrackLoudness(loudnessDb: Float?) = normalizer.setTrackLoudnessDb(loudnessDb)
+
+    /** Enables the read-only meter only while the Now Playing artwork needs it. */
+    fun setArtworkReactiveEnabled(enabled: Boolean) = reactiveMeter.setEnabled(enabled)
 
     private fun apply(s: AudioSettings) {
         equalizer.setBands(s.eqEnabled, s.bandGainsDb)

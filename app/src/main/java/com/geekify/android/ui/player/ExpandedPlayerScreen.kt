@@ -44,9 +44,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.launch
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.findViewTreeLifecycleOwner
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -60,6 +64,7 @@ import com.geekify.android.data.model.Track
 import com.geekify.android.player.RepeatMode
 import com.geekify.android.ui.components.CircleIconButton
 import com.geekify.android.ui.components.MarqueeText
+import com.geekify.android.ui.components.MusicReactiveArtwork
 import com.geekify.android.ui.components.SeekBar
 import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.components.rememberArtColor
@@ -83,6 +88,29 @@ fun ExpandedPlayerScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val isLiked by viewModel.isCurrentLiked.collectAsState()
+    val lifecycleOwner = LocalView.current.findViewTreeLifecycleOwner()
+    var isNowPlayingActive by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true)
+    }
+    DisposableEffect(lifecycleOwner) {
+        if (lifecycleOwner == null) return@DisposableEffect onDispose { viewModel.setArtworkReactiveEnabled(false) }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> isNowPlayingActive = true
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE,
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> isNowPlayingActive = false
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.setArtworkReactiveEnabled(false)
+        }
+    }
+    LaunchedEffect(isNowPlayingActive, state.isPlaying) {
+        viewModel.setArtworkReactiveEnabled(isNowPlayingActive && state.isPlaying)
+    }
     val track = state.current ?: run {
         onDismiss()
         return
@@ -224,16 +252,22 @@ fun ExpandedPlayerScreen(
                     .background(InkElevated),
                 contentAlignment = Alignment.Center
             ) {
-                Crossfade(targetState = thumbUrl, animationSpec = tween(400), label = "bigArt") { url ->
-                    if (url != null) {
-                        AsyncImage(
-                            model = url,
-                            contentDescription = track.title,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Icon(Icons.Default.MusicNote, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(80.dp))
+                MusicReactiveArtwork(
+                    isPlaying = state.isPlaying && isNowPlayingActive,
+                    beatIntensity = viewModel.artworkBeatIntensity,
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    Crossfade(targetState = thumbUrl, animationSpec = tween(400), label = "bigArt") { url ->
+                        if (url != null) {
+                            AsyncImage(
+                                model = url,
+                                contentDescription = track.title,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Icon(Icons.Default.MusicNote, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(80.dp))
+                        }
                     }
                 }
             }
