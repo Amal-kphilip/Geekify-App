@@ -63,7 +63,25 @@ import com.geekify.android.ui.components.CreatePlaylistDialog
 import com.geekify.android.ui.components.LocalBottomInset
 import com.geekify.android.ui.components.LocalNowPlayingId
 import com.geekify.android.ui.components.bouncyClickable
-import com.geekify.android.ui.components.glassPill
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.graphics.graphicsLayer
+import com.geekify.android.ui.glass.GlassOverlayHost
+import com.geekify.android.ui.glass.GlassOverlays
+import com.geekify.android.ui.glass.GlassStyle
+import com.geekify.android.ui.glass.LocalGlassBackdrop
+import com.geekify.android.ui.glass.LocalGlassOverlayHost
+import com.geekify.android.ui.glass.consumeTaps
+import com.geekify.android.ui.glass.glassBackdropSource
+import com.geekify.android.ui.glass.liquidGlass
+import com.geekify.android.ui.glass.rememberGlassBackdrop
+import com.geekify.android.ui.glass.rememberReducedMotion
+import com.geekify.android.ui.glass.trackPress
 import com.geekify.android.ui.components.TrackActionsDialog
 import com.geekify.android.ui.details.ArtistScreen
 import com.geekify.android.ui.details.CollectionScreen
@@ -106,7 +124,9 @@ fun MainScreen(
     navController: NavHostController = rememberNavController(),
     playerViewModel: PlayerViewModel = hiltViewModel(),
     accountViewModel: AccountViewModel = hiltViewModel(),
-    libraryViewModel: LibraryViewModel = hiltViewModel()
+    libraryViewModel: LibraryViewModel = hiltViewModel(),
+    startRoute: String? = null,
+    onStartRouteConsumed: () -> Unit = {}
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -136,6 +156,14 @@ fun MainScreen(
 
     LaunchedEffect(Unit) {
         availableUpdate = updateManager.findAvailableUpdate()
+    }
+
+    // Deep link from a Geekify notification (e.g. "recents"). Only known routes are accepted.
+    LaunchedEffect(startRoute) {
+        if (startRoute == Screen.Recents.route) {
+            navController.navigate(Screen.Recents.route) { launchSingleTop = true }
+        }
+        if (startRoute != null) onStartRouteConsumed()
     }
 
     // Back handling lives inside each overlay (ExpandedPlayerScreen, QueueScreen) so the topmost
@@ -189,11 +217,23 @@ fun MainScreen(
         }
     }
 
+    // Two backdrops: the CONTENT (what the floating nav / mini player float over) and the whole SCENE
+    // (what popups, dialogs, panels and the queue float over). Glass never samples itself.
+    val contentBackdrop = rememberGlassBackdrop()
+    val sceneBackdrop = rememberGlassBackdrop()
+    val overlayHost = remember { GlassOverlayHost() }
+
     CompositionLocalProvider(
         LocalNowPlayingId provides playerState.current?.videoId,
-        LocalBottomInset provides floatingBarsHeight
+        LocalBottomInset provides floatingBarsHeight,
+        LocalGlassOverlayHost provides overlayHost
     ) {
     Box(modifier = Modifier.fillMaxSize().background(InkBackground)) {
+      // ---- SCENE: everything that sits underneath popups / dialogs / panels ----
+      Box(modifier = Modifier.fillMaxSize().glassBackdropSource(sceneBackdrop, enabled = overlayHost.entries.isNotEmpty() || showQueue).background(InkBackground)) {
+      CompositionLocalProvider(LocalGlassBackdrop provides contentBackdrop) {
+        // Main content stays clean, sharp and opaque. It is only RECORDED so the floating bars can sample it.
+        Box(modifier = Modifier.fillMaxSize().glassBackdropSource(contentBackdrop).background(InkBackground)) {
                 NavHost(
                     modifier = Modifier.fillMaxSize(),
                     navController = navController,
@@ -356,12 +396,17 @@ fun MainScreen(
                     }
                 }
 
+        }
+
         // ---- Floating mini player + navigation pill (content scrolls underneath) ----
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .onSizeChanged { floatingBarsHeightPx = it.height }
+                // Topmost pointer target for the whole bottom strip (pills AND the gaps between/around them):
+                // a tap here can never reach a song, album or card underneath.
+                .consumeTaps()
         ) {
             // Fades the list into the background behind the pills.
             Box(
@@ -370,8 +415,8 @@ fun MainScreen(
                     .background(
                         Brush.verticalGradient(
                             0f to Color.Transparent,
-                            0.45f to InkBackground.copy(alpha = 0.88f),
-                            1f to InkBackground
+                            0.5f to InkBackground.copy(alpha = 0.55f),
+                            1f to InkBackground.copy(alpha = 0.85f)
                         )
                     )
             )
@@ -395,6 +440,8 @@ fun MainScreen(
             }
         }
 
+      }
+
         // Fullscreen Expanded Player Overlay
         AnimatedVisibility(
             visible = showExpandedPlayer,
@@ -414,7 +461,10 @@ fun MainScreen(
             )
         }
 
-        // Queue Overlay
+      } // end SCENE
+
+      CompositionLocalProvider(LocalGlassBackdrop provides sceneBackdrop) {
+        // Queue Overlay (a glass container over the dimmed scene)
         AnimatedVisibility(
             visible = showQueue,
             enter = slideInVertically(tween(380, easing = FastOutSlowInEasing), initialOffsetY = { it }) + fadeIn(tween(250)),
@@ -506,11 +556,18 @@ fun MainScreen(
                 onLater = { availableUpdate = null }
             )
         }
+
+        // Popups, dialogs and the profile panel register here so they can be glass over the scene.
+        GlassOverlays(overlayHost)
+      }
     }
     }
 }
 
-/** Frosted capsule with the primary destinations; the selected one sits in a lime circle. Settings lives in the profile menu. */
+/**
+ * Floating Liquid Glass pill with the primary destinations. The lime selection circle slides between items on a spring.
+ * Settings lives in the profile menu. Every item is a 56dp target with a content description.
+ */
 @Composable
 private fun FloatingNavBar(
     currentRoute: String?,
@@ -519,43 +576,55 @@ private fun FloatingNavBar(
     onLibrary: () -> Unit,
     onCreate: () -> Unit
 ) {
-    Row(
+    val selectedIndex = when (currentRoute) {
+        Screen.Home.route -> 0
+        Screen.Search.route -> 1
+        Screen.Library.route -> 2
+        else -> -1
+    }
+    val reduced = rememberReducedMotion()
+    val pressed = remember { mutableStateOf(false) }
+    val pressAnim by animateFloatAsState(if (pressed.value) 1f else 0f, label = "navPress")
+
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .glassPill(CircleShape)
-            .padding(horizontal = 10.dp, vertical = 9.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+            .liquidGlass(CircleShape, GlassStyle.Navigation, pressProgress = { pressAnim })
+            .trackPress(pressed)
+            .consumeTaps() // the bar itself is a pointer target; item clicks still win because children are handled first
     ) {
-        NavPillItem(
-            selected = currentRoute == Screen.Home.route,
-            selectedIcon = Icons.Filled.Home,
-            icon = Icons.Outlined.Home,
-            label = "Home",
-            onClick = onHome
+        val itemSize = 56.dp
+        val inner = maxWidth - 20.dp
+        val gap = (inner - itemSize * 4) / 3
+        val targetX = (itemSize + gap) * selectedIndex.coerceAtLeast(0)
+        val indicatorX by animateDpAsState(
+            targetValue = targetX,
+            animationSpec = if (reduced) snap() else spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMedium),
+            label = "navIndicatorX"
         )
-        NavPillItem(
-            selected = currentRoute == Screen.Search.route,
-            selectedIcon = Icons.Filled.Search,
-            icon = Icons.Outlined.Search,
-            label = "Search",
-            onClick = onSearch
-        )
-        NavPillItem(
-            selected = currentRoute == Screen.Library.route,
-            selectedIcon = Icons.Filled.LibraryMusic,
-            icon = Icons.Outlined.LibraryMusic,
-            label = "My Music",
-            onClick = onLibrary
-        )
-        // "Create" is an action, never a destination.
-        NavPillItem(
-            selected = false,
-            selectedIcon = Icons.Filled.Add,
-            icon = Icons.Outlined.Add,
-            label = "Create playlist",
-            onClick = onCreate
-        )
+        val indicatorAlpha by animateFloatAsState(if (selectedIndex >= 0) 1f else 0f, label = "navIndicatorAlpha")
+
+        Box(modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp)) {
+            Box(
+                modifier = Modifier
+                    .offset(x = indicatorX)
+                    .size(itemSize)
+                    .graphicsLayer { alpha = indicatorAlpha }
+                    .clip(CircleShape)
+                    .background(Lime)
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                NavPillItem(selectedIndex == 0, Icons.Filled.Home, Icons.Outlined.Home, "Home", onHome)
+                NavPillItem(selectedIndex == 1, Icons.Filled.Search, Icons.Outlined.Search, "Search", onSearch)
+                NavPillItem(selectedIndex == 2, Icons.Filled.LibraryMusic, Icons.Outlined.LibraryMusic, "My Music", onLibrary)
+                // "Create" is an action, never a destination.
+                NavPillItem(false, Icons.Filled.Add, Icons.Outlined.Add, "Create playlist", onCreate)
+            }
+        }
     }
 }
 
@@ -567,13 +636,11 @@ private fun NavPillItem(
     label: String,
     onClick: () -> Unit
 ) {
-    val bg by animateColorAsState(if (selected) Lime else Color.Transparent, tween(220), label = "navBg")
-    val fg by animateColorAsState(if (selected) OnAccent else Color.White.copy(alpha = 0.92f), tween(220), label = "navFg")
+    val fg by animateColorAsState(if (selected) OnAccent else Color.White.copy(alpha = 0.94f), tween(220), label = "navFg")
     Box(
         modifier = Modifier
             .size(56.dp)
             .clip(CircleShape)
-            .background(bg)
             .bouncyClickable(pressedScale = 0.9f, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {

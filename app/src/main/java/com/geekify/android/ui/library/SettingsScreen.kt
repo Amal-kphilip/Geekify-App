@@ -8,6 +8,10 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.geekify.android.notifications.NotificationSettingsViewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.background
@@ -25,7 +29,12 @@ import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.theme.*
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onAudioClick: () -> Unit = {}) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onAudioClick: () -> Unit = {},
+    notificationSettings: NotificationSettingsViewModel = hiltViewModel()
+) {
+    val notif by notificationSettings.prefs.collectAsState()
     AuroraBackground {
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 20.dp)) {
             Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -35,6 +44,16 @@ fun SettingsScreen(onBack: () -> Unit, onAudioClick: () -> Unit = {}) {
             }
             Spacer(Modifier.height(20.dp))
             SettingsEntry(Icons.Default.GraphicEq, "Audio & equalizer", "Equalizer, tempo, pitch, normalization", onAudioClick)
+            Spacer(Modifier.height(14.dp))
+            Surface(color = InkPanel, shape = RoundedCornerShape(28.dp)) {
+                Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp)) {
+                    Text("Notifications", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 10.dp))
+                    NotificationSwitch("App updates", "Tell me when a new Geekify version is available", notif.updates, notificationSettings::setUpdates)
+                    NotificationSwitch("Tips & new features", "Rare notes after an update", notif.tips, notificationSettings::setTips)
+                    NotificationSwitch("Library reminders", "Occasionally continue your recent songs (off by default)", notif.engagement, notificationSettings::setEngagement)
+                    Text("Playback controls are managed in Android's notification settings.", color = TextMuted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 10.dp))
+                }
+            }
             Spacer(Modifier.height(14.dp))
             Surface(color = InkElevated, shape = RoundedCornerShape(28.dp)) {
                 Column(Modifier.padding(18.dp)) {
@@ -77,5 +96,16 @@ private fun SettingsEntry(icon: androidx.compose.ui.graphics.vector.ImageVector,
             Text(subtitle, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
         }
         Icon(Icons.Default.ChevronRight, null, tint = TextMuted)
+    }
+}
+
+@Composable
+private fun NotificationSwitch(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = TextPrimary, fontSize = 15.sp)
+            Text(subtitle, color = TextSecondary, fontSize = 12.sp)
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
     }
 }

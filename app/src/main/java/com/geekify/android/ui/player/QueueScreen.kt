@@ -20,7 +20,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.geekify.android.ui.components.AuroraBackground
+import com.geekify.android.ui.glass.GlassStyle
+import com.geekify.android.ui.glass.LocalGlassDim
+import com.geekify.android.ui.glass.consumeTaps
+import com.geekify.android.ui.glass.liquidGlass
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.CompositionLocalProvider
 import com.geekify.android.ui.components.CircleIconButton
 import com.geekify.android.ui.components.TrackRow
 import com.geekify.android.ui.theme.TextMuted
@@ -39,14 +45,23 @@ fun QueueScreen(
     // closes the queue first and never pops a screen underneath it.
     BackHandler(onBack = onBack)
 
-    AuroraBackground {
+    // One glass container floating over the dimmed app; the song rows inside stay clean (no per-row glass cards).
+    // The scrim consumes touches so nothing behind the queue can be tapped.
+    CompositionLocalProvider(LocalGlassDim provides 0.42f) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.42f)).consumeTaps()) {
+      Box(
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .padding(top = 8.dp)
+            .liquidGlass(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp), GlassStyle.Panel)
+      ) {
         Scaffold(
             containerColor = Color.Transparent,
             topBar = {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .statusBarsPadding()
                         .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -143,5 +158,7 @@ fun QueueScreen(
                 }
             }
         }
+      }
+    }
     }
 }

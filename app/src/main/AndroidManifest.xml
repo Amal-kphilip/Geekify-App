@@ -40,6 +40,10 @@
             </intent-filter>
         </activity>
 
+        <receiver
+            android:name=".notifications.NotificationActionReceiver"
+            android:exported="false" />
+
         <service
             android:name=".player.PlaybackService"
             android:exported="true"

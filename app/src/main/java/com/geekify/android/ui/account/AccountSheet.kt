@@ -38,7 +38,11 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
 import com.geekify.android.data.auth.SyncState
-import com.geekify.android.ui.components.DialogBackdrop
+import com.geekify.android.ui.glass.GlassOverlayPortal
+import com.geekify.android.ui.glass.GlassStyle
+import com.geekify.android.ui.glass.OverlayEnter
+import com.geekify.android.ui.glass.consumeTaps
+import com.geekify.android.ui.glass.liquidGlass
 import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.theme.*
 
@@ -59,27 +63,26 @@ fun AccountSheet(
 ) {
     val state by viewModel.uiState.collectAsState()
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
-    ) {
-        DialogBackdrop(dim = 0.6f, blurRadius = 24)
+    // Floating Liquid Glass panel (portal into the root overlay host so it can sample the screen behind it).
+    GlassOverlayPortal(onDismiss = onDismiss, scrim = 0.45f, alignment = Alignment.TopStart, enter = OverlayEnter.None) {
         var panelVisible by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) { panelVisible = true }
-
-        Box(modifier = Modifier.fillMaxSize().clickable(onClick = onDismiss)) {
-            AnimatedVisibility(
-                visible = panelVisible,
-                enter = slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(200)),
-                modifier = Modifier.fillMaxHeight().widthIn(max = 352.dp).fillMaxWidth(0.88f)
+        AnimatedVisibility(
+            visible = panelVisible,
+            enter = slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(200)),
+            modifier = Modifier.fillMaxHeight().widthIn(max = 352.dp).fillMaxWidth(0.88f)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .liquidGlass(
+                        RoundedCornerShape(topEnd = 36.dp, bottomEnd = 36.dp),
+                        GlassStyle.Panel,
+                        highlightEnd = true // light catching the panel's leading edge
+                    )
+                    .consumeTaps()
             ) {
-                Surface(
-                    modifier = Modifier.fillMaxSize().clickable(onClick = {}),
-                    color = InkPanel,
-                    shape = RoundedCornerShape(topEnd = 36.dp, bottomEnd = 36.dp),
-                    shadowElevation = 24.dp
-                ) {
-                    ProfileHub(
+                ProfileHub(
                         state, onDismiss,
                         onAccountClick = { onAddAccountClick(); onDismiss() },
                         onProfileClick = {
@@ -92,7 +95,6 @@ fun AccountSheet(
                         onHealthClick = { onHealthClick(); onDismiss() },
                         onSignOut = { viewModel.signOut(); onDismiss() }
                     )
-                }
             }
         }
     }

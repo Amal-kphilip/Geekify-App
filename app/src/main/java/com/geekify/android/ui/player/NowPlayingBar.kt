@@ -35,7 +35,13 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.components.bestArtworkUrl
-import com.geekify.android.ui.components.glassPill
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import com.geekify.android.ui.glass.GlassStyle
+import com.geekify.android.ui.glass.LocalGlassBackdrop
+import com.geekify.android.ui.glass.liquidGlass
+import com.geekify.android.ui.glass.trackPress
 import com.geekify.android.ui.theme.*
 
 /**
@@ -52,11 +58,15 @@ fun NowPlayingBar(
     val track = state.current ?: return
 
     val thumbUrl = track.thumbnails.bestArtworkUrl(480)
+    val pressed = remember { mutableStateOf(false) }
+    val pressAnim by animateFloatAsState(if (pressed.value) 1f else 0f, label = "miniPress")
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .glassPill(RoundedCornerShape(40.dp))
+            // Floating glass surface only: the cover, title, artist and controls inside it stay sharp and opaque.
+            .liquidGlass(RoundedCornerShape(40.dp), GlassStyle.Floating, pressProgress = { pressAnim })
+            .trackPress(pressed)
             .bouncyClickable(pressedScale = 0.985f, onClick = onClick)
     ) {
         Row(

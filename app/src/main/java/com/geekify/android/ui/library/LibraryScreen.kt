@@ -14,8 +14,8 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QueueMusic
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import com.geekify.android.ui.glass.GlassMenu
+import com.geekify.android.ui.glass.GlassMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -103,25 +103,18 @@ fun LibraryScreen(
                         onClick = { menuOpen = true },
                         size = 50.dp
                     )
-                    DropdownMenu(
+                    GlassMenu(
                         expanded = menuOpen,
-                        onDismissRequest = { menuOpen = false },
-                        containerColor = InkElevated
+                        onDismissRequest = { menuOpen = false }
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("New playlist", color = TextPrimary) },
-                            onClick = {
-                                menuOpen = false
-                                showCreateDialog = true
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Account", color = TextPrimary) },
-                            onClick = {
-                                menuOpen = false
-                                onAvatarClick()
-                            }
-                        )
+                        GlassMenuItem("New playlist") {
+                            menuOpen = false
+                            showCreateDialog = true
+                        }
+                        GlassMenuItem("Account") {
+                            menuOpen = false
+                            onAvatarClick()
+                        }
                     }
                 }
             }

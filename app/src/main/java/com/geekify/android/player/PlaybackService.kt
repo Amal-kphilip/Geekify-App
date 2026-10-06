@@ -1,8 +1,6 @@
 package com.geekify.android.player
 
 import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -29,12 +27,15 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.DefaultMediaNotificationProvider
 import com.geekify.android.MainActivity
 import com.geekify.android.audio.AudioEffectsController
 import com.geekify.android.R
 import com.geekify.android.data.model.Track
-import com.geekify.android.ui.components.bestArtworkUrl
+import com.geekify.android.notifications.NotificationChannels
+import com.geekify.android.player.artwork.ArtworkUrls
+import com.geekify.android.player.artwork.CoilBitmapLoader
 import com.geekify.android.data.source.innertube.InnerTubeClient
 import com.geekify.android.data.source.MusicSource
 import dagger.hilt.android.AndroidEntryPoint
@@ -55,7 +56,7 @@ import javax.inject.Inject
 class PlaybackService : MediaSessionService() {
 
     companion object {
-        private const val PLAYBACK_CHANNEL_ID = "playback"
+        private const val PLAYBACK_CHANNEL_ID = NotificationChannels.PLAYBACK
         private const val PLAYBACK_NOTIFICATION_ID = 1001
     }
 
@@ -76,7 +77,8 @@ class PlaybackService : MediaSessionService() {
     private var progressJob: Job? = null
     private var lastPlayingVideoId: String? = null
     private var resolveRetries = 0
-    private var foregroundShownFor: String? = null
+    private var placeholderShown = false
+    private lateinit var artworkLoader: CoilBitmapLoader
     private var listenedMs = 0L
     private var playCounted = false
     private var restoredPositionUsed = false
@@ -89,12 +91,16 @@ class PlaybackService : MediaSessionService() {
         // Load the YouTube config/visitor id in the background so the first song does not wait for it.
         scope.launch(Dispatchers.IO) { innerTube.warmUp() }
 
-        // On current Samsung/Android releases a concrete provider and app icon make
-        // the foreground media notification reliable when playback leaves the app.
+        // Media3 owns the media notification (same id/channel as the early placeholder below). Artwork comes from
+        // the session's BitmapLoader (Coil-backed, see CoilBitmapLoader), so the cover is cached, downsampled and
+        // applied to the lock screen / notification as soon as it is ready.
         setMediaNotificationProvider(
-            DefaultMediaNotificationProvider(this).apply {
-                setSmallIcon(R.mipmap.ic_launcher)
-            }
+            DefaultMediaNotificationProvider.Builder(this)
+                .setNotificationId(PLAYBACK_NOTIFICATION_ID)
+                .setChannelId(PLAYBACK_CHANNEL_ID)
+                .setChannelName(R.string.channel_playback_name)
+                .build()
+                .apply { setSmallIcon(R.drawable.ic_stat_geekify) }
         )
 
         val dataSourceFactory = OkHttpDataSource.Factory(http)
@@ -142,8 +148,10 @@ class PlaybackService : MediaSessionService() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        artworkLoader = CoilBitmapLoader(this)
         mediaSession = MediaSession.Builder(this, QueuePlayer(player))
             .setSessionActivity(pendingIntent)
+            .setBitmapLoader(CacheBitmapLoader(artworkLoader))
             .build()
 
         // Tempo, pitch and silence skipping change on the running player (no re-initialisation).
@@ -237,19 +245,13 @@ class PlaybackService : MediaSessionService() {
         queueManager.state.onEach { state ->
             if (player.volume != state.volume) player.volume = state.volume
             val track = state.current ?: return@onEach
-            // Promote immediately when the user starts a song. Resolving a stream can take a
-            // few seconds, during which Media3's automatic notification has no prepared item
-            // yet. Without this, Android can keep the service background-only after the app is
-            // minimized and no media card reaches the notification drawer.
-            // Once per song is enough to promote the service. Re-posting it on every progress update
-            // (twice a second) kept overwriting Media3's own notification, which carries the controls.
-            if (state.isPlaying || state.isBuffering) {
-                if (foregroundShownFor != track.videoId) {
-                    foregroundShownFor = track.videoId
-                    showForegroundPlaybackNotification(track)
-                }
-            } else {
-                foregroundShownFor = null
+            // Before the very first stream is prepared Media3 has no item, so it posts no notification and Android
+            // could keep the service background-only. Promote the service with a one-off placeholder in that gap only.
+            // Once the player has a media item Media3 owns notification id 1001 (it carries the artwork and the
+            // controls); re-posting our own, artwork-less notification over it is what used to wipe the cover.
+            if ((state.isPlaying || state.isBuffering) && !placeholderShown && player.currentMediaItem == null) {
+                placeholderShown = true
+                showForegroundPlaybackNotification(track)
             }
             if (player.currentMediaItem?.mediaId != track.videoId) {
                 // After a restart the restored queue loads paused; only auto-play when the user asked to play.
@@ -291,18 +293,7 @@ class PlaybackService : MediaSessionService() {
         override fun seekToPreviousMediaItem() { queueManager.previous(currentPosition.coerceAtLeast(0L) / 1000) }
     }
 
-    private fun createPlaybackNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val channel = NotificationChannel(
-            PLAYBACK_CHANNEL_ID,
-            "Music playback",
-            NotificationManager.IMPORTANCE_LOW
-        ).apply {
-            description = "Playback controls and current song"
-            setShowBadge(false)
-        }
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-    }
+    private fun createPlaybackNotificationChannel() = NotificationChannels.ensureAll(this)
 
     private fun showForegroundPlaybackNotification(track: Track) {
         val openAppIntent = PendingIntent.getActivity(
@@ -314,7 +305,7 @@ class PlaybackService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val notification = Notification.Builder(this, PLAYBACK_CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_geekify)
             .setContentTitle(track.title)
             .setContentText(track.artist)
             .setContentIntent(openAppIntent)
@@ -335,6 +326,25 @@ class PlaybackService : MediaSessionService() {
             startForeground(PLAYBACK_NOTIFICATION_ID, notification)
         }
     }
+
+    /** One place builds every MediaItem so all song sources expose title, artist, album and a loadable artwork URI. */
+    private fun buildMediaItem(track: Track, url: String, mimeType: String?): MediaItem =
+        MediaItem.Builder()
+            .setMediaId(track.videoId)
+            .setUri(url)
+            .setMimeType(mimeType)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(track.title)
+                    .setDisplayTitle(track.title)
+                    .setArtist(track.artist)
+                    .setAlbumTitle(track.album)
+                    .setArtworkUri(ArtworkUrls.forTrack(track)?.let(Uri::parse))
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                    .setIsPlayable(true)
+                    .build()
+            )
+            .build()
 
     private var loadJob: Job? = null
     private var loadingId: String? = null
@@ -363,19 +373,7 @@ class PlaybackService : MediaSessionService() {
             try {
                 val stream = streamResolver.resolve(track.videoId)
                 audioEffects.setTrackLoudness(stream.loudnessDb)
-                val item = MediaItem.Builder()
-                    .setMediaId(track.videoId)
-                    .setUri(stream.url)
-                    .setMimeType(stream.mimeType)
-                    .setMediaMetadata(
-                        MediaMetadata.Builder()
-                            .setTitle(track.title)
-                            .setArtist(track.artist)
-                            .setAlbumTitle(track.album)
-                            .setArtworkUri(track.thumbnails.bestArtworkUrl()?.let(Uri::parse))
-                            .build()
-                    )
-                    .build()
+                val item = buildMediaItem(track, stream.url, stream.mimeType)
                 player.setMediaItem(item, startMs)
                 // The user may have pressed play/pause while the stream was being resolved.
                 player.playWhenReady = queueManager.state.value.isPlaying
@@ -422,19 +420,7 @@ class PlaybackService : MediaSessionService() {
                 try {
                     val stream = streamResolver.resolve(track.videoId, forceRefresh = true)
                     audioEffects.setTrackLoudness(stream.loudnessDb)
-                    val item = MediaItem.Builder()
-                        .setMediaId(track.videoId)
-                        .setUri(stream.url)
-                        .setMimeType(stream.mimeType)
-                    .setMediaMetadata(
-                        MediaMetadata.Builder()
-                            .setTitle(track.title)
-                            .setArtist(track.artist)
-                            .setAlbumTitle(track.album)
-                            .setArtworkUri(track.thumbnails.bestArtworkUrl()?.let(Uri::parse))
-                            .build()
-                    )
-                        .build()
+                    val item = buildMediaItem(track, stream.url, stream.mimeType)
                     player.setMediaItem(item, resumeAt)
                     player.playWhenReady = queueManager.state.value.isPlaying
                     player.prepare()
@@ -490,6 +476,7 @@ class PlaybackService : MediaSessionService() {
         queueManager.persistProgress()
         progressJob?.cancel()
         mediaSession.release()
+        artworkLoader.close()
         player.release()
         super.onDestroy()
     }
