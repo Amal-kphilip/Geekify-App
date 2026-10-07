@@ -8,12 +8,14 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -206,12 +208,14 @@ fun EqualizerBars(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TrackRow(
     track: Track,
     modifier: Modifier = Modifier,
     isPlaying: Boolean = LocalNowPlayingId.current == track.videoId,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     onMoreClick: (() -> Unit)? = null,
     moreIcon: ImageVector = Icons.Default.MoreHoriz,
     moreContentDescription: String = "More",
@@ -220,7 +224,13 @@ fun TrackRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .bouncyClickable(pressedScale = 0.985f, onClick = onClick)
+            .run {
+                if (onLongClick != null) {
+                    bouncyCombinedClickable(pressedScale = 0.985f, onLongClick = onLongClick, onClick = onClick)
+                } else {
+                    bouncyClickable(pressedScale = 0.985f, onClick = onClick)
+                }
+            }
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -312,6 +322,7 @@ fun TrackActionsDialog(
     playlists: List<LocalPlaylist>,
     onDismiss: () -> Unit,
     onToggleLike: () -> Unit,
+    onAddToQueue: () -> Unit,
     onAddToPlaylist: (String) -> Unit,
     onCreatePlaylist: (String) -> Unit
 ) {
@@ -353,6 +364,11 @@ fun TrackActionsDialog(
             label = if (liked) "Remove from Liked Songs" else "Add to Liked Songs",
             iconTint = if (liked) Lime else TextPrimary
         ) { onToggleLike(); onDismiss() }
+
+        ActionRow(
+            icon = Icons.Default.AddCircleOutline,
+            label = "Add to Queue"
+        ) { onAddToQueue(); onDismiss() }
 
         Text(
             "Add to playlist",
@@ -417,16 +433,24 @@ private fun ActionRow(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun CardItem(
     card: Card,
     modifier: Modifier = Modifier,
     width: Dp = 150.dp,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null
 ) {
     Column(
         modifier = modifier
             .width(width)
-            .bouncyClickable(onClick = onClick)
+            .run {
+                if (onLongClick != null) {
+                    bouncyCombinedClickable(onLongClick = onLongClick, onClick = onClick)
+                } else {
+                    bouncyClickable(onClick = onClick)
+                }
+            }
     ) {
         val thumbUrl = card.thumbnails.bestArtworkUrl(480)
         val isCircle = card.type == "artist"

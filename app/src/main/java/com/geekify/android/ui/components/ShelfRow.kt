@@ -13,7 +13,8 @@ fun ShelfRow(
     shelf: Shelf,
     modifier: Modifier = Modifier,
     onTrackClick: (Track, List<Track>) -> Unit,
-    onCardClick: (Card) -> Unit
+    onCardClick: (Card) -> Unit,
+    onTrackLongClick: (Track) -> Unit = {}
 ) {
     if (shelf.items.isEmpty()) return
 
@@ -44,7 +45,8 @@ fun ShelfRow(
                                 type = "song",
                                 videoId = item.value.videoId
                             ),
-                            onClick = { onTrackClick(item.value, allTracksInShelf) }
+                            onClick = { onTrackClick(item.value, allTracksInShelf) },
+                            onLongClick = { onTrackLongClick(item.value) }
                         )
                     }
                     is ShelfCard -> {

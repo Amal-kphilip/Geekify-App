@@ -1,5 +1,6 @@
 package com.geekify.android.ui.home
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -53,7 +54,8 @@ private data class ListRowItem(
     val title: String,
     val subtitle: String,
     val art: String?,
-    val onClick: () -> Unit
+    val onClick: () -> Unit,
+    val track: Track? = null
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -80,7 +82,6 @@ fun HomeScreen(
 
     // ---- Derived content for the home feed ----
     val allItems = state.shelves.flatMap { it.items }.distinctBy { it.title }
-    val dailyItems = state.dailyRecommendations[state.selectedFilter].orEmpty().ifEmpty { allItems }
 
     val mixCards = state.mixes.map { mix ->
         val lead = mix.tracks.firstOrNull()
@@ -110,13 +111,14 @@ fun HomeScreen(
     }).take(6)
 
     val usedIds = feedCards.map { it.id }.toSet()
-    val listItems = dailyItems.filter { it.id !in usedIds }.map { item ->
+    val listItems = allItems.filter { it.id !in usedIds }.map { item ->
         when (item) {
             is ShelfTrack -> ListRowItem(
                 title = item.value.title,
                 subtitle = "By ${item.value.artist}",
                 art = item.value.thumbnails.bestArtworkUrl(480),
-                onClick = { onTrackClick(item.value, listOf(item.value)) }
+                onClick = { onTrackClick(item.value, listOf(item.value)) },
+                track = item.value
             )
             is ShelfCard -> ListRowItem(
                 title = item.value.title,
@@ -297,7 +299,8 @@ fun HomeScreen(
                                         onToggleLike = { lead?.let(onToggleLike) },
                                         onAddToQueue = { lead?.let(onAddToQueue) },
                                         onMore = { lead?.let(onTrackActions) },
-                                        modifier = Modifier.fillParentMaxWidth(0.86f)
+                                        modifier = Modifier.fillParentMaxWidth(0.86f),
+                                        onLongClick = { lead?.let(onTrackActions) }
                                     )
                                 }
                             }
@@ -326,13 +329,21 @@ fun HomeScreen(
                         }
                     }
                     items(visibleList.size) { index ->
-                        PlaylistRow(item = visibleList[index])
+                        PlaylistRow(
+                            item = visibleList[index],
+                            onLongClick = { visibleList[index].track?.let(onTrackActions) }
+                        )
                     }
                 }
 
                 // ---- Remaining shelves from the feed ----
                 items(state.shelves, key = { it.title }) { shelf ->
-                    ShelfRow(shelf = shelf, onTrackClick = onTrackClick, onCardClick = onCardClick)
+                    ShelfRow(
+                        shelf = shelf,
+                        onTrackClick = onTrackClick,
+                        onCardClick = onCardClick,
+                        onTrackLongClick = onTrackActions
+                    )
                 }
 
                 item { Spacer(Modifier.height(24.dp + LocalBottomInset.current)) }
@@ -387,6 +398,7 @@ private fun DrawScope.drawHeaderGlow() {
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun DiscoverCard(
     item: DiscoverItem,
     color: Color,
@@ -394,14 +406,21 @@ private fun DiscoverCard(
     onToggleLike: () -> Unit,
     onAddToQueue: () -> Unit,
     onMore: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null
 ) {
     Box(
         modifier = modifier
             .height(186.dp)
             .clip(RoundedCornerShape(28.dp))
             .background(color)
-            .bouncyClickable(pressedScale = 0.98f, onClick = item.onPlay)
+            .run {
+                if (onLongClick != null) {
+                    bouncyCombinedClickable(pressedScale = 0.98f, onLongClick = onLongClick, onClick = item.onPlay)
+                } else {
+                    bouncyClickable(pressedScale = 0.98f, onClick = item.onPlay)
+                }
+            }
     ) {
         // Artwork on the right, melting into the card colour.
         Box(
@@ -516,11 +535,18 @@ private fun CardAction(icon: ImageVector, description: String, onClick: () -> Un
 }
 
 @Composable
-private fun PlaylistRow(item: ListRowItem) {
+@OptIn(ExperimentalFoundationApi::class)
+private fun PlaylistRow(item: ListRowItem, onLongClick: (() -> Unit)? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .bouncyClickable(pressedScale = 0.985f, onClick = item.onClick)
+            .run {
+                if (onLongClick != null) {
+                    bouncyCombinedClickable(pressedScale = 0.985f, onLongClick = onLongClick, onClick = item.onClick)
+                } else {
+                    bouncyClickable(pressedScale = 0.985f, onClick = item.onClick)
+                }
+            }
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

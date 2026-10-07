@@ -499,6 +499,7 @@ fun MainScreen(
                 playlists = playlists,
                 onDismiss = { actionTrack = null },
                 onToggleLike = { libraryViewModel.toggleLike(track) },
+                onAddToQueue = { playerViewModel.addToQueue(track) },
                 onAddToPlaylist = { playlistId -> libraryViewModel.addToPlaylist(playlistId, track) },
                 onCreatePlaylist = { name -> libraryViewModel.createPlaylistWithTrack(name, track) }
             )

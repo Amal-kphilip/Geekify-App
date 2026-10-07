@@ -145,6 +145,7 @@ fun SearchScreen(
                                         TrackRow(
                                             track = song,
                                             onClick = { onTrackClick(song, response.songs) },
+                                            onLongClick = { onTrackActions(song) },
                                             onMoreClick = { onTrackActions(song) }
                                         )
                                     }
