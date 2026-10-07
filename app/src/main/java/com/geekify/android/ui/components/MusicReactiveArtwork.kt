@@ -18,14 +18,14 @@ import kotlinx.coroutines.flow.StateFlow
 import androidx.compose.runtime.collectAsState
 
 /**
- * Premium, audio-reactive artwork treatment for the Now Playing cover.
- * Rotation pauses exactly where it is when playback pauses; the transient meter adds only a
- * bounded scale pulse so loudness never turns into a distracting zoom.
+ * Rotating, audio-reactive artwork treatment for the Now Playing cover.
+ * Rotation pauses where it is when playback pauses; the meter adds only a bounded, smoothed scale pulse.
  */
 @Composable
 fun MusicReactiveArtwork(
     isPlaying: Boolean,
     beatIntensity: StateFlow<Float>,
+    baseScale: Float = 1f,
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
@@ -49,8 +49,8 @@ fun MusicReactiveArtwork(
 
     val normalizedBeat = ((currentBeatIntensity - BEAT_FLOOR) / (1f - BEAT_FLOOR))
         .coerceIn(0f, 1f)
-    val targetScale = 1f + normalizedBeat * MAX_PULSE_SCALE
-    val beatScale by animateFloatAsState(
+    val targetScale = baseScale * (1f + normalizedBeat * MAX_PULSE_SCALE)
+    val artworkScale by animateFloatAsState(
         targetValue = targetScale,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioNoBouncy,
@@ -62,8 +62,8 @@ fun MusicReactiveArtwork(
     Box(
         modifier = modifier.graphicsLayer {
             rotationZ = rotation.value
-            scaleX = beatScale
-            scaleY = beatScale
+            scaleX = artworkScale
+            scaleY = artworkScale
         },
         content = content
     )

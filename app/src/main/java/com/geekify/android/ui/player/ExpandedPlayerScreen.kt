@@ -59,6 +59,8 @@ import coil3.compose.AsyncImage
 import com.geekify.android.data.model.Track
 import com.geekify.android.player.RepeatMode
 import com.geekify.android.ui.components.CircleIconButton
+import com.geekify.android.ui.components.MarqueeText
+import com.geekify.android.ui.components.MusicReactiveArtwork
 import com.geekify.android.ui.components.SeekBar
 import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.components.rememberArtColor
@@ -108,12 +110,22 @@ fun ExpandedPlayerScreen(
     val dismissScope = rememberCoroutineScope()
     val screenHeightPx = with(LocalDensity.current) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
 
-    // The cover gently shrinks when paused and springs back when playing.
-    val artScale by animateFloatAsState(
+    // The existing paused-state shrink is preserved, while the reactive artwork component
+    // applies rotation + beat scaling to the complete cover layer.
+    val artBaseScale by animateFloatAsState(
         targetValue = if (state.isPlaying) 1f else 0.92f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
-        label = "artScale"
+        label = "artBaseScale"
     )
+
+    // Only enable the shared audio meter while this Now Playing destination is composed.
+    DisposableEffect(Unit) {
+        viewModel.setReactiveArtworkMeterEnabled(state.isPlaying)
+        onDispose { viewModel.setReactiveArtworkMeterEnabled(false) }
+    }
+    LaunchedEffect(state.isPlaying) {
+        viewModel.setReactiveArtworkMeterEnabled(state.isPlaying)
+    }
 
     // Size the cover from both dimensions so short screens never push the controls off screen.
     val config = LocalConfiguration.current
@@ -210,29 +222,35 @@ fun ExpandedPlayerScreen(
             Spacer(Modifier.weight(0.7f))
 
             // ---- Circular cover ----
-            Box(
+            MusicReactiveArtwork(
+                isPlaying = state.isPlaying,
+                beatIntensity = viewModel.beatIntensity,
+                baseScale = artBaseScale,
                 modifier = Modifier
                     .align(Alignment.CenterHorizontally)
                     .size(artSize)
-                    .graphicsLayer {
-                        scaleX = artScale
-                        scaleY = artScale
-                    }
-                    .shadow(28.dp, CircleShape, ambientColor = Color.Black, spotColor = Color.Black)
-                    .clip(CircleShape)
-                    .background(InkElevated),
-                contentAlignment = Alignment.Center
             ) {
-                Crossfade(targetState = thumbUrl, animationSpec = tween(400), label = "bigArt") { url ->
-                    if (url != null) {
-                        AsyncImage(
-                            model = url,
-                            contentDescription = track.title,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Icon(Icons.Default.MusicNote, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(80.dp))
+                // The complete rendered artwork layer is rotated/scaled together. The circular
+                // clip is only the artwork's existing shape; there is no separate fixed pulse mask.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .shadow(28.dp, CircleShape, ambientColor = Color.Black, spotColor = Color.Black)
+                        .clip(CircleShape)
+                        .background(InkElevated),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Crossfade(targetState = thumbUrl, animationSpec = tween(400), label = "bigArt") { url ->
+                        if (url != null) {
+                            AsyncImage(
+                                model = url,
+                                contentDescription = track.title,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Icon(Icons.Default.MusicNote, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(80.dp))
+                        }
                     }
                 }
             }
@@ -240,26 +258,30 @@ fun ExpandedPlayerScreen(
             Spacer(Modifier.weight(0.6f))
 
             // ---- Title / artist ----
-            Text(
+            MarqueeText(
                 text = track.title,
+                modifier = Modifier.fillMaxWidth(),
+                style = androidx.compose.ui.text.TextStyle(
+                    fontFamily = MontserratFamily,
+                    fontSize = 27.sp,
+                    lineHeight = 32.sp,
+                    fontWeight = FontWeight.Medium
+                ),
                 color = TextPrimary,
-                fontSize = 27.sp,
-                lineHeight = 32.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
+                textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(4.dp))
-            Text(
+            MarqueeText(
                 text = track.artist,
+                modifier = Modifier.fillMaxWidth(),
+                style = androidx.compose.ui.text.TextStyle(
+                    fontFamily = MontserratFamily,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Normal
+                ),
                 color = TextSecondary,
-                fontSize = 15.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
+                speedDpPerSecond = 42f
             )
 
             state.error?.let { message ->

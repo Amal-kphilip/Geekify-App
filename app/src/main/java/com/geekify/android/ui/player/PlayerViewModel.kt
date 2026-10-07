@@ -1,6 +1,7 @@
 package com.geekify.android.ui.player
 
 import androidx.lifecycle.ViewModel
+import com.geekify.android.audio.AudioEffectsController
 import androidx.lifecycle.viewModelScope
 import com.geekify.android.data.local.LibraryRepository
 import com.geekify.android.data.model.Track
@@ -14,10 +15,12 @@ import javax.inject.Inject
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
     private val controller: PlayerController,
-    private val library: LibraryRepository
+    private val library: LibraryRepository,
+    private val audioEffects: AudioEffectsController
 ) : ViewModel() {
 
     val state: StateFlow<QueueState> = controller.state
+    val beatIntensity: StateFlow<Float> = audioEffects.beatIntensity
 
     private val _isCurrentLiked = MutableStateFlow(false)
     val isCurrentLiked: StateFlow<Boolean> = _isCurrentLiked.asStateFlow()
@@ -44,6 +47,7 @@ class PlayerViewModel @Inject constructor(
     fun toggleShuffle() = controller.toggleShuffle()
     fun cycleRepeat() = controller.cycleRepeat()
     fun setVolume(volume: Float) = controller.setVolume(volume)
+    fun setReactiveArtworkMeterEnabled(enabled: Boolean) = audioEffects.setReactiveMeterEnabled(enabled)
     fun addToQueue(track: Track) = controller.addToQueue(track)
     fun removeFromQueue(index: Int) = controller.removeFromQueue(index)
     fun reorder(from: Int, to: Int) = controller.reorder(from, to)

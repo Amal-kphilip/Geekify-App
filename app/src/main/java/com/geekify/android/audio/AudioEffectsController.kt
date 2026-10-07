@@ -37,9 +37,15 @@ class AudioEffectsController @Inject constructor(
 ) {
     val equalizer = BiquadEqualizerProcessor()
     val normalizer = NormalizationProcessor()
+    val reactiveMeter = MusicReactiveMeterProcessor()
 
     /** The processors in the order the audio sink runs them. */
-    val processors: Array<AudioProcessor> get() = arrayOf(equalizer, normalizer)
+    val processors: Array<AudioProcessor> get() = arrayOf(equalizer, normalizer, reactiveMeter)
+
+    val beatIntensity: StateFlow<Float>
+        get() = reactiveMeter.beatIntensity
+
+    fun setReactiveMeterEnabled(enabled: Boolean) = reactiveMeter.setEnabled(enabled)
 
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
     private val _settings = MutableStateFlow(AudioSettings())
