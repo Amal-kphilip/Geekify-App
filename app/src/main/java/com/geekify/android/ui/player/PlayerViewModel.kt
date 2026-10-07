@@ -26,15 +26,14 @@ class PlayerViewModel @Inject constructor(
     val isCurrentLiked: StateFlow<Boolean> = _isCurrentLiked.asStateFlow()
 
     init {
-        state.map { it.current }
+        combine(
+            state.map { it.current?.videoId }.distinctUntilChanged(),
+            library.liked
+        ) { currentVideoId, likedTracks ->
+            currentVideoId != null && likedTracks.any { it.videoId == currentVideoId }
+        }
             .distinctUntilChanged()
-            .onEach { track ->
-                if (track != null) {
-                    _isCurrentLiked.value = library.isLiked(track.videoId)
-                } else {
-                    _isCurrentLiked.value = false
-                }
-            }
+            .onEach { _isCurrentLiked.value = it }
             .launchIn(viewModelScope)
     }
 

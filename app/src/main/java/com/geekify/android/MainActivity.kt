@@ -46,11 +46,16 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         requestedRoute = intent?.getStringExtra(GeekifyNotifier.EXTRA_ROUTE)
 
-        // Android 13+: without this the playback notification (and lock-screen controls) stay hidden.
+        // Android 13+: ask once. A denial is respected rather than triggering the system dialog on every launch.
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            lifecycleScope.launch {
+                if (!notificationStore.stateNow().permissionRequested) {
+                    notificationStore.markPermissionRequested()
+                    notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
         }
 
         // Start PlaybackService
@@ -93,6 +98,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         AppForeground.isVisible = false
+        if (!isChangingConfigurations) {
+            // Give eligible update/tip notifications a real background opportunity immediately after the
+            // last visible Activity stops, instead of waiting for the next 12 h periodic worker window.
+            lifecycleScope.launch {
+                if (!AppForeground.isVisible) notificationCoordinator.runOnce(appInForeground = false)
+            }
+        }
         super.onStop()
     }
 }

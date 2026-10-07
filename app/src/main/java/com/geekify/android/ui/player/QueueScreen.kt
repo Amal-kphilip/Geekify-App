@@ -122,7 +122,8 @@ fun QueueScreen(
                             TrackRow(
                                 track = nowPlaying,
                                 isPlaying = true,
-                                onClick = {}
+                                onClick = {},
+                                marqueeTitle = true
                             )
                             Spacer(Modifier.height(16.dp))
                         }
@@ -152,7 +153,8 @@ fun QueueScreen(
                                         onClick = { viewModel.play(track, state.queue) },
                                         onMoreClick = { viewModel.removeFromQueue(index) },
                                         moreIcon = Icons.Default.Close,
-                                        moreContentDescription = "Remove from queue"
+                                        moreContentDescription = "Remove from queue",
+                                        marqueeTitle = true
                                     )
                                 }
                             }

@@ -26,9 +26,12 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.CacheBitmapLoader
+import androidx.media3.session.CommandButton
+import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import androidx.media3.session.DefaultMediaNotificationProvider
 import com.geekify.android.MainActivity
 import com.geekify.android.audio.AudioEffectsController
@@ -47,9 +50,14 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancel
 import okhttp3.OkHttpClient
+import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
 import javax.inject.Inject
 
 @OptIn(UnstableApi::class)
@@ -65,6 +73,8 @@ class PlaybackService : MediaSessionService() {
         private const val RETRY_RESET_AFTER_MS = 15_000L
         /** A broken/stalled googlevideo stream must not leave the player buffering forever. */
         private const val BUFFERING_TIMEOUT_MS = 12_000L
+        private const val ACTION_MEDIA_LIKE = "com.geekify.android.media.LIKE"
+        private const val ACTION_MEDIA_SHUFFLE = "com.geekify.android.media.SHUFFLE"
     }
 
     @Inject lateinit var queueManager: QueueManager
@@ -73,11 +83,14 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var innerTube: InnerTubeClient
     @Inject lateinit var musicSource: MusicSource
     @Inject lateinit var historyRepository: com.geekify.android.data.local.HistoryRepository
+    @Inject lateinit var libraryRepository: com.geekify.android.data.local.LibraryRepository
     @Inject lateinit var http: OkHttpClient
     @Inject lateinit var syncRepository: com.geekify.android.data.sync.SyncRepository
 
     private lateinit var player: ExoPlayer
     private lateinit var mediaSession: MediaSession
+    private var mediaNotificationController: MediaSession.ControllerInfo? = null
+    private var likedVideoIds: Set<String> = emptySet()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var prefetchJob: Job? = null
     private var autoplayJob: Job? = null
@@ -161,11 +174,28 @@ class PlaybackService : MediaSessionService() {
         mediaSession = MediaSession.Builder(this, QueuePlayer(player))
             .setSessionActivity(pendingIntent)
             .setBitmapLoader(CacheBitmapLoader(artworkLoader))
+            .setMediaButtonPreferences(mediaButtonPreferences(liked = false, shuffle = false))
+            .setCallback(PlaybackSessionCallback())
             .build()
         // Media3 only manages the notification (and the foreground state) for sessions that were added to the
         // service. The app never creates a MediaController, so onGetSession() is not called by anything and the
         // session was never added: no media notification was ever posted. Adding it here makes Media3 show it.
         addSession(mediaSession)
+
+        // Keep media-notification actions synchronized with the authoritative local queue and liked-song state.
+        queueManager.state
+            .map { it.current?.videoId to it.shuffle }
+            .distinctUntilChanged()
+            .onEach { (_, shuffle) -> updateMediaNotificationButtons(shuffle = shuffle) }
+            .launchIn(scope)
+        libraryRepository.liked
+            .map { tracks -> tracks.asSequence().map { it.videoId }.toSet() }
+            .distinctUntilChanged()
+            .onEach { ids ->
+                likedVideoIds = ids
+                updateMediaNotificationButtons()
+            }
+            .launchIn(scope)
 
         // Tempo, pitch and silence skipping change on the running player (no re-initialisation).
         audioEffects.settings.onEach { s ->
@@ -301,6 +331,98 @@ class PlaybackService : MediaSessionService() {
      * this wrapper the notification / lock screen / headset see a one-item playlist: no "next", and
      * "previous" just restarts the song. This routes them to the real queue instead.
      */
+    private val likeCommand = SessionCommand(ACTION_MEDIA_LIKE, Bundle.EMPTY)
+    private val shuffleCommand = SessionCommand(ACTION_MEDIA_SHUFFLE, Bundle.EMPTY)
+
+    private fun mediaButtonPreferences(liked: Boolean, shuffle: Boolean): List<CommandButton> = listOf(
+        CommandButton.Builder(
+            if (shuffle) CommandButton.ICON_SHUFFLE_ON else CommandButton.ICON_SHUFFLE_OFF
+        )
+            .setDisplayName("Shuffle")
+            .setSessionCommand(shuffleCommand)
+            .setSlots(CommandButton.SLOT_OVERFLOW)
+            .build(),
+        CommandButton.Builder(
+            if (liked) CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED
+        )
+            .setDisplayName(if (liked) "Unlike" else "Like")
+            .setSessionCommand(likeCommand)
+            .setSlots(CommandButton.SLOT_OVERFLOW)
+            .build()
+    )
+
+    private fun updateMediaNotificationButtons(
+        liked: Boolean = queueManager.state.value.current?.videoId?.let(likedVideoIds::contains) == true,
+        shuffle: Boolean = queueManager.state.value.shuffle
+    ) {
+        val controller = mediaNotificationController ?: return
+        mediaSession.setMediaButtonPreferences(controller, mediaButtonPreferences(liked, shuffle))
+    }
+
+    private inner class PlaybackSessionCallback : MediaSession.Callback {
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): MediaSession.ConnectionResult {
+            val accepted = MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+            if (session.isMediaNotificationController(controller)) {
+                mediaNotificationController = controller
+                val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
+                    .add(likeCommand)
+                    .add(shuffleCommand)
+                    .build()
+                accepted
+                    .setAvailableSessionCommands(commands)
+                    .setMediaButtonPreferences(
+                        mediaButtonPreferences(
+                            liked = queueManager.state.value.current?.videoId?.let(likedVideoIds::contains) == true,
+                            shuffle = queueManager.state.value.shuffle
+                        )
+                    )
+            }
+            return accepted.build()
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle
+        ): ListenableFuture<SessionResult> {
+            if (customCommand != likeCommand && customCommand != shuffleCommand) {
+                return super.onCustomCommand(session, controller, customCommand, args)
+            }
+
+            val result = SettableFuture.create<SessionResult>()
+            scope.launch {
+                try {
+                    when (customCommand) {
+                        likeCommand -> queueManager.state.value.current?.let { track ->
+                            libraryRepository.toggleLike(track)
+                        }
+                        shuffleCommand -> queueManager.toggleShuffle()
+                    }
+                    updateMediaNotificationButtons()
+                    result.set(SessionResult(SessionResult.RESULT_SUCCESS))
+                } catch (_: Exception) {
+                    result.set(SessionResult(SessionResult.RESULT_ERROR_UNKNOWN))
+                }
+            }
+            return result
+        }
+
+        override fun onPostConnect(session: MediaSession, controller: MediaSession.ControllerInfo) {
+            if (session.isMediaNotificationController(controller)) {
+                mediaNotificationController = controller
+                updateMediaNotificationButtons()
+            }
+        }
+
+        override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
+            if (mediaNotificationController == controller) mediaNotificationController = null
+        }
+    }
+
     private inner class QueuePlayer(wrapped: Player) : ForwardingPlayer(wrapped) {
         override fun getAvailableCommands(): Player.Commands =
             super.getAvailableCommands().buildUpon()
@@ -568,6 +690,7 @@ class PlaybackService : MediaSessionService() {
         mediaSession.release()
         artworkLoader.close()
         player.release()
+        scope.cancel()
         super.onDestroy()
     }
 }

@@ -55,6 +55,7 @@ fun NowPlayingBar(
     onClick: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
+    val liked by viewModel.isCurrentLiked.collectAsState()
     val track = state.current ?: return
 
     val thumbUrl = track.thumbnails.bestArtworkUrl(480)
@@ -117,6 +118,13 @@ fun NowPlayingBar(
             }
 
             Spacer(Modifier.width(8.dp))
+
+            LikeButton(
+                liked = liked,
+                onClick = { viewModel.toggleLikeCurrent() },
+                modifier = Modifier.size(40.dp),
+                size = 22.dp
+            )
 
             Box(
                 modifier = Modifier

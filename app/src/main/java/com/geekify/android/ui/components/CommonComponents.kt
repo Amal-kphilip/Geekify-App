@@ -214,7 +214,8 @@ fun TrackRow(
     onClick: () -> Unit,
     onMoreClick: (() -> Unit)? = null,
     moreIcon: ImageVector = Icons.Default.MoreHoriz,
-    moreContentDescription: String = "More"
+    moreContentDescription: String = "More",
+    marqueeTitle: Boolean = false
 ) {
     Row(
         modifier = modifier
@@ -246,14 +247,27 @@ fun TrackRow(
         Spacer(Modifier.width(16.dp))
 
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = track.title,
-                color = if (isPlaying) Lime else TextPrimary,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            if (marqueeTitle) {
+                MarqueeText(
+                    text = track.title,
+                    modifier = Modifier.fillMaxWidth(),
+                    color = if (isPlaying) Lime else TextPrimary,
+                    style = androidx.compose.ui.text.TextStyle(
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Start
+                )
+            } else {
+                Text(
+                    text = track.title,
+                    color = if (isPlaying) Lime else TextPrimary,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
             Spacer(Modifier.height(3.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (isPlaying) {

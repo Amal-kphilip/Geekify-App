@@ -101,7 +101,16 @@ class LibraryRepository @Inject constructor(
 
     // Cloud sync helpers
     suspend fun likedOnce(): List<Track> = likedDao.allOnce().map(LikedTrackEntity::toTrack)
-    suspend fun replaceAllLiked(tracks: List<Track>) { likedDao.clear(); likedDao.insertAll(tracks.map(Track::toLiked)) }
+    suspend fun replaceAllLiked(tracks: List<Track>) {
+        likedDao.clear()
+        if (tracks.isEmpty()) return
+        val newestFirstBase = System.currentTimeMillis()
+        likedDao.insertAll(
+            tracks.mapIndexed { index, track ->
+                track.toLiked(addedAt = newestFirstBase - index)
+            }
+        )
+    }
     suspend fun playlistsOnce(): List<LocalPlaylist> {
         return dao.allPlaylistsOnce().map { pl ->
             LocalPlaylist(pl.id, pl.name, pl.createdAt, dao.tracksOnce(pl.id).map(PlaylistTrackEntity::toTrack))

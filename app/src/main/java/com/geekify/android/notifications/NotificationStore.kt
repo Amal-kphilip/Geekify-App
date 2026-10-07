@@ -40,7 +40,9 @@ data class NotificationState(
     /** Every non-media notification we posted (last 14 days). */
     val allSentAt: List<Long> = emptyList(),
     /** Only tips/engagement (last 14 days) - these have the weekly cap. */
-    val softSentAt: List<Long> = emptyList()
+    val softSentAt: List<Long> = emptyList(),
+    /** Prevents repeatedly prompting for POST_NOTIFICATIONS after the first request. */
+    val permissionRequested: Boolean = false
 )
 
 /** Reuses the app's existing DataStore (the same one AudioSettings and QueueManager use). */
@@ -63,6 +65,7 @@ class NotificationStore @Inject constructor(
         val lastOpened = longPreferencesKey("notif_last_opened_at")
         val allSent = stringPreferencesKey("notif_all_sent_at")
         val softSent = stringPreferencesKey("notif_soft_sent_at")
+        val permissionRequested = booleanPreferencesKey("notif_permission_requested")
     }
 
     private val safeData: Flow<Preferences> = dataStore.data.catch { emit(emptyPreferences()) }
@@ -75,6 +78,7 @@ class NotificationStore @Inject constructor(
     suspend fun setUpdates(on: Boolean) = edit { it[K.updates] = on }
     suspend fun setTips(on: Boolean) = edit { it[K.tips] = on }
     suspend fun setEngagement(on: Boolean) = edit { it[K.engagement] = on }
+    suspend fun markPermissionRequested() = edit { it[K.permissionRequested] = true }
 
     suspend fun updateState(transform: (NotificationState) -> NotificationState) = edit { p ->
         val next = transform(decodeState(p))
@@ -88,6 +92,7 @@ class NotificationStore @Inject constructor(
         p[K.lastOpened] = next.lastOpenedAt
         p[K.allSent] = next.allSentAt.joinToString(",")
         p[K.softSent] = next.softSentAt.joinToString(",")
+        p[K.permissionRequested] = next.permissionRequested
     }
 
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
@@ -110,7 +115,8 @@ class NotificationStore @Inject constructor(
         tipHandledForVersion = p[K.tipFor] ?: 0,
         lastOpenedAt = p[K.lastOpened] ?: 0L,
         allSentAt = p[K.allSent].toLongList(),
-        softSentAt = p[K.softSent].toLongList()
+        softSentAt = p[K.softSent].toLongList(),
+        permissionRequested = p[K.permissionRequested] ?: false
     )
 
     private fun String?.toLongList(): List<Long> =

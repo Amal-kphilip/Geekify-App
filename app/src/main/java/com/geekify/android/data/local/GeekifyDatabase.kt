@@ -136,7 +136,7 @@ data class PlaylistTrackEntity(
 )
 
 // Helper extensions
-fun Track.toLiked() = LikedTrackEntity(videoId, title, artist, artists, album, albumId, thumbnails, duration, durationSeconds, explicit, type)
+fun Track.toLiked(addedAt: Long = System.currentTimeMillis()) = LikedTrackEntity(videoId, title, artist, artists, album, albumId, thumbnails, duration, durationSeconds, explicit, type, addedAt)
 fun Track.toHistory() = HistoryTrackEntity(videoId, title, artist, artists, album, albumId, thumbnails, duration, durationSeconds, explicit, type)
 fun LikedTrackEntity.toTrack() = Track(videoId, title, artist, artists, album, albumId, thumbnails, duration, durationSeconds, explicit, type)
 fun HistoryTrackEntity.toTrack() = Track(videoId, title, artist, artists, album, albumId, thumbnails, duration, durationSeconds, explicit, type)
@@ -149,12 +149,12 @@ data class LocalPlaylist(val id: String, val name: String, val createdAt: Long, 
 
 @Dao
 interface LikedDao {
-    @Query("SELECT * FROM liked_tracks ORDER BY addedAt DESC") fun all(): Flow<List<LikedTrackEntity>>
+    @Query("SELECT * FROM liked_tracks ORDER BY addedAt DESC, rowid DESC") fun all(): Flow<List<LikedTrackEntity>>
     @Query("SELECT EXISTS(SELECT 1 FROM liked_tracks WHERE videoId=:id)") suspend fun isLiked(id: String): Boolean
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insert(e: LikedTrackEntity)
     @Delete suspend fun delete(e: LikedTrackEntity)
     @Query("DELETE FROM liked_tracks") suspend fun clear()
-    @Query("SELECT * FROM liked_tracks ORDER BY addedAt DESC") suspend fun allOnce(): List<LikedTrackEntity>
+    @Query("SELECT * FROM liked_tracks ORDER BY addedAt DESC, rowid DESC") suspend fun allOnce(): List<LikedTrackEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAll(list: List<LikedTrackEntity>)
 }
 
