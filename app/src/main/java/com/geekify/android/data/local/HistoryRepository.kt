@@ -37,6 +37,12 @@ class HistoryRepository @Inject constructor(
     suspend fun topPlayed(limit: Int = 40): List<PlayStat> =
         stats.top(limit).map { PlayStat(it.videoId, it.title, it.artist, it.playCount, it.lastPlayedAt) }
 
+    /** Live real-play stats so recommendation rebuilds can react when repeated listening changes. */
+    fun topPlayedFlow(limit: Int = 40): Flow<List<PlayStat>> =
+        stats.topFlow(limit).map { rows ->
+            rows.map { PlayStat(it.videoId, it.title, it.artist, it.playCount, it.lastPlayedAt) }
+        }
+
     suspend fun clearStats() = stats.clear()
 
     suspend fun clear() = dao.clear()

@@ -96,9 +96,26 @@ class HomeViewModel @Inject constructor(
     @OptIn(FlowPreview::class)
     private fun observeTaste() {
         combine(
-            history.recent.map { it.firstOrNull()?.videoId }.distinctUntilChanged(),
-            library.liked.map { it.size }.distinctUntilChanged()
-        ) { latest, likes -> latest to likes }
+            history.recent.map { tracks ->
+                tracks.take(10).joinToString("|") { it.videoId }
+            }.distinctUntilChanged(),
+            library.liked.map { tracks ->
+                tracks.take(40).joinToString("|") { it.videoId }
+            }.distinctUntilChanged(),
+            library.playlists.map { playlists ->
+                playlists.joinToString("|") { playlist ->
+                    playlist.id + ":" + playlist.tracks.joinToString(",") { it.videoId }
+                }
+            }.distinctUntilChanged(),
+            history.topPlayedFlow(30).map { stats ->
+                stats.joinToString("|") { stat -> "${stat.videoId}:${stat.plays}" }
+            }.distinctUntilChanged(),
+            library.savedCollections.map { collections ->
+                collections.take(20).joinToString("|") { collection ->
+                    collection.id + ":" + (collection.subtitle ?: "")
+                }
+            }.distinctUntilChanged()
+        ) { _, _, _, _, _ -> Unit }
             .drop(1)
             .debounce(5_000)
             .onEach {
@@ -192,7 +209,9 @@ class HomeViewModel @Inject constructor(
         val recentTracks = history.allOnce()
         val playlistTracks = library.playlistsOnce().flatMap { it.tracks }.distinctBy { it.videoId }
         val savedArtists = library.savedCollectionsOnce().mapNotNull { it.subtitle?.takeIf { s -> s.isNotBlank() } }
-        val frequent = history.topPlayed(30).map { Recommender.PlayedSignal(it.videoId, it.artist, it.title, it.plays) }
+        val frequent = history.topPlayed(30).map {
+            Recommender.PlayedSignal(it.videoId, it.artist, it.title, it.plays)
+        }
 
         fun signal(t: Track) = Recommender.Signal(t.videoId, t.artist, t.title)
         val liked = likedTracks.take(40).map(::signal)
@@ -201,7 +220,15 @@ class HomeViewModel @Inject constructor(
 
         if (liked.isEmpty() && recent.isEmpty() && frequent.isEmpty() && playlist.isEmpty()) return@withContext
 
-        val (weights, meta, _) = Recommender.seedWeights(liked, recent, frequent, playlist, savedArtists)
+        val languageProfile = Recommender.languageAffinity(liked, recent, frequent, playlist)
+        val (weights, meta, _) = Recommender.seedWeights(
+            liked,
+            recent,
+            frequent,
+            playlist,
+            savedArtists,
+            languageAffinity = languageProfile.affinity
+        )
         val seeds = Recommender.pickSeedsVaried(weights, meta, SEED_COUNT)
 
         // Ask for every seed's related songs at the same time (results are cached for 15 minutes).
@@ -211,7 +238,9 @@ class HomeViewModel @Inject constructor(
         // Offline or rate limited: keep whatever mixes are already on screen.
         if (relatedMap.isEmpty()) return@withContext
 
-        val exclude = (likedTracks + recentTracks + playlistTracks).map { it.videoId }.toSet()
+        val exclude = (likedTracks + recentTracks + playlistTracks).map { it.videoId }.toMutableSet().apply {
+            addAll(frequent.map { it.videoId })
+        }
 
         val (mixResults, _) = Recommender.buildMixes(
             liked = liked,

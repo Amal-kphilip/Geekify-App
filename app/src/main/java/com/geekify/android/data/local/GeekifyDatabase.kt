@@ -175,6 +175,7 @@ interface PlayStatDao {
     suspend fun bump(id: String, title: String, artist: String, now: Long): Int
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insert(e: PlayStatEntity): Long
     @Query("SELECT * FROM play_stats ORDER BY playCount DESC, lastPlayedAt DESC LIMIT :limit") suspend fun top(limit: Int): List<PlayStatEntity>
+    @Query("SELECT * FROM play_stats ORDER BY playCount DESC, lastPlayedAt DESC LIMIT :limit") fun topFlow(limit: Int): Flow<List<PlayStatEntity>>
     @Query("DELETE FROM play_stats") suspend fun clear()
 }
 

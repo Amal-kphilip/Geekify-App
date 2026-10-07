@@ -1,7 +1,6 @@
 package com.geekify.android.ui.components
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -28,7 +27,6 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.text.KeyboardActions
@@ -44,105 +42,16 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.unit.TextUnit
 import coil3.compose.AsyncImage
-import kotlinx.coroutines.delay
-import kotlin.math.roundToInt
 import com.geekify.android.data.model.Card
 import com.geekify.android.data.model.Track
 import com.geekify.android.data.local.LocalPlaylist
 import com.geekify.android.ui.theme.*
-
-/**
- * Single-line title that stays static when it fits and otherwise scrolls at a constant speed.
- *
- * The animation is scoped to the composable lifecycle, so queue items that are off-screen do not
- * keep an animation coroutine running.
- */
-@Composable
-fun MarqueeText(
-    text: String,
-    modifier: Modifier = Modifier,
-    color: Color = LocalContentColor.current,
-    fontSize: TextUnit = LocalTextStyle.current.fontSize,
-    lineHeight: TextUnit = LocalTextStyle.current.lineHeight,
-    fontWeight: FontWeight? = LocalTextStyle.current.fontWeight,
-    textAlign: TextAlign = TextAlign.Start,
-    enabled: Boolean = true
-) {
-    val density = LocalDensity.current
-    val scrollOffset = remember { Animatable(0f) }
-    var textWidthPx by remember(text) { mutableFloatStateOf(0f) }
-    var viewportWidthPx by remember { mutableFloatStateOf(0f) }
-
-    val overflows = enabled && textWidthPx > viewportWidthPx + 0.5f
-
-    LaunchedEffect(text, overflows, viewportWidthPx, textWidthPx, enabled) {
-        if (!overflows) {
-            scrollOffset.snapTo(0f)
-            return@LaunchedEffect
-        }
-
-        scrollOffset.snapTo(0f)
-        val distancePx = (textWidthPx - viewportWidthPx).coerceAtLeast(0f)
-        val scrollSpeedPxPerSecond = with(density) { 34.dp.toPx() }.coerceAtLeast(1f)
-        val durationMillis = (distancePx / scrollSpeedPxPerSecond * 1_000f)
-            .roundToInt()
-            .coerceAtLeast(700)
-
-        while (true) {
-            delay(750)
-            scrollOffset.animateTo(
-                targetValue = -distancePx,
-                animationSpec = tween(durationMillis, easing = LinearEasing)
-            )
-            delay(900)
-            scrollOffset.animateTo(
-                targetValue = 0f,
-                animationSpec = tween(durationMillis, easing = LinearEasing)
-            )
-        }
-    }
-
-    Box(
-        modifier = modifier
-            .clipToBounds()
-            .onSizeChanged { viewportWidthPx = it.width.toFloat() }
-    ) {
-        Text(
-            text = text,
-            color = color,
-            fontSize = fontSize,
-            lineHeight = lineHeight,
-            fontWeight = fontWeight,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Clip,
-            textAlign = if (overflows) TextAlign.Start else textAlign,
-            onTextLayout = { result ->
-                textWidthPx = if (result.lineCount > 0) {
-                    result.getLineRight(0) - result.getLineLeft(0)
-                } else {
-                    0f
-                }
-            },
-            modifier = (if (overflows) {
-                Modifier.wrapContentWidth(unbounded = true)
-            } else {
-                Modifier.fillMaxWidth()
-            })
-                .graphicsLayer { translationX = if (overflows) scrollOffset.value else 0f }
-        )
-    }
-}
 
 /** videoId of the track that is currently playing; lets every TrackRow highlight itself. */
 val LocalNowPlayingId = compositionLocalOf<String?> { null }
@@ -305,8 +214,7 @@ fun TrackRow(
     onClick: () -> Unit,
     onMoreClick: (() -> Unit)? = null,
     moreIcon: ImageVector = Icons.Default.MoreHoriz,
-    moreContentDescription: String = "More",
-    marqueeTitle: Boolean = false
+    moreContentDescription: String = "More"
 ) {
     Row(
         modifier = modifier
@@ -338,25 +246,14 @@ fun TrackRow(
         Spacer(Modifier.width(16.dp))
 
         Column(modifier = Modifier.weight(1f)) {
-            if (marqueeTitle) {
-                MarqueeText(
-                    text = track.title,
-                    color = if (isPlaying) Lime else TextPrimary,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = true
-                )
-            } else {
-                Text(
-                    text = track.title,
-                    color = if (isPlaying) Lime else TextPrimary,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+            Text(
+                text = track.title,
+                color = if (isPlaying) Lime else TextPrimary,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
             Spacer(Modifier.height(3.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (isPlaying) {
