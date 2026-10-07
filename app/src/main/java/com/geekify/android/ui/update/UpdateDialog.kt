@@ -2,7 +2,14 @@ package com.geekify.android.ui.update
 
 import android.os.Build
 import android.view.WindowManager
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -10,7 +17,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -113,7 +119,6 @@ fun UpdateDialog(
                         shape
                     )
                     .padding(24.dp)
-                    .animateContentSize()
             ) {
                 // ---- Header ----
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -173,7 +178,28 @@ fun UpdateDialog(
                 Spacer(Modifier.height(24.dp))
 
                 // ---- Progress / actions ----
-                Crossfade(targetState = stage, animationSpec = tween(220), label = "updateStage") { current ->
+                AnimatedContent(
+                    targetState = stage,
+                    transitionSpec = {
+                        (fadeIn(animationSpec = tween(180)) +
+                            slideInVertically(
+                                animationSpec = tween(240, easing = FastOutSlowInEasing),
+                                initialOffsetY = { 10 }
+                            )) togetherWith
+                            (fadeOut(animationSpec = tween(120)) +
+                                slideOutVertically(
+                                    animationSpec = tween(160, easing = FastOutSlowInEasing),
+                                    targetOffsetY = { -6 }
+                                )) using
+                            SizeTransform(
+                                clip = false,
+                                sizeAnimationSpec = { _, _ ->
+                                    tween(280, easing = FastOutSlowInEasing)
+                                }
+                            )
+                    },
+                    label = "updateStage"
+                ) { current ->
                     when (current) {
                         UpdateStage.Available -> Row(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
