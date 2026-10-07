@@ -31,6 +31,8 @@ data class HomeUiState(
     val selectedFilter: String = "Everything",
     val mixes: List<Mix> = emptyList(),
     val shelves: List<Shelf> = emptyList(),
+    /** Personalized candidates for the Top daily section, keyed by the active Home filter. */
+    val dailyRecommendations: Map<String, List<ShelfItem>> = emptyMap(),
     val isLoading: Boolean = false,
     val error: String? = null,
     /** The shelves on screen come from the local cache (cold start or offline), not from a fresh response. */
@@ -84,6 +86,7 @@ class HomeViewModel @Inject constructor(
             if (liveFeedLoaded || allShelves.isNotEmpty()) return@launch
             allShelves = cached
             applyFilter(_uiState.value.selectedFilter)
+            rebuildDailyRecommendations()
             _uiState.update { it.copy(fromCache = true) }
         }
     }
@@ -159,6 +162,7 @@ class HomeViewModel @Inject constructor(
                     liveFeedLoaded = true
                     allShelves = result.value.shelves
                     applyFilter(_uiState.value.selectedFilter)
+                    rebuildDailyRecommendations()
                     _uiState.update { it.copy(isLoading = false, fromCache = false) }
                     shelfCache.save(result.value.shelves)
                     // New listeners (or an offline taste profile) get a sensible starter mix instead of nothing.
@@ -275,6 +279,124 @@ class HomeViewModel @Inject constructor(
         if (mixes.isEmpty()) return@withContext
         memory.remember(mixes.flatMap { mix -> mix.tracks.take(12).map { it.videoId } })
         _uiState.update { it.copy(mixes = mixes) }
+        rebuildDailyRecommendations(mixes)
+    }
+
+    /**
+     * Uses the existing personalized "Made for you" mix as the source for the Top daily section too.
+     * Songs come directly from the recommender; albums/artists are derived from those recommended
+     * tracks, while playlists are re-ranked from the already loaded Home feed using the same artist
+     * taste signals. No new recommendation system or database is introduced.
+     */
+    private fun rebuildDailyRecommendations(mixes: List<Mix> = _uiState.value.mixes) {
+        val forYou = mixes.firstOrNull { it.id == "for-you" }?.tracks.orEmpty()
+        if (forYou.isEmpty()) return
+
+        val songs: List<ShelfItem> = forYou
+            .distinctBy { it.videoId }
+            .take(20)
+            .map(::ShelfTrack)
+
+        val albums: List<ShelfItem> = forYou
+            .asSequence()
+            .filter { !it.albumId.isNullOrBlank() && !it.album.isNullOrBlank() }
+            .distinctBy { it.albumId }
+            .take(20)
+            .map { track ->
+                ShelfCard(
+                    Card(
+                        id = track.albumId!!,
+                        title = track.album!!,
+                        subtitle = track.artist,
+                        thumbnails = track.thumbnails,
+                        type = "album",
+                        browseId = track.albumId
+                    )
+                )
+            }
+            .toList()
+
+        val artists: List<ShelfItem> = forYou
+            .asSequence()
+            .flatMap { track ->
+                if (track.artists.isNotEmpty()) track.artists.asSequence()
+                else sequenceOf(ArtistRef(track.artist, null))
+            }
+            .filter { !it.id.isNullOrBlank() && it.name.isNotBlank() }
+            .distinctBy { it.id }
+            .take(20)
+            .map { artist ->
+                val artTrack = forYou.firstOrNull { t ->
+                    t.artists.any { a -> a.id == artist.id } || t.artist.equals(artist.name, ignoreCase = true)
+                }
+                ShelfCard(
+                    Card(
+                        id = artist.id!!,
+                        title = artist.name,
+                        subtitle = "Artist",
+                        thumbnails = artTrack?.thumbnails.orEmpty(),
+                        type = "artist",
+                        browseId = artist.id
+                    )
+                )
+            }
+            .toList()
+
+        val preferredArtists = forYou
+            .flatMap { t ->
+                buildList {
+                    add(t.artist)
+                    addAll(t.artists.map { it.name })
+                }
+            }
+            .map { it.trim().lowercase() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .take(20)
+
+        val playlists: List<ShelfItem> = allShelves
+            .asSequence()
+            .flatMap { shelf -> shelf.items.asSequence() }
+            .filterIsInstance<ShelfCard>()
+            .filter { it.value.type == "playlist" }
+            .distinctBy { it.value.id }
+            .map { item ->
+                val text = buildString {
+                    append(item.value.title.lowercase())
+                    append(' ')
+                    append(item.value.subtitle.orEmpty().lowercase())
+                }
+                val score = preferredArtists.count { artist ->
+                    text.contains(artist)
+                }
+                score to item
+            }
+            .sortedByDescending { it.first }
+            .map { it.second }
+            .take(20)
+            .toList()
+
+        val everything = buildList {
+            val max = maxOf(songs.size, albums.size, artists.size, playlists.size)
+            repeat(max) { index ->
+                songs.getOrNull(index)?.let(::add)
+                albums.getOrNull(index)?.let(::add)
+                artists.getOrNull(index)?.let(::add)
+                playlists.getOrNull(index)?.let(::add)
+            }
+        }.distinctBy { it.id }.take(20)
+
+        _uiState.update {
+            it.copy(
+                dailyRecommendations = mapOf(
+                    "Everything" to everything,
+                    "Songs" to songs,
+                    "Albums" to albums,
+                    "Playlists" to playlists,
+                    "Artists" to artists
+                )
+            )
+        }
     }
 
     /** Fallback for people with no listening history yet: popular songs from the feed, or a search. */

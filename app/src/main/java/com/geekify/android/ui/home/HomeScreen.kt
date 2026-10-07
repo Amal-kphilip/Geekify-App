@@ -80,6 +80,7 @@ fun HomeScreen(
 
     // ---- Derived content for the home feed ----
     val allItems = state.shelves.flatMap { it.items }.distinctBy { it.title }
+    val dailyItems = state.dailyRecommendations[state.selectedFilter].orEmpty().ifEmpty { allItems }
 
     val mixCards = state.mixes.map { mix ->
         val lead = mix.tracks.firstOrNull()
@@ -109,7 +110,7 @@ fun HomeScreen(
     }).take(6)
 
     val usedIds = feedCards.map { it.id }.toSet()
-    val listItems = allItems.filter { it.id !in usedIds }.map { item ->
+    val listItems = dailyItems.filter { it.id !in usedIds }.map { item ->
         when (item) {
             is ShelfTrack -> ListRowItem(
                 title = item.value.title,

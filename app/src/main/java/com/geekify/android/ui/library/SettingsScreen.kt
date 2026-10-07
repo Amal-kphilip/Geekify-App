@@ -1,6 +1,8 @@
 package com.geekify.android.ui.library
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -24,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.geekify.android.BuildConfig
 import com.geekify.android.ui.components.AuroraBackground
+import com.geekify.android.ui.components.LocalBottomInset
 import com.geekify.android.ui.components.CircleIconButton
 import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.theme.*
@@ -35,8 +38,16 @@ fun SettingsScreen(
     notificationSettings: NotificationSettingsViewModel = hiltViewModel()
 ) {
     val notif by notificationSettings.prefs.collectAsState()
+    val scrollState = rememberScrollState()
+    val bottomInset = LocalBottomInset.current
     AuroraBackground {
-        Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 20.dp)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .padding(horizontal = 20.dp)
+                .verticalScroll(scrollState)
+        ) {
             Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 CircleIconButton(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", onClick = onBack, size = 50.dp)
                 Text("Settings", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
@@ -68,6 +79,7 @@ fun SettingsScreen(
                     Text("Version ${BuildConfig.VERSION_NAME}", color = TextMuted, fontSize = 12.sp)
                 }
             }
+            Spacer(Modifier.height(bottomInset + 24.dp))
         }
     }
 }

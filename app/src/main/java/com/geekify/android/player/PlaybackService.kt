@@ -683,6 +683,16 @@ class PlaybackService : MediaSessionService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = mediaSession
 
+    @OptIn(UnstableApi::class)
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Explicitly dismissing Geekify from recent apps should also end active playback.
+        // This does not affect normal background playback while the task remains open.
+        player.pause()
+        queueManager.setPlaying(false)
+        queueManager.persistProgress()
+        pauseAllPlayersAndStopSelf()
+    }
+
     override fun onDestroy() {
         queueManager.persistProgress()
         progressJob?.cancel()
