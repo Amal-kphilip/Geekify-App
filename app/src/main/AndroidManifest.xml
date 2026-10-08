@@ -114,6 +114,58 @@
             </intent-filter>
         </activity-alias>
 
+        <activity-alias
+            android:name=".launcher.IconFluffyBlue"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_geekify_fluffy_blue"
+            android:label="Geekify"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.IconFluffyDark"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_geekify_fluffy_dark"
+            android:label="Geekify"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.IconFluffyGold"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_geekify_fluffy_gold"
+            android:label="Geekify"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.IconFluffyWhite"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_geekify_fluffy_white"
+            android:label="Geekify"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
         <receiver
             android:name=".notifications.NotificationActionReceiver"
             android:exported="false" />
