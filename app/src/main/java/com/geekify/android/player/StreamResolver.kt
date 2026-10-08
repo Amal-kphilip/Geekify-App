@@ -80,8 +80,11 @@ class StreamResolver @Inject constructor(
     }
 
     private suspend fun doResolve(videoId: String): ResolvedStream {
+        // Prefer the fast VISIONOS resolver, but fall back to the existing WEB_REMIX player
+        // response when that client cannot resolve a playable stream for a particular track.
+        // This is intentionally kept inside the resolver so playback architecture remains unchanged.
         val raw: JsonObject = try {
-            innerTube.playerStreams(videoId)
+            innerTube.player(videoId)
         } catch (e: Exception) {
             throw StreamException(e.message ?: "Could not reach YouTube.", e)
         }

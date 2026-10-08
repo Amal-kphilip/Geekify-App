@@ -399,6 +399,7 @@ class PlaybackService : MediaSessionService() {
                     when (customCommand) {
                         likeCommand -> queueManager.state.value.current?.let { track ->
                             libraryRepository.toggleLike(track)
+                            syncRepository.pushNow()
                         }
                         shuffleCommand -> queueManager.toggleShuffle()
                     }

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import com.geekify.android.audio.AudioEffectsController
 import androidx.lifecycle.viewModelScope
 import com.geekify.android.data.local.LibraryRepository
+import com.geekify.android.data.sync.SyncRepository
 import com.geekify.android.data.model.Track
 import com.geekify.android.player.PlayerController
 import com.geekify.android.player.QueueState
@@ -16,6 +17,7 @@ import javax.inject.Inject
 class PlayerViewModel @Inject constructor(
     private val controller: PlayerController,
     private val library: LibraryRepository,
+    private val sync: SyncRepository,
     private val audioEffects: AudioEffectsController
 ) : ViewModel() {
 
@@ -57,6 +59,7 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             library.toggleLike(current)
             _isCurrentLiked.value = library.isLiked(current.videoId)
+            sync.pushNow()
         }
     }
 }

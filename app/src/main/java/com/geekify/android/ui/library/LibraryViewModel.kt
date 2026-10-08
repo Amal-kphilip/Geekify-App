@@ -44,7 +44,7 @@ class LibraryViewModel @Inject constructor(
     fun toggleLike(track: Track) {
         viewModelScope.launch {
             library.toggleLike(track)
-            sync.schedulePush()
+            sync.pushNow()
         }
     }
 

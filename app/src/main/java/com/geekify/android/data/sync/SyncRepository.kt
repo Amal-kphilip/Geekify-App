@@ -198,6 +198,19 @@ class SyncRepository @Inject constructor(
         }
     }
 
+    /** Immediately persists the latest local library state using the application sync scope.
+     * Used for user actions such as Like where the app may be minimized or closed immediately after the tap.
+     */
+    fun pushNow() {
+        val uid = activeUid ?: return
+        if (applying) return
+        pushJob?.cancel()
+        pushJob = scope.launch {
+            writeNow(uid)
+            pushJob = null
+        }
+    }
+
     /** Call on app foreground. */
     fun onForeground() {
         val uid = activeUid ?: return

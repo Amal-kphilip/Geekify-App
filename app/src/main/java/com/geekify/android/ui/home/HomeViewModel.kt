@@ -87,7 +87,9 @@ class HomeViewModel @Inject constructor(
             allShelves = cached
             applyFilter(_uiState.value.selectedFilter)
             rebuildDailyRecommendations()
-            _uiState.update { it.copy(fromCache = true) }
+            // Cached shelves are already fully usable. Do not keep the startup loader
+            // visible while the fresh network feed refreshes in the background.
+            _uiState.update { it.copy(isLoading = false, fromCache = false) }
         }
     }
 
@@ -165,9 +167,14 @@ class HomeViewModel @Inject constructor(
                     rebuildDailyRecommendations()
                     _uiState.update { it.copy(isLoading = false, fromCache = false) }
                     shelfCache.save(result.value.shelves)
-                    // New listeners (or an offline taste profile) get a sensible starter mix instead of nothing.
-                    mixes.join()
-                    if (_uiState.value.mixes.isEmpty()) buildStarterMix()
+                    // Do not block the Home screen on personalized recommendation network calls.
+                    // The feed is already usable; the mixes update when their background job finishes.
+                    if (mixes.isCompleted && _uiState.value.mixes.isEmpty()) buildStarterMix()
+                    mixes.invokeOnCompletion {
+                        if (_uiState.value.mixes.isEmpty()) {
+                            viewModelScope.launch { runCatching { buildStarterMix() } }
+                        }
+                    }
                 }
                 is MusicResult.Failure -> {
                     // Keep whatever is on screen (cached shelves); the screen shows a retry banner.

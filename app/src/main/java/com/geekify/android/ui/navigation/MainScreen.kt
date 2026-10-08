@@ -201,18 +201,59 @@ fun MainScreen(
     val floatingBarsHeight = with(LocalDensity.current) { floatingBarsHeightPx.toDp() }
 
     val navigateToTab: (String) -> Unit = { route ->
-        if (route == Screen.Home.route) {
-            // A playlist/detail screen is stacked above Home. Pop back to the
-            // existing Home instance instead of trying to restore a nested state.
-            val returnedHome = navController.popBackStack(Screen.Home.route, inclusive = false)
-            if (!returnedHome) {
-                navController.navigate(Screen.Home.route) { launchSingleTop = true }
+        when (route) {
+            Screen.Home.route -> {
+                // Return directly to the existing Home root instead of restoring
+                // a previously saved nested destination/state.
+                val returnedHome = navController.popBackStack(Screen.Home.route, inclusive = false)
+                if (!returnedHome && currentRoute != Screen.Home.route) {
+                    navController.navigate(Screen.Home.route) {
+                        launchSingleTop = true
+                        restoreState = false
+                    }
+                }
             }
-        } else if (currentRoute != route) {
-            navController.navigate(route) {
-                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                launchSingleTop = true
-                restoreState = true
+
+            Screen.Library.route -> {
+                // Library can have Playlist/Collection/Artist destinations stacked above it.
+                // Pop directly to the existing Library root so the tab always becomes active.
+                val returnedLibrary = navController.popBackStack(Screen.Library.route, inclusive = false)
+                if (!returnedLibrary && currentRoute != Screen.Library.route) {
+                    navController.navigate(Screen.Library.route) {
+                        launchSingleTop = true
+                        restoreState = false
+                    }
+                }
+            }
+
+            Screen.Search.route -> {
+                // Return to the existing Search root when coming from another destination.
+                // When Search is already selected, recreate just that root destination so a
+                // previously entered query/results state is cleared and the Search tab responds.
+                if (currentRoute == Screen.Search.route) {
+                    navController.navigate(Screen.Search.route) {
+                        popUpTo(Screen.Search.route) { inclusive = true }
+                        launchSingleTop = true
+                        restoreState = false
+                    }
+                } else {
+                    val returnedSearch = navController.popBackStack(Screen.Search.route, inclusive = false)
+                    if (!returnedSearch) {
+                        navController.navigate(Screen.Search.route) {
+                            launchSingleTop = true
+                            restoreState = false
+                        }
+                    }
+                }
+            }
+
+            else -> {
+                if (currentRoute != route) {
+                    navController.navigate(route) {
+                        launchSingleTop = true
+                        restoreState = false
+                    }
+                }
             }
         }
     }

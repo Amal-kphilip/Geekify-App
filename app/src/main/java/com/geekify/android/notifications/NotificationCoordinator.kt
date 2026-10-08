@@ -27,12 +27,6 @@ class NotificationCoordinator @Inject constructor(
 
         val prefs = store.prefsNow()
 
-        // First run after install: remember this version so "what's new" is only ever shown after a real update.
-        if (state.tipHandledForVersion == 0) {
-            store.updateState { it.copy(tipHandledForVersion = installed) }
-            state = store.stateNow()
-        }
-
         // 2. Update notification.
         if (allowed(NotificationPolicy.Kind.UPDATE, now, prefs, state, appInForeground, NotificationChannels.UPDATES)) {
             val name = state.latestVersionName
@@ -43,6 +37,35 @@ class NotificationCoordinator @Inject constructor(
                 }
                 return
             }
+        }
+
+        // First run: give the existing Tips notification path one real, one-time notification.
+        // It is only posted after the app is backgrounded and only when Tips are enabled.
+        state = store.stateNow()
+        val firstTipPending =
+            state.tipHandledForVersion == 0 ||
+                (state.tipHandledForVersion == installed && state.allSentAt.isEmpty())
+        if (firstTipPending &&
+            allowed(NotificationPolicy.Kind.FEATURE, now, prefs, state, appInForeground, NotificationChannels.TIPS)
+        ) {
+            if (notifier.postTip(
+                    "Welcome to Geekify",
+                    "Your music is ready. Tap to open Geekify.",
+                    route = null
+                )
+            ) {
+                store.updateState {
+                    it.copy(
+                        tipHandledForVersion = installed,
+                        allSentAt = it.allSentAt.logged(now),
+                        softSentAt = it.softSentAt.logged(now)
+                    )
+                }
+                return
+            }
+        } else if (firstTipPending && !prefs.tips) {
+            store.updateState { it.copy(tipHandledForVersion = installed) }
+            state = store.stateNow()
         }
 
         // 3. "What's new" once after the app was updated.

@@ -59,7 +59,9 @@ object NotificationPolicy {
             Kind.FEATURE -> {
                 if (!i.prefs.tips) return Decision.Deny("tips turned off")
                 if (isUpdatePending(i.prefs, s, i.installedVersionCode)) return Decision.Deny("update notification has priority")
-                if (i.now - s.lastOpenedAt < TIP_QUIET_AFTER_OPEN_MS) return Decision.Deny("app opened recently")
+                val firstTipPending = s.tipHandledForVersion == 0 ||
+                    (s.tipHandledForVersion == i.installedVersionCode && s.allSentAt.isEmpty())
+                if (!firstTipPending && i.now - s.lastOpenedAt < TIP_QUIET_AFTER_OPEN_MS) return Decision.Deny("app opened recently")
             }
             Kind.ENGAGEMENT -> {
                 if (!i.prefs.engagement) return Decision.Deny("engagement notifications turned off")

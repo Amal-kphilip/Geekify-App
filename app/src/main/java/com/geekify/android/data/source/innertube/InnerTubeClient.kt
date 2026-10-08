@@ -44,16 +44,30 @@ class InnerTubeClient @Inject constructor(private val http: OkHttpClient) {
      */
     suspend fun playerStreams(videoId: String): JsonObject {
         var last: Throwable? = null
-        repeat(2) { attempt ->
-            try {
-                return callPlayerVisionOs(videoId)
-            } catch (t: Throwable) {
-                last = t
-                if (t is InnerTubeException && !t.retryable) throw t
-                if (attempt == 0) delay(500)
+        // Primary client first; fall back to YouTube's embedded web player when the
+        // primary client is blocked by a bot/login challenge for this video or IP.
+        val clients = listOf(::callPlayerVisionOs, ::callPlayerWebEmbedded)
+        for ((clientIndex, client) in clients.withIndex()) {
+            repeat(2) { attempt ->
+                try {
+                    val response = client(videoId)
+                    val status = response["playabilityStatus"]?.jsonObject
+                    val statusCode = status?.get("status")?.jsonPrimitive?.contentOrNull
+                    val hasStreams = response["streamingData"]?.jsonObject != null
+                    if ((statusCode == null || statusCode == "OK") && hasStreams) {
+                        return response
+                    }
+                    val reason = status?.get("reason")?.jsonPrimitive?.contentOrNull ?: statusCode
+                    last = InnerTubeException(reason ?: "YouTube returned no playable stream.", false)
+                } catch (t: Throwable) {
+                    last = t
+                    if (t is InnerTubeException && !t.retryable && clientIndex == 1) break
+                }
+                if (attempt == 0) delay(350)
             }
         }
-        throw InnerTubeException("Could not contact YouTube. Check your connection and try again.", true, last)
+        throw (last as? InnerTubeException)
+            ?: InnerTubeException("YouTube could not provide a playable stream.", true, last)
     }
 
     /** Metadata (videoDetails) plus streams when available; falls back to the Music web client. */
@@ -63,6 +77,54 @@ class InnerTubeClient @Inject constructor(private val http: OkHttpClient) {
         } catch (_: Exception) {
             call("player", buildJsonObject { put("videoId", videoId) })
         }
+
+    private suspend fun callPlayerWebEmbedded(videoId: String): JsonObject {
+        val body = buildJsonObject {
+            put("context", buildJsonObject {
+                put("client", buildJsonObject {
+                    put("clientName", "WEB_EMBEDDED_PLAYER")
+                    put("clientVersion", WEB_EMBEDDED_VERSION)
+                    put("userAgent", WEB_EMBEDDED_USER_AGENT)
+                    put("hl", "en")
+                    put("gl", "IN")
+                    visitorData?.let { put("visitorData", it) }
+                })
+                put("thirdParty", buildJsonObject {
+                    put("embedUrl", "https://www.youtube.com/")
+                })
+            })
+            put("videoId", videoId)
+            put("racyCheckOk", true)
+            put("contentCheckOk", true)
+            put("playbackContext", buildJsonObject {
+                put("contentPlaybackContext", buildJsonObject { put("html5Preference", "HTML5_PREF_WANTS") })
+            })
+        }.toString().toRequestBody(JSON)
+
+        val request = Request.Builder()
+            .url("https://www.youtube.com/youtubei/v1/player?prettyPrint=false")
+            .header("Content-Type", "application/json")
+            .header("Origin", "https://www.youtube.com")
+            .header("User-Agent", WEB_EMBEDDED_USER_AGENT)
+            .header("X-YouTube-Client-Name", "56")
+            .header("X-YouTube-Client-Version", WEB_EMBEDDED_VERSION)
+            .post(body)
+            .build()
+
+        return withContext(Dispatchers.IO) {
+            http.newCall(request).execute().use {
+                val text = it.body.string()
+                if (it.isSuccessful) {
+                    json.parseToJsonElement(text).jsonObject.also { obj -> rememberVisitor(obj) }
+                } else {
+                    throw InnerTubeException(
+                        "YouTube embedded player refused the stream request (${it.code}).",
+                        it.code >= 500 || it.code == 429
+                    )
+                }
+            }
+        }
+    }
 
     private suspend fun callPlayerVisionOs(videoId: String): JsonObject {
         // The visitor id is optional. Never make the first tap wait on the (large) Music homepage
@@ -189,6 +251,10 @@ class InnerTubeClient @Inject constructor(private val http: OkHttpClient) {
 
         /** The one number to bump if streams stop resolving (compare with yt-dlp's `visionos` client). */
         private const val VISIONOS_VERSION = "1.02"
+
+        private const val WEB_EMBEDDED_VERSION = "2.20260708.00.00"
+        private const val WEB_EMBEDDED_USER_AGENT =
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15,gzip(gfe)"
 
         private val JSON = "application/json; charset=utf-8".toMediaType()
         private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
