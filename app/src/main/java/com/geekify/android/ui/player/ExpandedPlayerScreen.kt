@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -63,6 +64,9 @@ import com.geekify.android.ui.components.MarqueeText
 import com.geekify.android.ui.components.MusicReactiveArtwork
 import com.geekify.android.ui.components.SeekBar
 import com.geekify.android.ui.components.bouncyClickable
+import com.geekify.android.ui.components.DialogButtonStyle
+import com.geekify.android.ui.components.DialogPillButton
+import com.geekify.android.ui.components.GeekifyDialog
 import com.geekify.android.ui.components.rememberArtColor
 import com.geekify.android.ui.components.bestArtworkUrl
 import com.geekify.android.ui.theme.*
@@ -84,6 +88,8 @@ fun ExpandedPlayerScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val isLiked by viewModel.isCurrentLiked.collectAsState()
+    val sleepTimerRemainingMs by viewModel.sleepTimerRemainingMs.collectAsState()
+    var showSleepTimer by remember { mutableStateOf(false) }
     val track = state.current ?: run {
         onDismiss()
         return
@@ -209,6 +215,15 @@ fun ExpandedPlayerScreen(
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center
                 )
+                CircleIconButton(
+                    icon = Icons.Default.Timer,
+                    contentDescription = if (sleepTimerRemainingMs != null) "Sleep timer active" else "Sleep timer",
+                    onClick = { showSleepTimer = true },
+                    size = 50.dp,
+                    container = Color.White.copy(alpha = 0.2f),
+                    tint = if (sleepTimerRemainingMs != null) Lime else TextPrimary
+                )
+                Spacer(Modifier.width(8.dp))
                 CircleIconButton(
                     icon = if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                     contentDescription = if (isLiked) "Remove from Liked Songs" else "Add to Liked Songs",
@@ -409,6 +424,97 @@ fun ExpandedPlayerScreen(
             Spacer(Modifier.height(20.dp))
         }
         }
+
+        if (showSleepTimer) {
+            SleepTimerDialog(
+                remainingMs = sleepTimerRemainingMs,
+                onSelect = { minutes ->
+                    viewModel.setSleepTimer(minutes)
+                    showSleepTimer = false
+                },
+                onCancelTimer = {
+                    viewModel.cancelSleepTimer()
+                    showSleepTimer = false
+                },
+                onDismiss = { showSleepTimer = false }
+            )
+        }
+    }
+}
+
+@Composable
+private fun SleepTimerDialog(
+    remainingMs: Long?,
+    onSelect: (Int) -> Unit,
+    onCancelTimer: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    GeekifyDialog(onDismissRequest = onDismiss) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(InkElevated),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Timer, contentDescription = null, tint = Lime, modifier = Modifier.size(24.dp))
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Sleep timer", color = TextPrimary, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = remainingMs?.let { "Active • ${formatSleepTimer(it)} remaining" } ?: "Stop playback automatically after a set time",
+                    color = TextSecondary,
+                    fontSize = 13.sp,
+                    maxLines = 2
+                )
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        Text("Stop after", color = TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(10.dp))
+
+        val options = listOf(5, 10, 15, 30, 45, 60, 90)
+        options.chunked(2).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                row.forEach { minutes ->
+                    DialogPillButton(
+                        text = if (minutes >= 60) "${minutes / 60}h" + if (minutes % 60 == 0) "" else " ${minutes % 60}m" else "${minutes}m",
+                        onClick = { onSelect(minutes) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+
+        if (remainingMs != null) {
+            Spacer(Modifier.height(4.dp))
+            DialogPillButton(
+                text = "Cancel timer",
+                onClick = onCancelTimer,
+                modifier = Modifier.fillMaxWidth(),
+                style = DialogButtonStyle.Secondary
+            )
+        }
+    }
+}
+
+private fun formatSleepTimer(ms: Long): String {
+    val totalSeconds = (ms / 1_000L).coerceAtLeast(0L)
+    val hours = totalSeconds / 3_600L
+    val minutes = (totalSeconds % 3_600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0L) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%02d:%02d".format(minutes, seconds)
     }
 }
 

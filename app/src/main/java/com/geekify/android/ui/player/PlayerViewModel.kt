@@ -23,6 +23,7 @@ class PlayerViewModel @Inject constructor(
 
     val state: StateFlow<QueueState> = controller.state
     val beatIntensity: StateFlow<Float> = audioEffects.beatIntensity
+    val sleepTimerRemainingMs: StateFlow<Long?> = controller.sleepTimerRemainingMs
 
     private val _isCurrentLiked = MutableStateFlow(false)
     val isCurrentLiked: StateFlow<Boolean> = _isCurrentLiked.asStateFlow()
@@ -53,6 +54,8 @@ class PlayerViewModel @Inject constructor(
     fun removeFromQueue(index: Int) = controller.removeFromQueue(index)
     fun reorder(from: Int, to: Int) = controller.reorder(from, to)
     fun clearQueue() = controller.clearQueue()
+    fun setSleepTimer(minutes: Int) = controller.setSleepTimer(minutes)
+    fun cancelSleepTimer() = controller.cancelSleepTimer()
 
     fun toggleLikeCurrent() {
         val current = state.value.current ?: return

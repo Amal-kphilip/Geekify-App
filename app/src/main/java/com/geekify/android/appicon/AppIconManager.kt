@@ -16,10 +16,6 @@ object AppIconManager {
     const val DARK = "dark"
     const val PREMIUM = "premium"
     const val MONOCHROME = "monochrome"
-    const val FLUFFY_BLUE = "fluffy_blue"
-    const val FLUFFY_DARK = "fluffy_dark"
-    const val FLUFFY_GOLD = "fluffy_gold"
-    const val FLUFFY_WHITE = "fluffy_white"
 
     private const val PREFS_NAME = "geekify_app_icon"
     private const val KEY_SELECTED = "selected_icon"
@@ -41,10 +37,6 @@ object AppIconManager {
         IconOption(DARK, "Dark", com.geekify.android.R.drawable.ic_geekify_dark_preview, "com.geekify.android.launcher.IconDark"),
         IconOption(PREMIUM, "Premium", com.geekify.android.R.drawable.ic_geekify_premium_preview, "com.geekify.android.launcher.IconPremium"),
         IconOption(MONOCHROME, "Monochrome", com.geekify.android.R.drawable.ic_geekify_monochrome_preview, "com.geekify.android.launcher.IconMonochrome"),
-        IconOption(FLUFFY_BLUE, "Fluffy Blue & Orange", com.geekify.android.R.drawable.ic_geekify_fluffy_blue_preview, "com.geekify.android.launcher.IconFluffyBlue"),
-        IconOption(FLUFFY_DARK, "Fluffy Dark", com.geekify.android.R.drawable.ic_geekify_fluffy_dark_preview, "com.geekify.android.launcher.IconFluffyDark"),
-        IconOption(FLUFFY_GOLD, "Fluffy Gold", com.geekify.android.R.drawable.ic_geekify_fluffy_gold_preview, "com.geekify.android.launcher.IconFluffyGold"),
-        IconOption(FLUFFY_WHITE, "Fluffy White", com.geekify.android.R.drawable.ic_geekify_fluffy_white_preview, "com.geekify.android.launcher.IconFluffyWhite")
     )
 
     fun currentIcon(context: Context): String {
@@ -82,6 +74,15 @@ object AppIconManager {
             // change. Keep the previous selection instead.
         } catch (_: IllegalArgumentException) {
             // Defensive fallback for an OEM package manager rejecting an alias.
+        }
+    }
+
+    /** Restores Default when a previously selected launcher icon no longer exists. */
+    fun ensureValidSelection(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val selected = prefs.getString(KEY_SELECTED, DEFAULT)
+        if (selected == null || options.none { it.id == selected }) {
+            setIcon(context, DEFAULT)
         }
     }
 
