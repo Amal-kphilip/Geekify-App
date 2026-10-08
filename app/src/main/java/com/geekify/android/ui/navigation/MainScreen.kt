@@ -97,6 +97,7 @@ import com.geekify.android.ui.library.PlaylistScreen
 import com.geekify.android.ui.library.RecentsScreen
 import com.geekify.android.ui.library.RecentsViewModel
 import com.geekify.android.ui.library.SettingsScreen
+import com.geekify.android.ui.library.AppIconSettingsScreen
 import com.geekify.android.ui.player.ExpandedPlayerScreen
 import com.geekify.android.ui.player.NowPlayingBar
 import com.geekify.android.ui.player.PlayerViewModel
@@ -135,6 +136,7 @@ fun MainScreen(
     var showQueue by remember { mutableStateOf(false) }
     var showAccountSheet by remember { mutableStateOf(false) }
     var showCreatePlaylist by remember { mutableStateOf(false) }
+    var miniPlayerDismissed by remember { mutableStateOf(false) }
     var actionTrack by remember { mutableStateOf<Track?>(null) }
 
     val accountState by accountViewModel.uiState.collectAsState()
@@ -194,6 +196,15 @@ fun MainScreen(
                 playerViewModel.play(track)
             }
         }
+    }
+
+    // A paused mini player can be dismissed with a downward swipe. Starting playback or
+    // switching to another track makes the mini player available again.
+    LaunchedEffect(playerState.current?.videoId) {
+        miniPlayerDismissed = false
+    }
+    LaunchedEffect(playerState.isPlaying) {
+        if (playerState.isPlaying) miniPlayerDismissed = false
     }
 
     // Height of the floating mini player + navigation pill, so scrolling lists can leave room for them.
@@ -416,7 +427,8 @@ fun MainScreen(
                     composable(Screen.Settings.route) {
                         SettingsScreen(
                             onBack = { navController.popBackStack() },
-                            onAudioClick = { navController.navigate(Screen.AudioSettings.route) }
+                            onAudioClick = { navController.navigate(Screen.AudioSettings.route) },
+                            onAppIconClick = { navController.navigate(Screen.AppIconSettings.route) }
                         )
                     }
 
@@ -426,6 +438,10 @@ fun MainScreen(
 
                     composable(Screen.AudioSettings.route) {
                         AudioSettingsScreen(onBack = { navController.popBackStack() })
+                    }
+
+                    composable(Screen.AppIconSettings.route) {
+                        AppIconSettingsScreen(onBack = { navController.popBackStack() })
                     }
 
                     composable(Screen.EditProfile.route) {
@@ -467,12 +483,21 @@ fun MainScreen(
                     .padding(start = 16.dp, end = 16.dp, top = 30.dp, bottom = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                NowPlayingBar(
-                    viewModel = playerViewModel,
-                    onClick = { showExpandedPlayer = true }
-                )
+                AnimatedVisibility(
+                    visible = playerState.current != null && !miniPlayerDismissed
+                ) {
+                    NowPlayingBar(
+                        viewModel = playerViewModel,
+                        onClick = { showExpandedPlayer = true },
+                        onDismiss = {
+                            if (!playerState.isPlaying) miniPlayerDismissed = true
+                        }
+                    )
+                }
                 FloatingNavBar(
                     currentRoute = currentRoute,
+                    libraryDetailActive = navBackStackEntry?.destination?.route in setOf(Screen.Liked.route, Screen.Playlist.route, Screen.Collection.route) &&
+                        navController.previousBackStackEntry?.destination?.route == Screen.Library.route,
                     onHome = { navigateToTab(Screen.Home.route) },
                     onSearch = { navigateToTab(Screen.Search.route) },
                     onLibrary = { navigateToTab(Screen.Library.route) },
@@ -613,15 +638,17 @@ fun MainScreen(
 @Composable
 private fun FloatingNavBar(
     currentRoute: String?,
+    libraryDetailActive: Boolean,
     onHome: () -> Unit,
     onSearch: () -> Unit,
     onLibrary: () -> Unit,
     onCreate: () -> Unit
 ) {
-    val selectedIndex = when (currentRoute) {
-        Screen.Home.route -> 0
-        Screen.Search.route -> 1
-        Screen.Library.route -> 2
+    val selectedIndex = when {
+        currentRoute == Screen.Home.route -> 0
+        currentRoute == Screen.Search.route -> 1
+        currentRoute == Screen.Library.route -> 2
+        libraryDetailActive -> 2
         else -> -1
     }
     val reduced = rememberReducedMotion()

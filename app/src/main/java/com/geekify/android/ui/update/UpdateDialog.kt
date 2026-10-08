@@ -2,13 +2,7 @@ package com.geekify.android.ui.update
 
 import android.os.Build
 import android.view.WindowManager
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -178,53 +172,79 @@ fun UpdateDialog(
                 Spacer(Modifier.height(24.dp))
 
                 // ---- Progress / actions ----
-                AnimatedContent(
-                    targetState = stage,
-                    transitionSpec = {
-                        (fadeIn(animationSpec = tween(180)) +
-                            slideInVertically(
-                                animationSpec = tween(240, easing = FastOutSlowInEasing),
-                                initialOffsetY = { 10 }
-                            )) togetherWith
-                            (fadeOut(animationSpec = tween(120)) +
-                                slideOutVertically(
-                                    animationSpec = tween(160, easing = FastOutSlowInEasing),
-                                    targetOffsetY = { -6 }
-                                )) using
-                            SizeTransform(
-                                clip = false,
-                                sizeAnimationSpec = { _, _ ->
-                                    tween(280, easing = FastOutSlowInEasing)
-                                }
-                            )
-                    },
-                    label = "updateStage"
-                ) { current ->
-                    when (current) {
-                        UpdateStage.Available -> Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            PillButton("Later", onLater, primary = false, modifier = Modifier.weight(1f))
-                            PillButton("Update", onUpdate, primary = true, modifier = Modifier.weight(1.4f))
-                        }
-                        UpdateStage.Downloading -> ProgressBlock(
-                            label = "Downloading update…",
-                            progress = progress
-                        )
-                        UpdateStage.Installing -> ProgressBlock(
-                            label = "Installing update…",
-                            progress = null,
-                            showPercent = false
-                        )
-                        UpdateStage.Ready -> Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Lime, modifier = Modifier.size(20.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text("Update ready", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                // Keep this area at a stable height so the dialog window itself never
+                // remeasures/repositions while the download transitions to Ready.
+                // Only the content inside the reserved area animates.
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(88.dp),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Crossfade(
+                        targetState = stage,
+                        animationSpec = tween(220, easing = FastOutSlowInEasing),
+                        label = "updateStage"
+                    ) { current ->
+                        when (current) {
+                            UpdateStage.Available -> Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(52.dp)
+                            ) {
+                                PillButton("Later", onLater, primary = false, modifier = Modifier.weight(1f))
+                                PillButton("Update", onUpdate, primary = true, modifier = Modifier.weight(1.4f))
                             }
-                            Spacer(Modifier.height(16.dp))
-                            PillButton("Restart & Install", onInstall, primary = true, modifier = Modifier.fillMaxWidth())
+
+                            UpdateStage.Downloading -> Box(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = Alignment.TopCenter
+                            ) {
+                                ProgressBlock(
+                                    label = "Downloading update…",
+                                    progress = progress
+                                )
+                            }
+
+                            UpdateStage.Installing -> Box(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = Alignment.TopCenter
+                            ) {
+                                ProgressBlock(
+                                    label = "Installing update…",
+                                    progress = null,
+                                    showPercent = false
+                                )
+                            }
+
+                            UpdateStage.Ready -> Column(
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Filled.CheckCircle,
+                                        contentDescription = null,
+                                        tint = Lime,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        "Update ready",
+                                        color = TextPrimary,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                                Spacer(Modifier.height(16.dp))
+                                PillButton(
+                                    "Restart & Install",
+                                    onInstall,
+                                    primary = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
                     }
                 }

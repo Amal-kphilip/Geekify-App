@@ -1,10 +1,10 @@
 package com.geekify.android.ui.home
 
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -54,8 +54,7 @@ private data class ListRowItem(
     val title: String,
     val subtitle: String,
     val art: String?,
-    val onClick: () -> Unit,
-    val track: Track? = null
+    val onClick: () -> Unit
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -82,6 +81,7 @@ fun HomeScreen(
 
     // ---- Derived content for the home feed ----
     val allItems = state.shelves.flatMap { it.items }.distinctBy { it.title }
+    val dailyItems = state.dailyRecommendations[state.selectedFilter].orEmpty().ifEmpty { allItems }
 
     val mixCards = state.mixes.map { mix ->
         val lead = mix.tracks.firstOrNull()
@@ -110,15 +110,21 @@ fun HomeScreen(
         )
     }).take(6)
 
+    val discoverListState = rememberLazyListState()
+    LaunchedEffect(discover.isNotEmpty()) {
+        if (discover.isNotEmpty()) {
+            discoverListState.scrollToItem(0)
+        }
+    }
+
     val usedIds = feedCards.map { it.id }.toSet()
-    val listItems = allItems.filter { it.id !in usedIds }.map { item ->
+    val listItems = dailyItems.filter { it.id !in usedIds }.map { item ->
         when (item) {
             is ShelfTrack -> ListRowItem(
                 title = item.value.title,
                 subtitle = "By ${item.value.artist}",
                 art = item.value.thumbnails.bestArtworkUrl(480),
-                onClick = { onTrackClick(item.value, listOf(item.value)) },
-                track = item.value
+                onClick = { onTrackClick(item.value, listOf(item.value)) }
             )
             is ShelfCard -> ListRowItem(
                 title = item.value.title,
@@ -286,6 +292,7 @@ fun HomeScreen(
                             SectionTitle("Curated & trending")
                             Spacer(Modifier.height(6.dp))
                             LazyRow(
+                                state = discoverListState,
                                 contentPadding = PaddingValues(horizontal = 20.dp),
                                 horizontalArrangement = Arrangement.spacedBy(14.dp)
                             ) {
@@ -299,8 +306,7 @@ fun HomeScreen(
                                         onToggleLike = { lead?.let(onToggleLike) },
                                         onAddToQueue = { lead?.let(onAddToQueue) },
                                         onMore = { lead?.let(onTrackActions) },
-                                        modifier = Modifier.fillParentMaxWidth(0.86f),
-                                        onLongClick = { lead?.let(onTrackActions) }
+                                        modifier = Modifier.fillParentMaxWidth(0.86f)
                                     )
                                 }
                             }
@@ -329,21 +335,13 @@ fun HomeScreen(
                         }
                     }
                     items(visibleList.size) { index ->
-                        PlaylistRow(
-                            item = visibleList[index],
-                            onLongClick = { visibleList[index].track?.let(onTrackActions) }
-                        )
+                        PlaylistRow(item = visibleList[index])
                     }
                 }
 
                 // ---- Remaining shelves from the feed ----
                 items(state.shelves, key = { it.title }) { shelf ->
-                    ShelfRow(
-                        shelf = shelf,
-                        onTrackClick = onTrackClick,
-                        onCardClick = onCardClick,
-                        onTrackLongClick = onTrackActions
-                    )
+                    ShelfRow(shelf = shelf, onTrackClick = onTrackClick, onCardClick = onCardClick)
                 }
 
                 item { Spacer(Modifier.height(24.dp + LocalBottomInset.current)) }
@@ -398,7 +396,6 @@ private fun DrawScope.drawHeaderGlow() {
 }
 
 @Composable
-@OptIn(ExperimentalFoundationApi::class)
 private fun DiscoverCard(
     item: DiscoverItem,
     color: Color,
@@ -406,21 +403,14 @@ private fun DiscoverCard(
     onToggleLike: () -> Unit,
     onAddToQueue: () -> Unit,
     onMore: () -> Unit,
-    modifier: Modifier = Modifier,
-    onLongClick: (() -> Unit)? = null
+    modifier: Modifier = Modifier
 ) {
     Box(
         modifier = modifier
             .height(186.dp)
             .clip(RoundedCornerShape(28.dp))
             .background(color)
-            .run {
-                if (onLongClick != null) {
-                    bouncyCombinedClickable(pressedScale = 0.98f, onLongClick = onLongClick, onClick = item.onPlay)
-                } else {
-                    bouncyClickable(pressedScale = 0.98f, onClick = item.onPlay)
-                }
-            }
+            .bouncyClickable(pressedScale = 0.98f, onClick = item.onPlay)
     ) {
         // Artwork on the right, melting into the card colour.
         Box(
@@ -535,18 +525,11 @@ private fun CardAction(icon: ImageVector, description: String, onClick: () -> Un
 }
 
 @Composable
-@OptIn(ExperimentalFoundationApi::class)
-private fun PlaylistRow(item: ListRowItem, onLongClick: (() -> Unit)? = null) {
+private fun PlaylistRow(item: ListRowItem) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .run {
-                if (onLongClick != null) {
-                    bouncyCombinedClickable(pressedScale = 0.985f, onLongClick = onLongClick, onClick = item.onClick)
-                } else {
-                    bouncyClickable(pressedScale = 0.985f, onClick = item.onClick)
-                }
-            }
+            .bouncyClickable(pressedScale = 0.985f, onClick = item.onClick)
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

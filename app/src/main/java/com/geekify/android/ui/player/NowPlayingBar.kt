@@ -8,6 +8,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -28,6 +29,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,7 +55,8 @@ import com.geekify.android.ui.theme.*
 fun NowPlayingBar(
     viewModel: PlayerViewModel,
     modifier: Modifier = Modifier,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDismiss: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsState()
     val liked by viewModel.isCurrentLiked.collectAsState()
@@ -61,6 +65,7 @@ fun NowPlayingBar(
     val thumbUrl = track.thumbnails.bestArtworkUrl(480)
     val pressed = remember { mutableStateOf(false) }
     val pressAnim by animateFloatAsState(if (pressed.value) 1f else 0f, label = "miniPress")
+    val dismissThresholdPx = with(LocalDensity.current) { 72.dp.toPx() }
 
     Box(
         modifier = modifier
@@ -69,6 +74,27 @@ fun NowPlayingBar(
             .liquidGlass(RoundedCornerShape(40.dp), GlassStyle.Floating, pressProgress = { pressAnim })
             .trackPress(pressed)
             .bouncyClickable(pressedScale = 0.985f, onClick = onClick)
+            .pointerInput(state.isPlaying, onDismiss) {
+                if (!state.isPlaying) {
+                    var totalDownDrag = 0f
+                    detectVerticalDragGestures(
+                        onVerticalDrag = { change, dragAmount ->
+                            if (dragAmount > 0f) {
+                                totalDownDrag += dragAmount
+                            } else if (totalDownDrag > 0f) {
+                                totalDownDrag = 0f
+                            }
+                        },
+                        onDragEnd = {
+                            if (totalDownDrag >= dismissThresholdPx) {
+                                onDismiss()
+                            }
+                            totalDownDrag = 0f
+                        },
+                        onDragCancel = { totalDownDrag = 0f }
+                    )
+                }
+            }
     ) {
         Row(
             modifier = Modifier

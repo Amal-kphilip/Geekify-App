@@ -33,12 +33,86 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- One launcher alias is enabled at a time. The Default alias uses Geekify's original launcher artwork. -->
+        <activity-alias
+            android:name=".launcher.IconDefault"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_launcher"
+            android:label="Geekify"
+            android:enabled="true"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.IconRetro"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_geekify_retro"
+            android:label="Geekify"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.IconBlueOrange"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_geekify_blue_orange"
+            android:label="Geekify"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.IconDark"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_geekify_dark"
+            android:label="Geekify"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.IconPremium"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_geekify_premium"
+            android:label="Geekify"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.IconMonochrome"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_geekify_monochrome"
+            android:label="Geekify"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <receiver
             android:name=".notifications.NotificationActionReceiver"

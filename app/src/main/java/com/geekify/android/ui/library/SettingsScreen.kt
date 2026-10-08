@@ -8,6 +8,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -35,6 +36,7 @@ import com.geekify.android.ui.theme.*
 fun SettingsScreen(
     onBack: () -> Unit,
     onAudioClick: () -> Unit = {},
+    onAppIconClick: () -> Unit = {},
     notificationSettings: NotificationSettingsViewModel = hiltViewModel()
 ) {
     val notif by notificationSettings.prefs.collectAsState()
@@ -55,6 +57,8 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(20.dp))
             SettingsEntry(Icons.Default.GraphicEq, "Audio & equalizer", "Equalizer, tempo, pitch, normalization", onAudioClick)
+            Spacer(Modifier.height(14.dp))
+            SettingsEntry(Icons.Default.Apps, "App icon", "Choose the Geekify launcher icon", onAppIconClick)
             Spacer(Modifier.height(14.dp))
             Surface(color = InkPanel, shape = RoundedCornerShape(28.dp)) {
                 Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp)) {
