@@ -88,6 +88,16 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-compose:3.3.0")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.3.0")
 
+    // Geekify InnerTube backend adapter + InnerTubeX stream extraction
+    implementation(project(":innertube"))
+    implementation("com.jakewharton.timber:timber:5.0.1")
+    implementation("androidx.collection:collection-ktx:1.5.0")
+    implementation("io.ktor:ktor-client-core:3.6.0")
+    implementation("io.ktor:ktor-client-okhttp:3.6.0")
+    implementation("io.ktor:ktor-client-content-negotiation:3.6.0")
+    implementation("io.ktor:ktor-client-encoding:3.6.0")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:3.6.0")
+
     // Media3 / ExoPlayer
     implementation("androidx.media3:media3-exoplayer:1.6.1")
     implementation("androidx.media3:media3-session:1.6.1")

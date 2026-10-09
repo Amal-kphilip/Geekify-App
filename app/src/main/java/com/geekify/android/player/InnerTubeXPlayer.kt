@@ -1,50 +1,36 @@
 package com.geekify.android.player
 
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSpec
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
-import kotlinx.serialization.json.JsonObject
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
- * Everything the player needs from YouTube: "give me a playable stream for this video".
- *
- * The playback service depends only on this interface, so how the URL is obtained (which InnerTube client,
- * whether a signature has to be deciphered, a PO token...) can change without touching player logic.
- * [StreamResolver] is the implementation.
+ * Playback-facing API. Geekify keeps Media3, queue, cache and UI ownership; the implementation
+ * uses the InnerTubeX extractor for signature deciphering, token-aware client fallback,
+ * stream metadata, per-client headers and URL refresh behavior.
  */
 interface InnerTubeXPlayer {
     suspend fun resolve(videoId: String, forceRefresh: Boolean = false): StreamResolver.ResolvedStream
     fun prefetch(videoIds: List<String>)
     fun invalidate(videoId: String)
 
-    /** The stream last returned for [videoId] was rejected by the server (e.g. HTTP 403): drop it and pick a different format next time. */
+    /** The stream last returned for [videoId] was rejected by the server (for example HTTP 403). */
     fun markFailed(videoId: String)
-}
 
-/**
- * Turns an audio format that only carries a `signatureCipher` into a playable URL.
- *
- * This is the plug-in point for zemer-cipher (see integration/zemer-cipher/INTEGRATION.md): implement this
- * interface with it and bind it in [PlayerBindingsModule]. The current VISIONOS player client returns plain
- * URLs, so the default [NoOpStreamCipher] is never needed today; [StreamResolver] only asks a cipher for
- * formats that have no URL. [videoId] is passed because the cipher solver needs it. Return null when the
- * format cannot be deciphered; the resolver then skips it.
- */
-interface StreamCipher {
-    suspend fun decipher(videoId: String, format: JsonObject): String?
-}
+    /** Apply the resolved stream's required request headers/range limits to a Media3 request. */
+    @OptIn(UnstableApi::class)
+    fun resolveDataSpec(dataSpec: DataSpec): DataSpec = dataSpec
 
-@Singleton
-class NoOpStreamCipher @Inject constructor() : StreamCipher {
-    override suspend fun decipher(videoId: String, format: JsonObject): String? = null
+    /** Best-effort warm-up of the extractor/player-config cache. */
+    suspend fun warmUp() {}
 }
 
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class PlayerBindingsModule {
     @Binds abstract fun bindInnerTubeXPlayer(impl: StreamResolver): InnerTubeXPlayer
-    @Binds abstract fun bindStreamCipher(impl: NoOpStreamCipher): StreamCipher
 }

@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Geekify"
 include(":app")
+include(":innertube")

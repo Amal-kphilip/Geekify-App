@@ -1,5 +1,6 @@
 package com.geekify.android.data.source.innertube
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -14,7 +15,10 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class InnerTubeClient @Inject constructor(private val http: OkHttpClient) {
+class InnerTubeClient @Inject constructor(
+    private val http: OkHttpClient,
+    private val innerTubeBackend: GeekifyInnerTubeBackend
+) {
     private val json = Json { ignoreUnknownKeys = true }
     private data class Config(val key: String, val version: String)
     @Volatile private var config: Config? = null
@@ -22,25 +26,14 @@ class InnerTubeClient @Inject constructor(private val http: OkHttpClient) {
     /** Anonymous visitor id; the player endpoint wants it (taken from the music page, then from any response). */
     @Volatile private var visitorData: String? = null
 
-    suspend fun search(query: String, type: String?): JsonObject = call("search", buildJsonObject {
-        put("query", query)
-        type?.let { put("params", SEARCH_PARAMS.getValue(it)) }
-    })
-    suspend fun browse(id: String): JsonObject = call("browse", buildJsonObject { put("browseId", id) })
-    suspend fun next(videoId: String, playlistId: String? = null): JsonObject = call("next", buildJsonObject {
-        put("videoId", videoId); playlistId?.let { put("playlistId", it) }
-    })
+    suspend fun search(query: String, type: String?): JsonObject = innerTubeBackend.search(query, type)
+    suspend fun browse(id: String): JsonObject = innerTubeBackend.browse(id)
+    suspend fun next(videoId: String, playlistId: String? = null): JsonObject = innerTubeBackend.next(videoId, playlistId)
 
     /**
-     * Player response used for **audio stream URLs**.
-     *
-     * Uses the VISIONOS client: as of 2026 it returns plain (cipher-free) audio URLs anonymously,
-     * needs no PO token, and its URLs accept normal open-ended range requests (which is what ExoPlayer
-     * sends). The older ANDROID_VR / IOS / ANDROID_TESTSUITE clients now need PO tokens for audio-only
-     * formats, and ANDROID_VR URLs answer ExoPlayer's first read with HTTP 403.
-     *
-     * The URLs must be fetched with [PLAYER_USER_AGENT]; googlevideo checks it.
-     * If YouTube retires this client, bump [VISIONOS_VERSION] (see yt-dlp's INNERTUBE_CLIENTS).
+     * Lightweight player-response request used for metadata fallback. Actual audio-stream resolution
+     * is handled by [com.geekify.android.player.StreamResolver] through Metrolist's InnerTubeX
+     * extractor, which owns signature deciphering, token-aware client fallback and stream headers.
      */
     suspend fun playerStreams(videoId: String): JsonObject {
         var last: Throwable? = null
@@ -60,6 +53,7 @@ class InnerTubeClient @Inject constructor(private val http: OkHttpClient) {
                     val reason = status?.get("reason")?.jsonPrimitive?.contentOrNull ?: statusCode
                     last = InnerTubeException(reason ?: "YouTube returned no playable stream.", false)
                 } catch (t: Throwable) {
+                    if (t is CancellationException) throw t
                     last = t
                     if (t is InnerTubeException && !t.retryable && clientIndex == 1) break
                 }
@@ -74,6 +68,8 @@ class InnerTubeClient @Inject constructor(private val http: OkHttpClient) {
     suspend fun player(videoId: String): JsonObject =
         try {
             playerStreams(videoId)
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             call("player", buildJsonObject { put("videoId", videoId) })
         }
@@ -177,7 +173,10 @@ class InnerTubeClient @Inject constructor(private val http: OkHttpClient) {
 
     /** Loads the Music config + anonymous visitor id ahead of time so the first song starts faster. */
     suspend fun warmUp() {
-        runCatching { getConfig() }
+        // Warm both transports in the background: existing metadata-player calls keep their
+        // lightweight config path, while discovery/extraction share InnerTubeX session data.
+        try { getConfig() } catch (error: CancellationException) { throw error } catch (_: Exception) { }
+        try { innerTubeBackend.warmUp() } catch (error: CancellationException) { throw error } catch (_: Exception) { }
     }
 
     private fun rememberVisitor(obj: JsonObject) {
@@ -215,6 +214,7 @@ class InnerTubeClient @Inject constructor(private val http: OkHttpClient) {
                     }
                 }
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 last = t
                 if (t is InnerTubeException && !t.retryable) throw t
                 if (attempt < 2) delay(700L * (attempt + 1))
@@ -245,7 +245,7 @@ class InnerTubeClient @Inject constructor(private val http: OkHttpClient) {
 
     class InnerTubeException(message: String, val retryable: Boolean, cause: Throwable? = null) : IOException(message, cause)
     companion object {
-        /** Use this User-Agent when fetching the stream URLs resolved by [playerStreams]. */
+        /** User-Agent used by the legacy raw player request for metadata fallback. */
         const val PLAYER_USER_AGENT =
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
 
@@ -258,11 +258,5 @@ class InnerTubeClient @Inject constructor(private val http: OkHttpClient) {
 
         private val JSON = "application/json; charset=utf-8".toMediaType()
         private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        private val SEARCH_PARAMS = mapOf(
-            "song" to "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D",
-            "album" to "EgWKAQIYAWoKEAkQChAFEAMQBA%3D%3D",
-            "artist" to "EgWKAQIgAWoKEAkQChAFEAMQBA%3D%3D",
-            "playlist" to "EgWKAQJQAWoKEAkQChAFEAMQBA%3D%3D"
-        )
     }
 }

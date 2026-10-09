@@ -22,6 +22,7 @@ import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
@@ -113,8 +114,11 @@ class PlaybackService : MediaSessionService() {
 
         createPlaybackNotificationChannel()
 
-        // Load the YouTube config/visitor id in the background so the first song does not wait for it.
-        scope.launch(Dispatchers.IO) { innerTube.warmUp() }
+        // Warm the InnerTube API session and the player-config/cipher extractor off the playback path.
+        scope.launch(Dispatchers.IO) {
+            innerTube.warmUp()
+            streamResolver.warmUp()
+        }
 
         // Media3 owns the media notification (same id/channel as the early placeholder below). Artwork comes from
         // the session's BitmapLoader (Coil-backed, see CoilBitmapLoader), so the cover is cached, downsampled and
@@ -128,14 +132,18 @@ class PlaybackService : MediaSessionService() {
                 .apply { setSmallIcon(R.drawable.ic_stat_geekify) }
         )
 
+        // Keep the upstream factory neutral: InnerTubeX supplies the User-Agent and other required
+        // headers for the exact client that produced each signed stream URL.
         val upstreamFactory = OkHttpDataSource.Factory(http)
-            // googlevideo checks that the URL is fetched with the same User-Agent as the client that issued it.
-            .setUserAgent(InnerTubeClient.PLAYER_USER_AGENT)
-        // Bytes are cached on disk under a stable key (see buildMediaItem), because the signed URL changes
-        // every time a track is resolved. If the cache itself errors, playback silently falls back to the network.
+        // Apply the selected InnerTubeX stream's client headers and range constraints only when
+        // Media3 actually opens the upstream URL. Keep the stable per-track/itag disk-cache key,
+        // so expired URLs can be refreshed without discarding already cached audio bytes.
+        val resolvingUpstreamFactory = ResolvingDataSource.Factory(upstreamFactory) { dataSpec ->
+            streamResolver.resolveDataSpec(dataSpec)
+        }
         val dataSourceFactory = CacheDataSource.Factory()
             .setCache(audioCache)
-            .setUpstreamDataSourceFactory(upstreamFactory)
+            .setUpstreamDataSourceFactory(resolvingUpstreamFactory)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
         // The audio sink runs our equalizer and normaliser before ExoPlayer's own tempo / silence processors.
