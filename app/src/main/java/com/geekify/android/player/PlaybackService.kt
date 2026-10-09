@@ -19,6 +19,8 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -85,6 +87,7 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var historyRepository: com.geekify.android.data.local.HistoryRepository
     @Inject lateinit var libraryRepository: com.geekify.android.data.local.LibraryRepository
     @Inject lateinit var http: OkHttpClient
+    @Inject lateinit var audioCache: SimpleCache
     @Inject lateinit var syncRepository: com.geekify.android.data.sync.SyncRepository
 
     private lateinit var player: ExoPlayer
@@ -125,9 +128,15 @@ class PlaybackService : MediaSessionService() {
                 .apply { setSmallIcon(R.drawable.ic_stat_geekify) }
         )
 
-        val dataSourceFactory = OkHttpDataSource.Factory(http)
+        val upstreamFactory = OkHttpDataSource.Factory(http)
             // googlevideo checks that the URL is fetched with the same User-Agent as the client that issued it.
             .setUserAgent(InnerTubeClient.PLAYER_USER_AGENT)
+        // Bytes are cached on disk under a stable key (see buildMediaItem), because the signed URL changes
+        // every time a track is resolved. If the cache itself errors, playback silently falls back to the network.
+        val dataSourceFactory = CacheDataSource.Factory()
+            .setCache(audioCache)
+            .setUpstreamDataSourceFactory(upstreamFactory)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
         // The audio sink runs our equalizer and normaliser before ExoPlayer's own tempo / silence processors.
         val renderersFactory = object : DefaultRenderersFactory(this) {
@@ -146,7 +155,12 @@ class PlaybackService : MediaSessionService() {
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .setLoadControl(
                 DefaultLoadControl.Builder()
-                    .setBufferDurationsMs(1_500, 30_000, 750, 1_500)
+                    .setBufferDurationsMs(
+                        /* minBufferMs = */ 15_000,
+                        /* maxBufferMs = */ 50_000,
+                        /* bufferForPlaybackMs = */ 1_000,
+                        /* bufferForPlaybackAfterRebufferMs = */ 3_000
+                    )
                     .build()
             )
             .setAudioAttributes(
@@ -481,10 +495,12 @@ class PlaybackService : MediaSessionService() {
     }
 
     /** One place builds every MediaItem so all song sources expose title, artist, album and a loadable artwork URI. */
-    private fun buildMediaItem(track: Track, url: String, mimeType: String?): MediaItem =
+    private fun buildMediaItem(track: Track, url: String, mimeType: String?, itag: Int? = null): MediaItem =
         MediaItem.Builder()
             .setMediaId(track.videoId)
             .setUri(url)
+            // Stable cache key: the same song + audio format hits the disk cache even though the URL differs.
+            .setCustomCacheKey(if (itag != null) "${track.videoId}:$itag" else null)
             .setMimeType(mimeType)
             .setMediaMetadata(
                 MediaMetadata.Builder()
@@ -526,7 +542,7 @@ class PlaybackService : MediaSessionService() {
             try {
                 val stream = streamResolver.resolve(track.videoId)
                 audioEffects.setTrackLoudness(stream.loudnessDb)
-                val item = buildMediaItem(track, stream.url, stream.mimeType)
+                val item = buildMediaItem(track, stream.url, stream.mimeType, stream.itag)
                 player.setMediaItem(item, startMs)
                 // The user may have pressed play/pause while the stream was being resolved.
                 player.playWhenReady = queueManager.state.value.isPlaying
@@ -604,7 +620,7 @@ class PlaybackService : MediaSessionService() {
                 val stream = streamResolver.resolve(track.videoId, forceRefresh = true)
                 if (queueManager.state.value.current?.videoId != track.videoId) return@launch
                 audioEffects.setTrackLoudness(stream.loudnessDb)
-                val item = buildMediaItem(track, stream.url, stream.mimeType)
+                val item = buildMediaItem(track, stream.url, stream.mimeType, stream.itag)
                 player.setMediaItem(item, resumeAt)
                 player.playWhenReady = queueManager.state.value.isPlaying
                 player.prepare()

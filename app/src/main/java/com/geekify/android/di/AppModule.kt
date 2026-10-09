@@ -16,6 +16,11 @@ import com.geekify.android.data.local.PlayStatDao
 import com.geekify.android.data.local.PlaylistDao
 import com.geekify.android.data.source.MusicSource
 import com.geekify.android.data.source.YouTubeMusicSource
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.database.StandaloneDatabaseProvider
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.SimpleCache
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -23,10 +28,14 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
+import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "geekify_prefs")
+
+/** Upper bound for the on-disk audio cache. */
+private const val AUDIO_CACHE_BYTES = 300L * 1024 * 1024
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -39,6 +48,19 @@ abstract class AppModule {
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .build()
+
+        /**
+         * On-disk cache for streamed audio (least-recently-used, capped). Replays, seeking back and
+         * repeat no longer re-download. A SimpleCache may only be opened once per process, hence a singleton.
+         */
+        @OptIn(UnstableApi::class)
+        @Provides @Singleton
+        fun provideAudioCache(@ApplicationContext ctx: Context): SimpleCache =
+            SimpleCache(
+                File(ctx.cacheDir, "audio_cache"),
+                LeastRecentlyUsedCacheEvictor(AUDIO_CACHE_BYTES),
+                StandaloneDatabaseProvider(ctx)
+            )
 
         @Provides @Singleton
         fun provideDataStore(@ApplicationContext ctx: Context): DataStore<Preferences> = ctx.dataStore
