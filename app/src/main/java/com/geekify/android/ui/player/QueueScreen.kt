@@ -1,10 +1,16 @@
 package com.geekify.android.ui.player
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ClearAll
@@ -14,13 +20,26 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Velocity
+import kotlinx.coroutines.launch
 import com.geekify.android.ui.glass.GlassStyle
 import com.geekify.android.ui.glass.LocalGlassDim
 import com.geekify.android.ui.glass.consumeTaps
@@ -42,14 +61,80 @@ fun QueueScreen(
 ) {
     val state by viewModel.state.collectAsState()
 
+    // Match the Now Playing swipe-to-dismiss interaction while preserving vertical queue scrolling.
+    val listState = rememberLazyListState()
+    val dismissOffset = remember { Animatable(0f) }
+    val dismissScope = rememberCoroutineScope()
+    val latestOnBack by rememberUpdatedState(onBack)
+    val screenHeightPx = with(LocalDensity.current) {
+        LocalConfiguration.current.screenHeightDp.dp.toPx()
+    }
+    val dismissThresholdPx = screenHeightPx * 0.16f
+
+    suspend fun settleDismissGesture() {
+        val shouldDismiss = dismissOffset.value > dismissThresholdPx
+        if (shouldDismiss) {
+            dismissOffset.animateTo(screenHeightPx, tween(180))
+            latestOnBack()
+        } else {
+            dismissOffset.animateTo(
+                0f,
+                spring(dampingRatio = Spring.DampingRatioMediumBouncy)
+            )
+        }
+    }
+
+    // The list can still scroll normally. Once it reaches the top, a downward pull drags the
+    // queue overlay itself; releasing beyond the same 16% threshold used by Now Playing dismisses it.
+    val queueDismissConnection = remember(listState, screenHeightPx, dismissThresholdPx) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source != NestedScrollSource.UserInput) return Offset.Zero
+                val currentOffset = dismissOffset.value
+                if (currentOffset > 0f && available.y < 0f) {
+                    val nextOffset = (currentOffset + available.y).coerceAtLeast(0f)
+                    dismissScope.launch { dismissOffset.snapTo(nextOffset) }
+                    return Offset(0f, nextOffset - currentOffset)
+                }
+
+                val listIsAtTop = listState.firstVisibleItemIndex == 0 &&
+                    listState.firstVisibleItemScrollOffset == 0
+                if (available.y > 0f && listIsAtTop) {
+                    dismissScope.launch {
+                        dismissOffset.snapTo((dismissOffset.value + available.y).coerceAtLeast(0f))
+                    }
+                    return Offset(0f, available.y)
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (dismissOffset.value > 0f) {
+                    settleDismissGesture()
+                    return Velocity(0f, available.y)
+                }
+                return Velocity.Zero
+            }
+        }
+    }
+
     // Registered here (inside the overlay) so it outranks the NavHost's own back handler: Back always
     // closes the queue first and never pops a screen underneath it.
     BackHandler(onBack = onBack)
 
     // One glass container floating over the dimmed app; the song rows inside stay clean (no per-row glass cards).
-    // The scrim consumes touches so nothing behind the queue can be tapped.
+    // The scrim consumes taps so nothing behind the queue can be tapped. The full overlay follows the finger.
     CompositionLocalProvider(LocalGlassDim provides 0.42f) {
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.42f)).consumeTaps()) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                translationY = dismissOffset.value
+                alpha = 1f - (dismissOffset.value / screenHeightPx).coerceIn(0f, 1f) * 0.5f
+            }
+            .background(Color.Black.copy(alpha = 0.42f))
+            .consumeTaps()
+    ) {
       Box(
         Modifier
             .fillMaxSize()
@@ -63,7 +148,30 @@ fun QueueScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 8.dp),
+                        .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 8.dp)
+                        // The header also acts as a grab surface, including when the queue is empty.
+                        .pointerInput(screenHeightPx, dismissThresholdPx) {
+                            detectVerticalDragGestures(
+                                onVerticalDrag = { _, dragAmount ->
+                                    if (dragAmount > 0f || dismissOffset.value > 0f) {
+                                        dismissScope.launch {
+                                            dismissOffset.snapTo(
+                                                (dismissOffset.value + dragAmount).coerceAtLeast(0f)
+                                            )
+                                        }
+                                    }
+                                },
+                                onDragEnd = { dismissScope.launch { settleDismissGesture() } },
+                                onDragCancel = {
+                                    dismissScope.launch {
+                                        dismissOffset.animateTo(
+                                            0f,
+                                            spring(dampingRatio = Spring.DampingRatioMediumBouncy)
+                                        )
+                                    }
+                                }
+                            )
+                        },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     CircleIconButton(
@@ -104,10 +212,12 @@ fun QueueScreen(
                 }
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
                         .navigationBarsPadding()
+                        .nestedScroll(queueDismissConnection)
                 ) {
                     val nowPlaying = state.current
                     if (nowPlaying != null) {

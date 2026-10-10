@@ -19,6 +19,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -51,6 +53,8 @@ import coil3.request.allowHardware
 import coil3.toBitmap
 import com.geekify.android.ui.theme.InkElevated
 import com.geekify.android.ui.theme.Lime
+import ir.mahozad.multiplatform.wavyslider.WaveDirection.HEAD
+import ir.mahozad.multiplatform.wavyslider.material3.WavySlider as WavySlider3
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.PI
@@ -169,10 +173,11 @@ private fun averageDarkColor(bitmap: android.graphics.Bitmap): Int {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Seek bar: straight track, lime progress, round thumb with a soft glow. It only draws the
-// playback position. Between the ~0.5 s position updates it glides so the thumb never ticks.
+// Seek bar: animated WavySlider in the Geekify lime palette. Playback updates glide smoothly,
+// touch seeking remains immediate, and wave motion pauses when playback is paused.
 // ---------------------------------------------------------------------------------------------
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SeekBar(
     fraction: Float,
@@ -181,12 +186,11 @@ fun SeekBar(
     modifier: Modifier = Modifier,
     activeColor: Color = Lime,
     trackColor: Color = Color.White.copy(alpha = 0.22f),
-    @Suppress("UNUSED_PARAMETER") isPlaying: Boolean = true
+    isPlaying: Boolean = true
 ) {
     val currentOnChange by rememberUpdatedState(onChange)
     val currentOnFinished by rememberUpdatedState(onChangeFinished)
     var dragging by remember { mutableStateOf(false) }
-    val thumbRadius by animateDpAsState(if (dragging) 10.dp else 8.dp, label = "thumb")
 
     val target = fraction.coerceIn(0f, 1f)
     var lastTarget by remember { mutableFloatStateOf(target) }
@@ -197,45 +201,31 @@ fun SeekBar(
     )
     SideEffect { lastTarget = target }
 
-    Canvas(
+    WavySlider3(
+        value = smoothFraction,
+        onValueChange = { changedFraction ->
+            dragging = true
+            currentOnChange(changedFraction.coerceIn(0f, 1f))
+        },
+        onValueChangeFinished = {
+            dragging = false
+            currentOnFinished()
+        },
         modifier = modifier
             .fillMaxWidth()
-            .height(28.dp)
-            .pointerInput(Unit) {
-                detectTapGestures { offset ->
-                    currentOnChange((offset.x / size.width).coerceIn(0f, 1f))
-                    currentOnFinished()
-                }
-            }
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures(
-                    onDragStart = { offset ->
-                        dragging = true
-                        currentOnChange((offset.x / size.width).coerceIn(0f, 1f))
-                    },
-                    onDragEnd = {
-                        dragging = false
-                        currentOnFinished()
-                    },
-                    onDragCancel = {
-                        dragging = false
-                        currentOnFinished()
-                    },
-                    onHorizontalDrag = { change, _ ->
-                        change.consume()
-                        currentOnChange((change.position.x / size.width).coerceIn(0f, 1f))
-                    }
-                )
-            }
-    ) {
-        val strokeW = 4.dp.toPx()
-        val cy = size.height / 2f
-        val thumbR = thumbRadius.toPx()
-        val endX = (size.width * smoothFraction).coerceIn(thumbR, size.width - thumbR)
-
-        drawLine(trackColor, Offset(strokeW / 2f, cy), Offset(size.width - strokeW / 2f, cy), strokeW, StrokeCap.Round)
-        drawLine(activeColor, Offset(strokeW / 2f, cy), Offset(endX, cy), strokeW, StrokeCap.Round)
-        drawCircle(activeColor.copy(alpha = 0.22f), thumbR * 1.9f, Offset(endX, cy))
-        drawCircle(activeColor, thumbR, Offset(endX, cy))
-    }
+            .height(28.dp),
+        colors = SliderDefaults.colors(
+            thumbColor = activeColor,
+            activeTrackColor = activeColor,
+            inactiveTrackColor = trackColor,
+            activeTickColor = activeColor,
+            inactiveTickColor = trackColor
+        ),
+        waveLength = 32.dp,
+        waveHeight = 4.dp,
+        waveVelocity = (if (isPlaying) 15.dp else 0.dp) to HEAD,
+        waveThickness = 4.dp,
+        trackThickness = 4.dp,
+        incremental = false
+    )
 }

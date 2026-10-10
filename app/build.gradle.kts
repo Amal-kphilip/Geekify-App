@@ -52,6 +52,8 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    // Animated Material 3 wave seekbar for the expanded player
+    implementation("ir.mahozad.multiplatform:wavy-slider:2.2.0")
     implementation("androidx.compose.material:material-icons-extended")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
