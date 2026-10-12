@@ -11,6 +11,7 @@ import com.geekify.android.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -21,7 +22,8 @@ import java.util.concurrent.TimeUnit
 
 data class AvailableUpdate(
     val version: String,
-    val downloadUrl: String
+    val downloadUrl: String,
+    val releaseNotes: String = ""
 )
 
 /** Checks GitHub Releases and installs an APK supplied by the project's latest release. */
@@ -55,8 +57,13 @@ class AppUpdateManager(private val context: Context) {
                     ?.jsonObject
                     ?: return@use null
                 val downloadUrl = asset["browser_download_url"]?.jsonPrimitive?.content ?: return@use null
+                val releaseNotes = release["body"]?.jsonPrimitive?.contentOrNull.orEmpty().trim()
 
-                if (isNewer(version, BuildConfig.VERSION_NAME)) AvailableUpdate(version, downloadUrl) else null
+                if (isNewer(version, BuildConfig.VERSION_NAME)) {
+                    AvailableUpdate(version, downloadUrl, releaseNotes)
+                } else {
+                    null
+                }
             }
         }.getOrNull()
     }

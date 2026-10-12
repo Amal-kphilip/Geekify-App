@@ -604,6 +604,7 @@ fun MainScreen(
                 stage = updateStage,
                 currentVersion = BuildConfig.VERSION_NAME,
                 newVersion = update.version.trimStart('v', 'V'),
+                releaseNotes = update.releaseNotes,
                 progress = updateProgress,
                 error = updateError,
                 onUpdate = {

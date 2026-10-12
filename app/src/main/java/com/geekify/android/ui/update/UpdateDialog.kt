@@ -16,6 +16,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -29,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -66,7 +69,8 @@ fun UpdateDialog(
     error: String?,
     onUpdate: () -> Unit,
     onInstall: () -> Unit,
-    onLater: () -> Unit
+    onLater: () -> Unit,
+    releaseNotes: String = ""
 ) {
     Dialog(
         onDismissRequest = { if (stage != UpdateStage.Downloading && stage != UpdateStage.Installing) onLater() },
@@ -169,7 +173,11 @@ fun UpdateDialog(
                     VersionCard("New version", newVersion, Lime, highlighted = true, modifier = Modifier.weight(1f))
                 }
 
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(18.dp))
+
+                ReleaseNotesPanel(markdown = releaseNotes)
+
+                Spacer(Modifier.height(18.dp))
 
                 // ---- Progress / actions ----
                 // Keep this area at a stable height so the dialog window itself never
@@ -248,6 +256,146 @@ fun UpdateDialog(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+private data class ReleaseNoteLine(
+    val text: String,
+    val isBullet: Boolean
+)
+
+private data class ReleaseNoteSection(
+    val title: String,
+    val lines: List<ReleaseNoteLine>
+)
+
+/** Parses the lightweight Markdown commonly used in GitHub release bodies. */
+private fun parseReleaseNotes(markdown: String): List<ReleaseNoteSection> {
+    if (markdown.isBlank()) return emptyList()
+
+    val sections = mutableListOf<ReleaseNoteSection>()
+    var title = "Highlights"
+    var lines = mutableListOf<ReleaseNoteLine>()
+
+    fun flush() {
+        if (lines.isNotEmpty()) {
+            sections += ReleaseNoteSection(title = title, lines = lines.toList())
+            lines = mutableListOf()
+        }
+    }
+
+    fun cleanInlineMarkdown(value: String): String = value
+        .replace(Regex("!\\[([^]]*)]\\([^)]+\\)"), "$1")
+        .replace(Regex("\\[([^]]+)]\\([^)]+\\)"), "$1")
+        .replace(Regex("`([^`]+)`"), "$1")
+        .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")
+        .replace(Regex("(?<!\\*)\\*([^*]+)\\*(?!\\*)"), "$1")
+        .replace(Regex("<[^>]+>"), "")
+        .trim()
+
+    for (rawLine in markdown.lines()) {
+        val line = rawLine.trim()
+        if (line.isEmpty() || line.startsWith("<!--") || line.startsWith("---")) continue
+
+        val heading = Regex("^#{1,6}\\s+(.+)$").matchEntire(line)
+        if (heading != null) {
+            flush()
+            title = cleanInlineMarkdown(heading.groupValues[1]).ifBlank { "Highlights" }
+            continue
+        }
+
+        val bulletMatch = Regex("^(?:[-*+]\\s+|\\d+[.)]\\s+)(.+)$").matchEntire(line)
+        val content = cleanInlineMarkdown(bulletMatch?.groupValues?.get(1) ?: line)
+        if (content.isNotBlank()) lines += ReleaseNoteLine(text = content, isBullet = bulletMatch != null)
+    }
+    flush()
+    return sections
+}
+
+/** Scrollable release-notes section inspired by Morphe's update-dialog changelog. */
+@Composable
+private fun ReleaseNotesPanel(markdown: String) {
+    val sections = androidx.compose.runtime.remember(markdown) { parseReleaseNotes(markdown) }
+    val shape = RoundedCornerShape(18.dp)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 176.dp)
+            .clip(shape)
+            .background(VersionCardColor)
+            .border(1.dp, Color.White.copy(alpha = 0.07f), shape)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 14.dp, vertical = 12.dp)
+    ) {
+        Text(
+            text = "WHAT'S NEW",
+            color = Lime,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 1.1.sp
+        )
+        Spacer(Modifier.height(10.dp))
+
+        if (sections.isEmpty()) {
+            Text(
+                text = "Release notes are not available for this version yet.",
+                color = TextSecondary,
+                fontSize = 13.sp,
+                lineHeight = 18.sp
+            )
+        } else {
+            sections.forEachIndexed { sectionIndex, section ->
+                if (section.title != "Highlights" || sections.size > 1) {
+                    Text(
+                        text = section.title,
+                        color = TextPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(5.dp))
+                }
+                section.lines.forEach { item ->
+                    if (item.isBullet) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .padding(top = 6.dp)
+                                    .size(5.dp)
+                                    .clip(CircleShape)
+                                    .background(Lime)
+                            )
+                            Text(
+                                text = item.text,
+                                color = TextSecondary,
+                                fontSize = 13.sp,
+                                lineHeight = 18.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = item.text,
+                            color = TextSecondary,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp)
+                        )
+                    }
+                }
+                if (sectionIndex < sections.lastIndex) Spacer(Modifier.height(9.dp))
             }
         }
     }
