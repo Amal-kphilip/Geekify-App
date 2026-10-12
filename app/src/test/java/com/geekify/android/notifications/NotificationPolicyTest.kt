@@ -22,6 +22,13 @@ class NotificationPolicyTest {
         val shown = updateState.copy(updateShownForVersion = 10105)
         assertTrue(decide(Kind.UPDATE, shown) is Decision.Deny)           // same update checked again
     }
+    @Test fun updateIsNotSuppressedByRecentSoftNotification() {
+        val recentlySent = updateState.copy(
+            allSentAt = listOf(now - 3 * 3_600_000L),
+            softSentAt = listOf(now - 3 * 3_600_000L)
+        )
+        assertEquals(Decision.Allow, decide(Kind.UPDATE, recentlySent))
+    }
     @Test fun dismissedUpdateDoesNotRepeat() =
         assertTrue(decide(Kind.UPDATE, updateState.copy(dismissedVersion = 10105)) is Decision.Deny)
     @Test fun alreadyUpdatedNeverNotifies() =

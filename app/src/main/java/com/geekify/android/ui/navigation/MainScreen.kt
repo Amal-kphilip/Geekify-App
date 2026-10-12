@@ -127,7 +127,9 @@ fun MainScreen(
     accountViewModel: AccountViewModel = hiltViewModel(),
     libraryViewModel: LibraryViewModel = hiltViewModel(),
     startRoute: String? = null,
-    onStartRouteConsumed: () -> Unit = {}
+    onStartRouteConsumed: () -> Unit = {},
+    triggerUpdateCheck: Boolean = false,
+    onUpdateCheckConsumed: () -> Unit = {}
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -156,8 +158,20 @@ fun MainScreen(
     var updateProgress by remember { mutableStateOf<Float?>(null) }
     var updateError by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
-        availableUpdate = updateManager.findAvailableUpdate()
+    var hasCheckedUpdates by remember { mutableStateOf(false) }
+    LaunchedEffect(triggerUpdateCheck) {
+        // Check once on normal launch, and again whenever the user taps an update notification.
+        if (!hasCheckedUpdates || triggerUpdateCheck) {
+            hasCheckedUpdates = true
+            availableUpdate = updateManager.findAvailableUpdate()
+            if (triggerUpdateCheck) {
+                updateStage = UpdateStage.Available
+                downloadedApk = null
+                updateProgress = null
+                updateError = null
+                onUpdateCheckConsumed()
+            }
+        }
     }
 
     // Deep link from a Geekify notification (e.g. "recents"). Only known routes are accepted.

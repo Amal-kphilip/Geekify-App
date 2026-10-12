@@ -3,6 +3,7 @@
     <string name="channel_playback_name">Music playback</string>
     <string name="channel_updates_name">Geekify updates</string>
     <string name="channel_tips_name">Geekify tips</string>
+    <string name="notif_action_whats_new">What\'s new</string>
     <string name="notif_action_update">Update</string>
     <string name="notif_action_later">Later</string>
 </resources>

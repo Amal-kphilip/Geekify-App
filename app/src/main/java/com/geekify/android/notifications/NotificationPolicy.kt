@@ -10,7 +10,7 @@ object NotificationPolicy {
     const val DAY_MS = 24 * HOUR_MS
     const val WEEK_MS = 7 * DAY_MS
 
-    /** Global rule: at most one non-media notification (update, tip or engagement) in any 24 h window. */
+    /** Soft notifications are spaced out. Update alerts are version-gated and take priority over tips. */
     const val MIN_GAP_MS = DAY_MS
     /** Tips + engagement together: at most 2 in any rolling 7 days. Update notices are one-per-version and not counted here. */
     const val MAX_SOFT_PER_WEEK = 2
@@ -70,10 +70,14 @@ object NotificationPolicy {
             }
         }
 
-        val lastAny = s.allSentAt.maxOrNull() ?: 0L
-        if (i.now - lastAny < MIN_GAP_MS) return Decision.Deny("a notification was already sent in the last 24 h")
-
+        // App updates are time-sensitive and independently deduplicated by version. A recent
+        // welcome/tip notification must not suppress a newly published version announcement.
         if (i.kind != Kind.UPDATE) {
+            val lastAny = s.allSentAt.maxOrNull() ?: 0L
+            if (i.now - lastAny < MIN_GAP_MS) {
+                return Decision.Deny("a notification was already sent in the last 24 h")
+            }
+
             val softThisWeek = s.softSentAt.count { i.now - it < WEEK_MS }
             if (softThisWeek >= MAX_SOFT_PER_WEEK) return Decision.Deny("weekly limit reached")
         }

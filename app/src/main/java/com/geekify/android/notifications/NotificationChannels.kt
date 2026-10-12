@@ -14,7 +14,9 @@ import com.geekify.android.R
 object NotificationChannels {
     /** Kept as "playback" so existing installs keep the user's channel settings. */
     const val PLAYBACK = "playback"
-    const val UPDATES = "updates"
+    /** New ID required for HIGH importance because Android locks a channel's importance after creation. */
+    const val UPDATES = "geekify_app_updates"
+    private const val LEGACY_UPDATES = "updates"
     const val TIPS = "tips"
 
     fun ensureAll(context: Context) {
@@ -26,9 +28,20 @@ object NotificationChannels {
                 setShowBadge(false)
             }
         )
+        // Existing installs used "updates" at DEFAULT importance. A new channel ID is required
+        // for heads-up behavior because Android locks importance after channel creation. Preserve
+        // an existing explicit block/low importance choice instead of bypassing the user's choice.
+        val legacyUpdates = nm.getNotificationChannel(LEGACY_UPDATES)
+        val updatesImportance = when (legacyUpdates?.importance) {
+            NotificationManager.IMPORTANCE_NONE -> NotificationManager.IMPORTANCE_NONE
+            NotificationManager.IMPORTANCE_MIN -> NotificationManager.IMPORTANCE_MIN
+            NotificationManager.IMPORTANCE_LOW -> NotificationManager.IMPORTANCE_LOW
+            else -> NotificationManager.IMPORTANCE_HIGH
+        }
         nm.createNotificationChannel(
-            NotificationChannel(UPDATES, context.getString(R.string.channel_updates_name), NotificationManager.IMPORTANCE_DEFAULT).apply {
+            NotificationChannel(UPDATES, context.getString(R.string.channel_updates_name), updatesImportance).apply {
                 description = "Tells you when a new version of Geekify is available"
+                enableVibration(legacyUpdates?.shouldVibrate() ?: true)
             }
         )
         nm.createNotificationChannel(

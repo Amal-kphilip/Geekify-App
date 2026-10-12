@@ -123,6 +123,14 @@
             android:exported="false" />
 
         <service
+            android:name=".notifications.GeekifyUpdateMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <service
             android:name=".player.PlaybackService"
             android:exported="true"
             android:foregroundServiceType="mediaPlayback">

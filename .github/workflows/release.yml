@@ -55,3 +55,94 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" "Geekify-${GITHUB_REF_NAME}.apk" "Geekify-latest.apk" --generate-notes
+
+      - name: Validate stable release version for update notification
+        id: release_version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          if [[ "$RELEASE_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            major="${BASH_REMATCH[1]}"
+            minor="${BASH_REMATCH[2]}"
+            patch="${BASH_REMATCH[3]}"
+            major_num=$((10#$major))
+            minor_num=$((10#$minor))
+            patch_num=$((10#$patch))
+            if (( minor_num <= 99 && patch_num <= 99 )); then
+              echo "valid=true" >> "$GITHUB_OUTPUT"
+              echo "version=${major_num}.${minor_num}.${patch_num}" >> "$GITHUB_OUTPUT"
+              echo "version_code=$((major_num * 10000 + minor_num * 100 + patch_num))" >> "$GITHUB_OUTPUT"
+            else
+              echo "valid=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::Skipping FCM notification: minor and patch components must be at most 99."
+            fi
+          else
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping FCM notification for non-stable semantic version tag '$RELEASE_TAG'."
+          fi
+
+      - name: Check optional Firebase FCM sender credentials
+        id: fcm_credentials
+        env:
+          FCM_SERVICE_ACCOUNT_JSON: ${{ secrets.GEEKIFY_FCM_SERVICE_ACCOUNT_JSON }}
+        shell: bash
+        run: |
+          if [[ -n "$FCM_SERVICE_ACCOUNT_JSON" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::GEEKIFY_FCM_SERVICE_ACCOUNT_JSON is not set; instant update pushes are skipped. WorkManager remains the fallback."
+          fi
+
+      - name: Authenticate to Firebase Cloud Messaging
+        id: fcm_auth
+        if: ${{ steps.release_version.outputs.valid == 'true' && steps.fcm_credentials.outputs.configured == 'true' }}
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: geekify-40226
+          credentials_json: ${{ secrets.GEEKIFY_FCM_SERVICE_ACCOUNT_JSON }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/firebase.messaging
+          access_token_lifetime: 300s
+        continue-on-error: true
+
+      - name: Warn if Firebase authentication failed
+        if: ${{ steps.release_version.outputs.valid == 'true' && steps.fcm_credentials.outputs.configured == 'true' && steps.fcm_auth.outcome != 'success' }}
+        run: echo "::warning::FCM authentication failed; published APK remains available and WorkManager remains the fallback."
+
+      - name: Notify Geekify update subscribers
+        if: ${{ steps.release_version.outputs.valid == 'true' && steps.fcm_credentials.outputs.configured == 'true' && steps.fcm_auth.outcome == 'success' }}
+        env:
+          ACCESS_TOKEN: ${{ steps.fcm_auth.outputs.access_token }}
+          RELEASE_VERSION: ${{ steps.release_version.outputs.version }}
+          RELEASE_VERSION_CODE: ${{ steps.release_version.outputs.version_code }}
+        shell: bash
+        run: |
+          payload="$(jq -n \
+            --arg version "$RELEASE_VERSION" \
+            --arg version_code "$RELEASE_VERSION_CODE" \
+            '{
+              message: {
+                topic: "geekify_updates",
+                data: {
+                  type: "app_update",
+                  version: $version,
+                  version_code: $version_code
+                },
+                android: {
+                  priority: "high",
+                  ttl: "604800s",
+                  collapse_key: "geekify-app-update"
+                }
+              }
+            }')"
+
+          if ! curl --fail-with-body --silent --show-error \
+            --request POST \
+            "https://fcm.googleapis.com/v1/projects/geekify-40226/messages:send" \
+            --header "Authorization: Bearer ${ACCESS_TOKEN}" \
+            --header "Content-Type: application/json; charset=UTF-8" \
+            --data "$payload"; then
+            echo "::warning::FCM update push failed; the published release is intact and WorkManager remains the fallback."
+          fi

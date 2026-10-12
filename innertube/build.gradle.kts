@@ -37,3 +37,16 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("io.ktor:ktor-client-mock:3.6.0")
 }
+
+// InnerTubeX v0.8.4 contains Java 21 bytecode (class-file version 65).
+// Run this module's host-side unit tests on JDK 21 while keeping Android/Kotlin
+// output targeted to Java 17 for app compatibility.
+val jdk21TestLauncher = extensions
+    .getByType<org.gradle.jvm.toolchain.JavaToolchainService>()
+    .launcherFor {
+        languageVersion.set(org.gradle.jvm.toolchain.JavaLanguageVersion.of(21))
+    }
+
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    javaLauncher.set(jdk21TestLauncher)
+}

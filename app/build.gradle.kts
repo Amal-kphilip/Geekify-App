@@ -110,6 +110,8 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
+    // FCM pushes announce published app releases; WorkManager remains the fallback.
+    implementation("com.google.firebase:firebase-messaging")
 
     // Google Credential Manager (replaces deprecated signInWithPopup on Android)
     implementation("androidx.credentials:credentials:1.5.0")

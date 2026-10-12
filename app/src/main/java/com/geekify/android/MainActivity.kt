@@ -22,6 +22,7 @@ import com.geekify.android.notifications.GeekifyNotifier
 import com.geekify.android.notifications.NotificationCoordinator
 import com.geekify.android.notifications.NotificationStore
 import com.geekify.android.notifications.NotificationWorker
+import com.geekify.android.notifications.UpdatePushSubscription
 import com.geekify.android.player.PlaybackService
 import com.geekify.android.ui.navigation.MainScreen
 import com.geekify.android.ui.theme.GeekifyTheme
@@ -39,13 +40,21 @@ class MainActivity : ComponentActivity() {
     /** Screen requested by a notification tap (e.g. "recents"); consumed once by MainScreen. */
     private var requestedRoute by mutableStateOf<String?>(null)
 
+    /** A release notification asks MainScreen to re-check GitHub and open the update sheet. */
+    private var triggerUpdateCheck by mutableStateOf(false)
+
     private val notificationPermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* playback works either way */ }
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            lifecycleScope.launch {
+                UpdatePushSubscription.sync(this@MainActivity, notificationStore.prefsNow().updates)
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         requestedRoute = intent?.getStringExtra(GeekifyNotifier.EXTRA_ROUTE)
+        triggerUpdateCheck = intent?.getBooleanExtra(GeekifyNotifier.EXTRA_TRIGGER_UPDATE_CHECK, false) == true
 
         // Android 13+: without this the playback notification (and lock-screen controls) stay hidden.
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -70,7 +79,12 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             GeekifyTheme {
-                MainScreen(startRoute = requestedRoute, onStartRouteConsumed = { requestedRoute = null })
+                MainScreen(
+                    startRoute = requestedRoute,
+                    onStartRouteConsumed = { requestedRoute = null },
+                    triggerUpdateCheck = triggerUpdateCheck,
+                    onUpdateCheckConsumed = { triggerUpdateCheck = false }
+                )
             }
         }
     }
@@ -79,12 +93,14 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         requestedRoute = intent.getStringExtra(GeekifyNotifier.EXTRA_ROUTE)
+        triggerUpdateCheck = intent.getBooleanExtra(GeekifyNotifier.EXTRA_TRIGGER_UPDATE_CHECK, false)
     }
 
     override fun onStart() {
         super.onStart()
         AppForeground.isVisible = true
         lifecycleScope.launch {
+            UpdatePushSubscription.sync(this@MainActivity, notificationStore.prefsNow().updates)
             val now = System.currentTimeMillis()
             notificationStore.updateState { it.copy(lastOpenedAt = now) }
             // If the user has just installed the announced version, its notification must disappear.

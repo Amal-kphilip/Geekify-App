@@ -26,6 +26,7 @@ class GeekifyNotifier @Inject constructor(@ApplicationContext private val contex
         const val ACTION_DISMISS_UPDATE = "com.geekify.android.action.DISMISS_UPDATE"
         const val EXTRA_VERSION_CODE = "version_code"
         const val EXTRA_ROUTE = "geekify_route"
+        const val EXTRA_TRIGGER_UPDATE_CHECK = "trigger_update_check"
     }
 
     private val nm get() = NotificationManagerCompat.from(context)
@@ -57,12 +58,12 @@ class GeekifyNotifier @Inject constructor(@ApplicationContext private val contex
             .setSmallIcon(R.drawable.ic_stat_geekify)
             .setContentTitle("Geekify v${info.versionName} is available")
             .setContentText("New playback improvements, fixes, and features are ready.")
-            .setContentIntent(openApp(route = null, requestCode = 12)) // opens Geekify, whose update sheet downloads and installs
+            .setContentIntent(openApp(route = null, requestCode = 12, triggerUpdateCheck = true))
             .setDeleteIntent(dismiss) // swiping it away counts as "Later"
-            .addAction(0, context.getString(R.string.notif_action_update), openRelease)
+            .addAction(0, context.getString(R.string.notif_action_whats_new), openRelease)
             .addAction(0, context.getString(R.string.notif_action_later), dismiss)
             .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setOnlyAlertOnce(true)
             .setAutoCancel(true)
             .build()
@@ -94,11 +95,16 @@ class GeekifyNotifier @Inject constructor(@ApplicationContext private val contex
         false
     }
 
-    private fun openApp(route: String?, requestCode: Int): PendingIntent = PendingIntent.getActivity(
+    private fun openApp(
+        route: String?,
+        requestCode: Int,
+        triggerUpdateCheck: Boolean = false
+    ): PendingIntent = PendingIntent.getActivity(
         context, requestCode,
         Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             route?.let { putExtra(EXTRA_ROUTE, it) }
+            if (triggerUpdateCheck) putExtra(EXTRA_TRIGGER_UPDATE_CHECK, true)
         },
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     )

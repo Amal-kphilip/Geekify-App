@@ -97,6 +97,54 @@ class NotificationCoordinator @Inject constructor(
         }
     }
 
+    /**
+     * Handles a verified stable-release announcement delivered by FCM.
+     *
+     * Unlike the periodic fallback, this path does not call GitHub before notifying: high-priority
+     * FCM delivery is intended to show the user-visible alert immediately. The tapped notification
+     * then launches MainScreen, which performs the authoritative update check against GitHub.
+     */
+    suspend fun handlePushedRelease(release: ReleaseInfo, now: Long = System.currentTimeMillis()) {
+        if (release.versionCode <= installed) {
+            reconcile()
+            return
+        }
+
+        val prefs = store.prefsNow()
+        if (!prefs.updates || !notifier.canPost(NotificationChannels.UPDATES)) return
+
+        val before = store.stateNow()
+        if (before.latestVersionCode > release.versionCode ||
+            before.updateShownForVersion >= release.versionCode ||
+            before.dismissedVersion >= release.versionCode
+        ) return
+
+        store.updateState { current ->
+            if (current.latestVersionCode > release.versionCode) current
+            else current.copy(
+                lastCheckedAt = now,
+                latestVersionCode = release.versionCode,
+                latestVersionName = release.versionName,
+                latestReleaseUrl = release.pageUrl
+            )
+        }
+
+        val current = store.stateNow()
+        if (current.latestVersionCode != release.versionCode ||
+            current.updateShownForVersion >= release.versionCode ||
+            current.dismissedVersion >= release.versionCode
+        ) return
+
+        if (notifier.postUpdate(release)) {
+            store.updateState {
+                it.copy(
+                    updateShownForVersion = maxOf(it.updateShownForVersion, release.versionCode),
+                    allSentAt = it.allSentAt.logged(now)
+                )
+            }
+        }
+    }
+
     /** Called when the app starts: if the user has installed the announced version, its notification must go away. */
     suspend fun reconcile() = reconcile(store.stateNow())
 
