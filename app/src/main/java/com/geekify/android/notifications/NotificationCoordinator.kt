@@ -2,7 +2,7 @@ package com.geekify.android.notifications
 
 import com.geekify.android.BuildConfig
 import com.geekify.android.data.local.HistoryRepository
-import kotlinx.coroutines.flow.first
+import com.geekify.android.player.PlayerController
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -16,7 +16,8 @@ class NotificationCoordinator @Inject constructor(
     private val store: NotificationStore,
     private val checker: UpdateChecker,
     private val notifier: GeekifyNotifier,
-    private val history: HistoryRepository
+    private val history: HistoryRepository,
+    private val playerController: PlayerController
 ) {
     private val installed = BuildConfig.VERSION_CODE
 
@@ -83,16 +84,31 @@ class NotificationCoordinator @Inject constructor(
             store.updateState { it.copy(tipHandledForVersion = installed) }
         }
 
-        // 4. Opt-in library nudge, only if there is genuinely something to continue.
+        // 4. Opt-in, locally personalized listening reminder. It uses only existing on-device
+        // history/play counts and links to Recents; no listening data is uploaded for this message.
         if (allowed(NotificationPolicy.Kind.ENGAGEMENT, now, prefs, state, appInForeground, NotificationChannels.TIPS)) {
-            val last = history.recent.first().firstOrNull() ?: return
-            if (notifier.postTip(
-                    "Rediscover your music",
-                    "Pick up where you left off with \"${last.title}\" and your recent songs.",
-                    route = "recents"
-                )
-            ) {
-                store.updateState { it.copy(allSentAt = it.allSentAt.logged(now), softSentAt = it.softSentAt.logged(now)) }
+            val recent = history.allTimed()
+            if (recent.isEmpty()) return
+
+            val previousTrackId = store.stateNow().lastEngagementTrackId
+            val playCounts = history.topPlayed(limit = 40).associateBy { it.videoId }
+            // Prefer a repeat-listened track that appears in Recents, then another recent track.
+            // This makes the message feel relevant without linking to a song that Recents cannot show.
+            val selected = recent.firstOrNull { (track, _) ->
+                track.videoId != previousTrackId && (playCounts[track.videoId]?.plays ?: 0) >= 3
+            } ?: recent.firstOrNull { (track, _) -> track.videoId != previousTrackId }
+                ?: recent.first()
+
+            val track = selected.first
+            val message = EngagementMessageFactory.create(track, playCounts[track.videoId]?.plays ?: 0)
+            if (notifier.postTip(message.title, message.body, route = "recents")) {
+                store.updateState {
+                    it.copy(
+                        lastEngagementTrackId = message.trackId,
+                        allSentAt = it.allSentAt.logged(now),
+                        softSentAt = it.softSentAt.logged(now)
+                    )
+                }
             }
         }
     }
@@ -155,7 +171,19 @@ class NotificationCoordinator @Inject constructor(
     private fun allowed(
         kind: NotificationPolicy.Kind, now: Long, prefs: NotificationPrefs, state: NotificationState,
         foreground: Boolean, channel: String
-    ): Boolean = NotificationPolicy.decide(
-        NotificationPolicy.Input(kind, now, prefs, state, installed, foreground, notifier.canPost(channel))
-    ) == NotificationPolicy.Decision.Allow
+    ): Boolean {
+        val playback = playerController.state.value
+        return NotificationPolicy.decide(
+            NotificationPolicy.Input(
+                kind = kind,
+                now = now,
+                prefs = prefs,
+                state = state,
+                installedVersionCode = installed,
+                appInForeground = foreground,
+                systemAllowed = notifier.canPost(channel),
+                playbackActive = playback.isPlaying || playback.isBuffering
+            )
+        ) == NotificationPolicy.Decision.Allow
+    }
 }

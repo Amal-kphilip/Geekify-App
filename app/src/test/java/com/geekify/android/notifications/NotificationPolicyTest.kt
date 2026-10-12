@@ -53,6 +53,36 @@ class NotificationPolicyTest {
         assertTrue(decide(Kind.ENGAGEMENT, NotificationState(), prefs = allOn.copy(engagement = false)) is Decision.Deny)
         assertTrue(decide(Kind.FEATURE, NotificationState(), prefs = allOn.copy(tips = false)) is Decision.Deny)
     }
+    @Test fun softNudgesDoNotInterruptBackgroundPlayback() {
+        val idle = NotificationState(lastOpenedAt = now - 5 * DAY_MS)
+        val input = NotificationPolicy.Input(
+            kind = Kind.ENGAGEMENT,
+            now = now,
+            prefs = allOn,
+            state = idle,
+            installedVersionCode = installed,
+            appInForeground = false,
+            systemAllowed = true,
+            playbackActive = true
+        )
+        assertTrue(NotificationPolicy.decide(input) is Decision.Deny)
+        assertTrue(NotificationPolicy.decide(input.copy(kind = Kind.FEATURE)) is Decision.Deny)
+    }
+
+    @Test fun updateAlertIsNotBlockedByBackgroundPlayback() {
+        val input = NotificationPolicy.Input(
+            kind = Kind.UPDATE,
+            now = now,
+            prefs = allOn,
+            state = updateState,
+            installedVersionCode = installed,
+            appInForeground = false,
+            systemAllowed = true,
+            playbackActive = true
+        )
+        assertEquals(Decision.Allow, NotificationPolicy.decide(input))
+    }
+
     @Test fun weeklyCapStopsSoftNotifications() {
         val s = NotificationState(allSentAt = listOf(now - 2 * DAY_MS, now - 4 * DAY_MS), softSentAt = listOf(now - 2 * DAY_MS, now - 4 * DAY_MS))
         assertTrue(decide(Kind.ENGAGEMENT, s) is Decision.Deny)

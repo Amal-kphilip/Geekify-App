@@ -34,7 +34,9 @@ object NotificationPolicy {
         val installedVersionCode: Int,
         val appInForeground: Boolean,
         /** False when the OS-level permission or the channel is switched off: we never try to bypass that. */
-        val systemAllowed: Boolean
+        val systemAllowed: Boolean,
+        /** Soft nudges must not interrupt music continuing in the background. Update alerts are exempt. */
+        val playbackActive: Boolean = false
     )
 
     /** An update the user should still hear about: newer than installed, not yet announced, not dismissed. */
@@ -48,6 +50,7 @@ object NotificationPolicy {
         val s = i.state
         if (!i.systemAllowed) return Decision.Deny("notifications disabled in system settings")
         if (i.appInForeground) return Decision.Deny("user is in the app")
+        if (i.kind != Kind.UPDATE && i.playbackActive) return Decision.Deny("audio is playing")
 
         when (i.kind) {
             Kind.UPDATE -> {

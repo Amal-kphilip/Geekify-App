@@ -65,7 +65,7 @@ fun SettingsScreen(
                     Text("Notifications", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 10.dp))
                     NotificationSwitch("App updates", "Tell me when a new Geekify version is available", notif.updates, notificationSettings::setUpdates)
                     NotificationSwitch("Tips & new features", "Rare notes after an update", notif.tips, notificationSettings::setTips)
-                    NotificationSwitch("Library reminders", "Occasionally continue your recent songs (off by default)", notif.engagement, notificationSettings::setEngagement)
+                    NotificationSwitch("Personalized listening reminders", "Based on recent and frequently played songs on this device (off by default)", notif.engagement, notificationSettings::setEngagement)
                     Text("Playback controls are managed in Android's notification settings.", color = TextMuted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 10.dp))
                 }
             }

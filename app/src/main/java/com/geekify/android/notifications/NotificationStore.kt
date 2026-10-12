@@ -36,6 +36,8 @@ data class NotificationState(
     val dismissedVersion: Int = 0,
     /** Version code for which the "what's new" tip was last handled (0 = never seen, i.e. fresh install). */
     val tipHandledForVersion: Int = 0,
+    /** Track used by the previous personalized listening reminder, to avoid repeating its copy. */
+    val lastEngagementTrackId: String? = null,
     val lastOpenedAt: Long = 0L,
     /** Every non-media notification we posted (last 14 days). */
     val allSentAt: List<Long> = emptyList(),
@@ -62,6 +64,7 @@ class NotificationStore @Inject constructor(
         val shownFor = intPreferencesKey("notif_update_shown_for")
         val dismissed = intPreferencesKey("notif_dismissed_version")
         val tipFor = intPreferencesKey("notif_tip_handled_for")
+        val lastEngagementTrackId = stringPreferencesKey("notif_last_engagement_track_id")
         val lastOpened = longPreferencesKey("notif_last_opened_at")
         val allSent = stringPreferencesKey("notif_all_sent_at")
         val softSent = stringPreferencesKey("notif_soft_sent_at")
@@ -89,6 +92,7 @@ class NotificationStore @Inject constructor(
         p[K.shownFor] = next.updateShownForVersion
         p[K.dismissed] = next.dismissedVersion
         p[K.tipFor] = next.tipHandledForVersion
+        next.lastEngagementTrackId?.let { p[K.lastEngagementTrackId] = it } ?: p.remove(K.lastEngagementTrackId)
         p[K.lastOpened] = next.lastOpenedAt
         p[K.allSent] = next.allSentAt.joinToString(",")
         p[K.softSent] = next.softSentAt.joinToString(",")
@@ -113,6 +117,7 @@ class NotificationStore @Inject constructor(
         updateShownForVersion = p[K.shownFor] ?: 0,
         dismissedVersion = p[K.dismissed] ?: 0,
         tipHandledForVersion = p[K.tipFor] ?: 0,
+        lastEngagementTrackId = p[K.lastEngagementTrackId],
         lastOpenedAt = p[K.lastOpened] ?: 0L,
         allSentAt = p[K.allSent].toLongList(),
         softSentAt = p[K.softSent].toLongList(),
