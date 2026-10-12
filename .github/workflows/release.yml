@@ -54,7 +54,28 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" "Geekify-${GITHUB_REF_NAME}.apk" "Geekify-latest.apk" --generate-notes
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          VERSIONED_APK="Geekify-${TAG}.apk"
+          LATEST_APK="Geekify-latest.apk"
+
+          # Start or resume the release; avoid duplicate asset uploads on reruns.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --generate-notes
+          fi
+
+          # Upload only missing assets and preserve assets already present.
+          EXISTING_ASSETS="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          for ASSET in "$VERSIONED_APK" "$LATEST_APK"; do
+            if printf '%s\n' "$EXISTING_ASSETS" | grep -Fxq "$ASSET"; then
+              echo "Asset already exists; keeping it: $ASSET"
+            else
+              gh release upload "$TAG" "$ASSET"
+            fi
+          done
+
+          # Publish an interrupted draft before later notification steps run.
+          gh release edit "$TAG" --draft=false
 
       - name: Validate stable release version for update notification
         id: release_version
