@@ -25,6 +25,8 @@ class ListeningStatsCalculatorTest {
         assertEquals(120_000L, stats.last7DaysMs)
         assertEquals(120_000L, stats.last30DaysMs)
         assertEquals("track-a", stats.topTracks.single().videoId)
+        assertEquals(7, stats.dailyListening.size)
+        assertEquals(120_000L, stats.dailyListening.sumOf { it.listenedMs })
     }
 
     @Test

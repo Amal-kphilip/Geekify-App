@@ -59,7 +59,8 @@ fun AccountSheet(
     onHealthClick: () -> Unit,
     onEditProfileClick: () -> Unit,
     onAddAccountClick: () -> Unit,
-    onListenTogetherClick: () -> Unit
+    onListenTogetherClick: () -> Unit,
+    onListeningStatsClick: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
 
@@ -90,6 +91,7 @@ fun AccountSheet(
                             onDismiss()
                         },
                         onListenTogetherClick = { onListenTogetherClick(); onDismiss() },
+                        onListeningStatsClick = { onListeningStatsClick(); onDismiss() },
                         onRecentsClick = { onRecentsClick(); onDismiss() },
                         onSettingsClick = { onSettingsClick(); onDismiss() },
                         onHealthClick = { onHealthClick(); onDismiss() },
@@ -104,6 +106,7 @@ fun AccountSheet(
 private fun ProfileHub(
     state: AccountUiState, onDismiss: () -> Unit, onAccountClick: () -> Unit, onProfileClick: () -> Unit,
     onListenTogetherClick: () -> Unit,
+    onListeningStatsClick: () -> Unit,
     onRecentsClick: () -> Unit, onSettingsClick: () -> Unit, onHealthClick: () -> Unit, onSignOut: () -> Unit
 ) {
     val user = state.user
@@ -179,6 +182,7 @@ private fun ProfileHub(
             DrawerRow(Icons.Default.PersonAdd, if (user == null) "Sign in or sign up" else "Add account", onAccountClick)
             DrawerRow(Icons.Default.Groups, "Listen together", onListenTogetherClick)
             DrawerRow(Icons.Default.History, "Recents", onRecentsClick)
+            DrawerRow(Icons.Default.BarChart, "Listening statistics", onListeningStatsClick)
             DrawerRow(Icons.Default.HealthAndSafety, "Extractor health", onHealthClick)
             DrawerRow(Icons.Default.Settings, "Settings and privacy", onSettingsClick)
             if (user != null) {

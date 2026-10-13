@@ -63,7 +63,8 @@ fun QueueScreen(
     onBack: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
-    var expandedReasons by remember { mutableStateOf(emptySet<String>()) }
+    var whyOptionFor by remember { mutableStateOf<String?>(null) }
+    var expandedReasonFor by remember { mutableStateOf<String?>(null) }
 
     // Match the Now Playing swipe-to-dismiss interaction while preserving vertical queue scrolling.
     val listState = rememberLazyListState()
@@ -233,20 +234,25 @@ fun QueueScreen(
                                 fontWeight = FontWeight.Medium,
                                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
                             )
+                            val reason = state.recommendationReasons[nowPlaying.videoId]
                             TrackRow(
                                 track = nowPlaying,
                                 isPlaying = true,
                                 onClick = {},
+                                onLongClick = if (reason != null) {
+                                    {
+                                        whyOptionFor = nowPlaying.videoId
+                                        expandedReasonFor = null
+                                    }
+                                } else null,
                                 marqueeTitle = true
                             )
-                            state.recommendationReasons[nowPlaying.videoId]?.let { reason ->
+                            if (whyOptionFor == nowPlaying.videoId && reason != null) {
                                 WhyThisTrackRow(
                                     reason = reason,
-                                    expanded = nowPlaying.videoId in expandedReasons,
+                                    expanded = expandedReasonFor == nowPlaying.videoId,
                                     onToggle = {
-                                        expandedReasons = if (nowPlaying.videoId in expandedReasons) {
-                                            expandedReasons - nowPlaying.videoId
-                                        } else expandedReasons + nowPlaying.videoId
+                                        expandedReasonFor = if (expandedReasonFor == nowPlaying.videoId) null else nowPlaying.videoId
                                     }
                                 )
                             }
@@ -269,6 +275,7 @@ fun QueueScreen(
                         itemsIndexed(state.queue, key = { index, item -> "${item.videoId}_$index" }) { index, track ->
                             if (index > state.index) {
                                 Column(Modifier.fillMaxWidth()) {
+                                    val reason = state.recommendationReasons[track.videoId]
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically
@@ -276,21 +283,29 @@ fun QueueScreen(
                                         TrackRow(
                                             track = track,
                                             modifier = Modifier.weight(1f),
-                                            onClick = { viewModel.play(track, state.queue) },
+                                            onClick = {
+                                                whyOptionFor = null
+                                                expandedReasonFor = null
+                                                viewModel.play(track, state.queue)
+                                            },
+                                            onLongClick = if (reason != null) {
+                                                {
+                                                    whyOptionFor = track.videoId
+                                                    expandedReasonFor = null
+                                                }
+                                            } else null,
                                             onMoreClick = { viewModel.removeFromQueue(index) },
                                             moreIcon = Icons.Default.Close,
                                             moreContentDescription = "Remove from queue",
                                             marqueeTitle = true
                                         )
                                     }
-                                    state.recommendationReasons[track.videoId]?.let { reason ->
+                                    if (whyOptionFor == track.videoId && reason != null) {
                                         WhyThisTrackRow(
                                             reason = reason,
-                                            expanded = track.videoId in expandedReasons,
+                                            expanded = expandedReasonFor == track.videoId,
                                             onToggle = {
-                                                expandedReasons = if (track.videoId in expandedReasons) {
-                                                    expandedReasons - track.videoId
-                                                } else expandedReasons + track.videoId
+                                                expandedReasonFor = if (expandedReasonFor == track.videoId) null else track.videoId
                                             }
                                         )
                                     }

@@ -10,7 +10,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -52,8 +51,7 @@ fun LibraryScreen(
     onPlaylistClick: (String, String) -> Unit,
     onCollectionClick: (String, String) -> Unit = { _, _ -> },
     onBack: () -> Unit = {},
-    onPlayTracks: (List<Track>) -> Unit = {},
-    onListeningStatsClick: () -> Unit = {}
+    onPlayTracks: (List<Track>) -> Unit = {}
 ) {
     val liked by viewModel.liked.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
@@ -134,30 +132,6 @@ fun LibraryScreen(
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
-
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .clickable(onClick = onListeningStatsClick),
-                color = InkPanel,
-                shape = RoundedCornerShape(22.dp)
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.BarChart, contentDescription = null, tint = Lime, modifier = Modifier.size(24.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Listening statistics", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(3.dp))
-                        Text("Weekly time, favourites, languages and streaks", color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-            }
             Spacer(Modifier.height(14.dp))
 
             LazyColumn(

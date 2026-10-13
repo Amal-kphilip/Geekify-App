@@ -352,8 +352,7 @@ fun MainScreen(
                             onPlaylistClick = { id, name -> navController.navigate(Screen.Playlist.createRoute(id, name)) },
                             onCollectionClick = { id, kind -> navController.navigate(Screen.Collection.createRoute(id, kind)) },
                             onBack = { navigateToTab(Screen.Home.route) },
-                            onPlayTracks = { list -> list.firstOrNull()?.let { first -> playerViewModel.play(first, list) } },
-                            onListeningStatsClick = { navController.navigate(Screen.ListeningStats.route) }
+                            onPlayTracks = { list -> list.firstOrNull()?.let { first -> playerViewModel.play(first, list) } }
                         )
                     }
 
@@ -601,6 +600,7 @@ fun MainScreen(
                 onEditProfileClick = { navController.navigate(Screen.EditProfile.route) },
                 onAddAccountClick = { navController.navigate(Screen.AddAccount.route) },
                 onListenTogetherClick = { navController.navigate(Screen.ListenTogether.route) },
+                onListeningStatsClick = { navController.navigate(Screen.ListeningStats.route) },
                 onHealthClick = { navController.navigate(Screen.Health.route) }
             )
         }
@@ -668,7 +668,7 @@ private fun FloatingNavBar(
     val selectedIndex = when {
         currentRoute == Screen.Home.route -> 0
         currentRoute == Screen.Search.route -> 1
-        currentRoute == Screen.Library.route || currentRoute == Screen.ListeningStats.route -> 2
+        currentRoute == Screen.Library.route -> 2
         libraryDetailActive -> 2
         else -> -1
     }

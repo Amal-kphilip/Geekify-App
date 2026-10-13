@@ -53,11 +53,13 @@ data class ArtistListeningTotal(
 )
 
 data class LanguageListeningTotal(val name: String, val listenedMs: Long)
+data class DailyListeningTotal(val label: String, val listenedMs: Long)
 data class DiscoveredArtist(val id: String, val name: String, val firstHeardAt: Long)
 
 data class ListeningStatsSnapshot(
     val last7DaysMs: Long = 0L,
     val last30DaysMs: Long = 0L,
+    val dailyListening: List<DailyListeningTotal> = emptyList(),
     val topTracks: List<TrackListeningTotal> = emptyList(),
     val topArtists: List<ArtistListeningTotal> = emptyList(),
     val languages: List<LanguageListeningTotal> = emptyList(),
@@ -76,10 +78,20 @@ object ListeningStatsCalculator {
         zone: ZoneId = ZoneId.systemDefault()
     ): ListeningStatsSnapshot {
         val meaningful = sessions.filter { it.listenedMs >= MIN_MEANINGFUL_LISTEN_MS }
-        val weekSince = now - 7L * DAY_MS
         val monthSince = now - 30L * DAY_MS
-        val weekly = meaningful.filter { it.startedAt in weekSince..now }
+        val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+        val weekStartDate = today.minusDays(6)
+        val weekStartMs = weekStartDate.atStartOfDay(zone).toInstant().toEpochMilli()
+        val weekly = meaningful.filter { it.startedAt in weekStartMs..now }
         val monthly = meaningful.filter { it.startedAt in monthSince..now }
+        val weeklyByDate = weekly.groupBy { localDate(it.startedAt, zone) }
+        val dailyListening = (0L..6L).map { offset ->
+            val date = weekStartDate.plusDays(offset)
+            DailyListeningTotal(
+                label = date.format(DateTimeFormatter.ofPattern("EE", Locale.getDefault())),
+                listenedMs = weeklyByDate[date].orEmpty().sumOf { it.listenedMs }
+            )
+        }
 
         val topTracks = monthly.groupBy { it.videoId }.map { (id, rows) ->
             val newest = rows.maxByOrNull { it.startedAt } ?: return@map null
@@ -114,7 +126,6 @@ object ListeningStatsCalculator {
         val dailyMs = meaningful.groupBy { localDate(it.startedAt, zone) }
             .mapValues { (_, rows) -> rows.sumOf { it.listenedMs } }
         val qualifyingDays = dailyMs.filterValues { it >= STREAK_DAY_LISTEN_MS }.keys
-        val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
         val currentStart = when {
             today in qualifyingDays -> today
             today.minusDays(1) in qualifyingDays -> today.minusDays(1)
@@ -156,6 +167,7 @@ object ListeningStatsCalculator {
         return ListeningStatsSnapshot(
             last7DaysMs = weekly.sumOf { it.listenedMs },
             last30DaysMs = monthly.sumOf { it.listenedMs },
+            dailyListening = dailyListening,
             topTracks = topTracks,
             topArtists = topArtists,
             languages = languageTotals,
