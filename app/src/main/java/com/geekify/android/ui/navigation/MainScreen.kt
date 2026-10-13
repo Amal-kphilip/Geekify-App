@@ -96,6 +96,7 @@ import com.geekify.android.ui.library.LikedScreen
 import com.geekify.android.ui.library.PlaylistScreen
 import com.geekify.android.ui.library.RecentsScreen
 import com.geekify.android.ui.library.RecentsViewModel
+import com.geekify.android.ui.library.ListeningStatsScreen
 import com.geekify.android.ui.library.SettingsScreen
 import com.geekify.android.ui.library.AppIconSettingsScreen
 import com.geekify.android.ui.player.ExpandedPlayerScreen
@@ -351,7 +352,8 @@ fun MainScreen(
                             onPlaylistClick = { id, name -> navController.navigate(Screen.Playlist.createRoute(id, name)) },
                             onCollectionClick = { id, kind -> navController.navigate(Screen.Collection.createRoute(id, kind)) },
                             onBack = { navigateToTab(Screen.Home.route) },
-                            onPlayTracks = { list -> list.firstOrNull()?.let { first -> playerViewModel.play(first, list) } }
+                            onPlayTracks = { list -> list.firstOrNull()?.let { first -> playerViewModel.play(first, list) } },
+                            onListeningStatsClick = { navController.navigate(Screen.ListeningStats.route) }
                         )
                     }
 
@@ -436,6 +438,10 @@ fun MainScreen(
                     composable(Screen.Recents.route) {
                         val recentsVm: RecentsViewModel = hiltViewModel()
                         RecentsScreen(recentsVm, onBack = { navController.popBackStack() }, onPlay = onTrackClick)
+                    }
+
+                    composable(Screen.ListeningStats.route) {
+                        ListeningStatsScreen(onBack = { navController.popBackStack() })
                     }
 
                     composable(Screen.Settings.route) {
@@ -662,7 +668,7 @@ private fun FloatingNavBar(
     val selectedIndex = when {
         currentRoute == Screen.Home.route -> 0
         currentRoute == Screen.Search.route -> 1
-        currentRoute == Screen.Library.route -> 2
+        currentRoute == Screen.Library.route || currentRoute == Screen.ListeningStats.route -> 2
         libraryDetailActive -> 2
         else -> -1
     }

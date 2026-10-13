@@ -11,9 +11,11 @@ import com.geekify.android.data.local.LikedDao
 import com.geekify.android.data.local.CatalogDao
 import com.geekify.android.data.local.MIGRATION_1_2
 import com.geekify.android.data.local.MIGRATION_2_3
+import com.geekify.android.data.local.MIGRATION_3_4
 import com.geekify.android.data.local.ShelfCacheDao
 import com.geekify.android.data.local.PlayStatDao
 import com.geekify.android.data.local.PlaylistDao
+import com.geekify.android.data.local.ListeningSessionDao
 import com.geekify.android.data.source.MusicSource
 import com.geekify.android.data.source.YouTubeMusicSource
 import androidx.annotation.OptIn
@@ -68,13 +70,14 @@ abstract class AppModule {
         @Provides @Singleton
         fun provideDatabase(@ApplicationContext ctx: Context): GeekifyDatabase =
             Room.databaseBuilder(ctx, GeekifyDatabase::class.java, "geekify.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
 
         @Provides fun provideLikedDao(db: GeekifyDatabase): LikedDao = db.likedDao()
         @Provides fun provideHistoryDao(db: GeekifyDatabase): HistoryDao = db.historyDao()
         @Provides fun providePlaylistDao(db: GeekifyDatabase): PlaylistDao = db.playlistDao()
         @Provides fun providePlayStatDao(db: GeekifyDatabase): PlayStatDao = db.playStatDao()
+        @Provides fun provideListeningSessionDao(db: GeekifyDatabase): ListeningSessionDao = db.listeningSessionDao()
         @Provides fun provideCatalogDao(db: GeekifyDatabase): CatalogDao = db.catalogDao()
         @Provides fun provideShelfCacheDao(db: GeekifyDatabase): ShelfCacheDao = db.shelfCacheDao()
     }

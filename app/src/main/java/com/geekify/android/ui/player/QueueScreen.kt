@@ -20,7 +20,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
@@ -49,6 +51,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.CompositionLocalProvider
 import com.geekify.android.ui.components.CircleIconButton
 import com.geekify.android.ui.components.TrackRow
+import com.geekify.android.ui.theme.Lime
 import com.geekify.android.ui.theme.TextMuted
 import com.geekify.android.ui.theme.TextPrimary
 import com.geekify.android.ui.theme.TextSecondary
@@ -60,6 +63,7 @@ fun QueueScreen(
     onBack: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
+    var expandedReasons by remember { mutableStateOf(emptySet<String>()) }
 
     // Match the Now Playing swipe-to-dismiss interaction while preserving vertical queue scrolling.
     val listState = rememberLazyListState()
@@ -235,6 +239,17 @@ fun QueueScreen(
                                 onClick = {},
                                 marqueeTitle = true
                             )
+                            state.recommendationReasons[nowPlaying.videoId]?.let { reason ->
+                                WhyThisTrackRow(
+                                    reason = reason,
+                                    expanded = nowPlaying.videoId in expandedReasons,
+                                    onToggle = {
+                                        expandedReasons = if (nowPlaying.videoId in expandedReasons) {
+                                            expandedReasons - nowPlaying.videoId
+                                        } else expandedReasons + nowPlaying.videoId
+                                    }
+                                )
+                            }
                             Spacer(Modifier.height(16.dp))
                         }
                     }
@@ -253,19 +268,32 @@ fun QueueScreen(
 
                         itemsIndexed(state.queue, key = { index, item -> "${item.videoId}_$index" }) { index, track ->
                             if (index > state.index) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    TrackRow(
-                                        track = track,
-                                        modifier = Modifier.weight(1f),
-                                        onClick = { viewModel.play(track, state.queue) },
-                                        onMoreClick = { viewModel.removeFromQueue(index) },
-                                        moreIcon = Icons.Default.Close,
-                                        moreContentDescription = "Remove from queue",
-                                        marqueeTitle = true
-                                    )
+                                Column(Modifier.fillMaxWidth()) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        TrackRow(
+                                            track = track,
+                                            modifier = Modifier.weight(1f),
+                                            onClick = { viewModel.play(track, state.queue) },
+                                            onMoreClick = { viewModel.removeFromQueue(index) },
+                                            moreIcon = Icons.Default.Close,
+                                            moreContentDescription = "Remove from queue",
+                                            marqueeTitle = true
+                                        )
+                                    }
+                                    state.recommendationReasons[track.videoId]?.let { reason ->
+                                        WhyThisTrackRow(
+                                            reason = reason,
+                                            expanded = track.videoId in expandedReasons,
+                                            onToggle = {
+                                                expandedReasons = if (track.videoId in expandedReasons) {
+                                                    expandedReasons - track.videoId
+                                                } else expandedReasons + track.videoId
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -275,5 +303,22 @@ fun QueueScreen(
         }
       }
     }
+    }
+}
+
+
+@Composable
+private fun WhyThisTrackRow(
+    reason: String,
+    expanded: Boolean,
+    onToggle: () -> Unit
+) {
+    Column(Modifier.fillMaxWidth().padding(start = 92.dp, end = 20.dp, bottom = 8.dp)) {
+        TextButton(onClick = onToggle, contentPadding = PaddingValues(horizontal = 0.dp, vertical = 2.dp)) {
+            Text(if (expanded) "Why this track?  −" else "Why this track?  +", color = Lime, fontSize = 12.sp)
+        }
+        if (expanded) {
+            Text(reason, color = TextSecondary, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(bottom = 6.dp))
+        }
     }
 }

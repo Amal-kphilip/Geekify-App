@@ -37,7 +37,9 @@ data class QueueState(
     val repeat: RepeatMode = RepeatMode.OFF,
     val volume: Float = 0.85f,
     /** Short, user-readable reason the current track could not be played (null when fine). */
-    val error: String? = null
+    val error: String? = null,
+    /** Local, transparent explanations for tracks added by radio/autoplay, keyed by video ID. */
+    val recommendationReasons: Map<String, String> = emptyMap()
 ) {
     val current: Track? get() = queue.getOrNull(index)
     val hasNext: Boolean get() = when {
@@ -67,6 +69,7 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
         private val KEY_REPEAT = stringPreferencesKey("player_repeat")
         private val KEY_VOLUME = floatPreferencesKey("player_volume")
         private val KEY_PROGRESS = longPreferencesKey("player_progress_ms")
+        private val KEY_RECOMMENDATION_REASONS = stringPreferencesKey("player_recommendation_reasons")
     }
 
     init {
@@ -84,24 +87,59 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
                 val repeat = prefs[KEY_REPEAT]?.let { runCatching { RepeatMode.valueOf(it) }.getOrNull() } ?: RepeatMode.OFF
                 val volume = prefs[KEY_VOLUME] ?: 0.85f
                 val progress = (prefs[KEY_PROGRESS] ?: 0L).coerceAtLeast(0L)
+                val reasons = prefs[KEY_RECOMMENDATION_REASONS]?.let {
+                    runCatching { json.decodeFromString<Map<String, String>>(it) }.getOrNull()
+                }.orEmpty()
                 // A restored queue is always PAUSED (isPlaying = false): reopening the app never starts
                 // music by itself. The track and the position are kept so Play continues where it stopped.
-                _state.value = QueueState(queue, index.coerceIn(-1, queue.size - 1), false, false, progress, 0L, shuffle, repeat, volume)
+                _state.value = QueueState(
+                    queue = queue,
+                    index = index.coerceIn(-1, queue.size - 1),
+                    isPlaying = false,
+                    isBuffering = false,
+                    progressMs = progress,
+                    durationMs = 0L,
+                    shuffle = shuffle,
+                    repeat = repeat,
+                    volume = volume,
+                    recommendationReasons = reasons.filterKeys { id -> queue.any { it.videoId == id } }
+                )
             } catch (_: Exception) {}
         }
     }
 
     fun play(track: Track, queue: List<Track> = emptyList()) {
+        val old = _state.value
         val q = queue.ifEmpty { listOf(track) }
         val idx = maxOf(0, q.indexOfFirst { it.videoId == track.videoId })
-        update(_state.value.copy(queue = q, index = idx, isPlaying = true, isBuffering = true, progressMs = 0L, error = null))
+        // Preserve explanations when a user selects a song from the existing queue; a new library/search
+        // queue starts clean so old recommendations cannot leak into unrelated tracks.
+        val sameQueue = old.queue.map { it.videoId } == q.map { it.videoId }
+        update(old.copy(
+            queue = q,
+            index = idx,
+            isPlaying = true,
+            isBuffering = true,
+            progressMs = 0L,
+            error = null,
+            recommendationReasons = if (sameQueue) old.recommendationReasons else emptyMap()
+        ))
     }
 
     /** Starts [tracks] from a random song with shuffle switched on, like Spotify's shuffle-play. */
     fun playShuffled(tracks: List<Track>) {
         if (tracks.isEmpty()) return
         val idx = tracks.indices.random()
-        update(_state.value.copy(queue = tracks, index = idx, isPlaying = true, isBuffering = true, progressMs = 0L, shuffle = true, error = null))
+        update(_state.value.copy(
+            queue = tracks,
+            index = idx,
+            isPlaying = true,
+            isBuffering = true,
+            progressMs = 0L,
+            shuffle = true,
+            error = null,
+            recommendationReasons = emptyMap()
+        ))
     }
 
     @Volatile private var pendingStartMs = 0L
@@ -211,7 +249,8 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
             index == s.index -> if (q.isEmpty()) -1 else s.index.coerceAtMost(q.size - 1)
             else -> s.index
         }
-        update(s.copy(queue = q, index = newIdx))
+        val remainingIds = q.map { it.videoId }.toSet()
+        update(s.copy(queue = q, index = newIdx, recommendationReasons = s.recommendationReasons.filterKeys { it in remainingIds }))
     }
     fun reorder(from: Int, to: Int) {
         val s = _state.value
@@ -225,13 +264,23 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
     fun clearQueue() {
         val s = _state.value
         val kept = if (s.current != null) listOf(s.current!!) else emptyList()
-        update(s.copy(queue = kept, index = if (kept.isEmpty()) -1 else 0))
+        val keptIds = kept.map { it.videoId }.toSet()
+        update(s.copy(
+            queue = kept,
+            index = if (kept.isEmpty()) -1 else 0,
+            recommendationReasons = s.recommendationReasons.filterKeys { it in keptIds }
+        ))
     }
-    fun appendRelated(tracks: List<Track>) {
+    fun appendRelated(tracks: List<Track>, reasonsByVideoId: Map<String, String> = emptyMap()) {
         val s = _state.value
         val existing = s.queue.map { it.videoId }.toSet()
-        val fresh = tracks.filter { it.videoId !in existing }
-        if (fresh.isNotEmpty()) update(s.copy(queue = s.queue + fresh))
+        val fresh = tracks.filter { it.videoId !in existing }.distinctBy { it.videoId }
+        if (fresh.isNotEmpty()) {
+            val nextReasons = s.recommendationReasons + fresh.mapNotNull { track ->
+                reasonsByVideoId[track.videoId]?.takeIf { it.isNotBlank() }?.let { track.videoId to it }
+            }
+            update(s.copy(queue = s.queue + fresh, recommendationReasons = nextReasons))
+        }
     }
 
     private fun update(newState: QueueState) {
@@ -254,6 +303,7 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
                 prefs[KEY_SHUFFLE] = s.shuffle.toString()
                 prefs[KEY_REPEAT] = s.repeat.name
                 prefs[KEY_VOLUME] = s.volume
+                prefs[KEY_RECOMMENDATION_REASONS] = json.encodeToString(s.recommendationReasons)
             }
         }
     }

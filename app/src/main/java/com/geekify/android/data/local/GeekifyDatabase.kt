@@ -111,6 +111,26 @@ data class PlayStatEntity(
     val lastPlayedAt: Long
 )
 
+/** One durable listening session, updated periodically while audio is actually playing. */
+@Entity(
+    tableName = "listening_sessions",
+    indices = [Index(value = ["startedAt"]), Index(value = ["videoId"]), Index(value = ["artist"])]
+)
+data class ListeningSessionEntity(
+    @PrimaryKey val sessionId: String,
+    val videoId: String,
+    val title: String,
+    val artist: String,
+    val artists: List<ArtistRef> = emptyList(),
+    /** Active listening time accumulated while the player was really playing, not seek position. */
+    val listenedMs: Long,
+    val durationMs: Long,
+    val startedAt: Long,
+    val updatedAt: Long,
+    val completed: Boolean = false,
+    val skipped: Boolean = false
+)
+
 @Entity(tableName = "playlists")
 data class PlaylistEntity(
     @PrimaryKey val id: String,
@@ -180,6 +200,41 @@ interface PlayStatDao {
 }
 
 @Dao
+interface ListeningSessionDao {
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfMissing(session: ListeningSessionEntity): Long
+
+    @Query("UPDATE listening_sessions SET videoId=:videoId, title=:title, artist=:artist, artists=:artists, listenedMs=:listenedMs, " +
+        "durationMs=:durationMs, startedAt=:startedAt, updatedAt=:updatedAt, completed=:completed, skipped=:skipped " +
+        "WHERE sessionId=:sessionId AND updatedAt < :updatedAt")
+    suspend fun updateIfNewer(
+        sessionId: String, videoId: String, title: String, artist: String, artists: List<ArtistRef>,
+        listenedMs: Long, durationMs: Long, startedAt: Long, updatedAt: Long, completed: Boolean, skipped: Boolean
+    )
+
+    @Transaction
+    suspend fun upsert(session: ListeningSessionEntity) {
+        val inserted = insertIfMissing(session)
+        if (inserted == -1L) {
+            updateIfNewer(
+                session.sessionId, session.videoId, session.title, session.artist, session.artists,
+                session.listenedMs, session.durationMs, session.startedAt, session.updatedAt,
+                session.completed, session.skipped
+            )
+        }
+    }
+
+    @Query("SELECT * FROM listening_sessions ORDER BY startedAt DESC")
+    fun observeAll(): Flow<List<ListeningSessionEntity>>
+
+    @Query("SELECT * FROM listening_sessions ORDER BY startedAt DESC LIMIT :limit")
+    suspend fun latest(limit: Int): List<ListeningSessionEntity>
+
+    @Query("DELETE FROM listening_sessions WHERE startedAt < :before")
+    suspend fun pruneBefore(before: Long)
+}
+
+@Dao
 interface CatalogDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertTracks(list: List<TrackEntity>)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertAlbum(e: AlbumEntity)
@@ -220,9 +275,9 @@ interface PlaylistDao {
 
 @Database(
     entities = [LikedTrackEntity::class, HistoryTrackEntity::class, PlaylistEntity::class, PlaylistTrackEntity::class, PlayStatEntity::class,
-        TrackEntity::class, AlbumEntity::class, ArtistEntity::class, CachedShelfEntity::class
+        TrackEntity::class, AlbumEntity::class, ArtistEntity::class, CachedShelfEntity::class, ListeningSessionEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -231,6 +286,7 @@ abstract class GeekifyDatabase : RoomDatabase() {
     abstract fun historyDao(): HistoryDao
     abstract fun playlistDao(): PlaylistDao
     abstract fun playStatDao(): PlayStatDao
+    abstract fun listeningSessionDao(): ListeningSessionDao
     abstract fun catalogDao(): CatalogDao
     abstract fun shelfCacheDao(): ShelfCacheDao
 }
@@ -267,5 +323,22 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
                 "`artist` TEXT NOT NULL, `playCount` INTEGER NOT NULL, `lastPlayedAt` INTEGER NOT NULL, " +
                 "PRIMARY KEY(`videoId`))"
         )
+    }
+}
+
+
+/** v3 -> v4: adds durable listening sessions without touching existing library or play-count data. */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `listening_sessions` (" +
+                "`sessionId` TEXT NOT NULL, `videoId` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, " +
+                "`artists` TEXT NOT NULL, `listenedMs` INTEGER NOT NULL, `durationMs` INTEGER NOT NULL, " +
+                "`startedAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `completed` INTEGER NOT NULL, " +
+                "`skipped` INTEGER NOT NULL, PRIMARY KEY(`sessionId`))"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_listening_sessions_startedAt` ON `listening_sessions` (`startedAt`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_listening_sessions_videoId` ON `listening_sessions` (`videoId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_listening_sessions_artist` ON `listening_sessions` (`artist`)")
     }
 }

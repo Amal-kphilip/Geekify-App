@@ -40,6 +40,9 @@ import com.geekify.android.MainActivity
 import com.geekify.android.audio.AudioEffectsController
 import com.geekify.android.R
 import com.geekify.android.data.model.Track
+import com.geekify.android.data.local.ListeningSessionEntity
+import com.geekify.android.data.local.ListeningStatsRepository
+import com.geekify.android.domain.listening.SmartQueueRanker
 import com.geekify.android.notifications.NotificationChannels
 import com.geekify.android.player.artwork.ArtworkUrls
 import com.geekify.android.player.artwork.CoilBitmapLoader
@@ -62,6 +65,7 @@ import okhttp3.OkHttpClient
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import javax.inject.Inject
+import java.util.UUID
 
 @OptIn(UnstableApi::class)
 @AndroidEntryPoint
@@ -76,6 +80,7 @@ class PlaybackService : MediaSessionService() {
         private const val RETRY_RESET_AFTER_MS = 15_000L
         /** A broken/stalled googlevideo stream must not leave the player buffering forever. */
         private const val BUFFERING_TIMEOUT_MS = 12_000L
+        private const val LISTENING_CHECKPOINT_MS = 15_000L
         private const val ACTION_MEDIA_LIKE = "com.geekify.android.media.LIKE"
         private const val ACTION_MEDIA_SHUFFLE = "com.geekify.android.media.SHUFFLE"
     }
@@ -86,6 +91,7 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var innerTube: InnerTubeClient
     @Inject lateinit var musicSource: MusicSource
     @Inject lateinit var historyRepository: com.geekify.android.data.local.HistoryRepository
+    @Inject lateinit var listeningStatsRepository: ListeningStatsRepository
     @Inject lateinit var libraryRepository: com.geekify.android.data.local.LibraryRepository
     @Inject lateinit var http: OkHttpClient
     @Inject lateinit var audioCache: SimpleCache
@@ -96,6 +102,8 @@ class PlaybackService : MediaSessionService() {
     private var mediaNotificationController: MediaSession.ControllerInfo? = null
     private var likedVideoIds: Set<String> = emptySet()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    // Persistence survives service teardown long enough to flush the final listening checkpoint.
+    private val listeningPersistenceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var prefetchJob: Job? = null
     private var autoplayJob: Job? = null
     private var progressJob: Job? = null
@@ -107,6 +115,12 @@ class PlaybackService : MediaSessionService() {
     private lateinit var artworkLoader: CoilBitmapLoader
     private var listenedMs = 0L
     private var playCounted = false
+    private var activeListeningSessionId: String? = null
+    private var activeListeningTrack: Track? = null
+    private var activeListeningStartedAt = 0L
+    private var lastListeningUpdatedAt = 0L
+    private var activeListeningMs = 0L
+    private var lastListeningCheckpointMs = 0L
     private var restoredPositionUsed = false
 
     override fun onCreate() {
@@ -237,26 +251,24 @@ class PlaybackService : MediaSessionService() {
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 queueManager.setPlaying(playWhenReady)
                 // Remember where a pause happened so reopening the app can offer to continue from here.
-                if (!playWhenReady) queueManager.persistProgress()
+                if (!playWhenReady) {
+                    queueManager.persistProgress()
+                    // Close the active segment on pause. If the user resumes hours or days later,
+                    // the new listening time must belong to the actual resume date, not this one.
+                    finishListeningSession()
+                }
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) {
                     queueManager.setBuffering(false)
-                    val current = queueManager.state.value.current ?: return
-                    if (current.videoId != lastPlayingVideoId) {
-                        lastPlayingVideoId = current.videoId
-                        listenedMs = 0L
-                        playCounted = false
-                        scope.launch {
-                            historyRepository.add(current)
-                            // Plays are written locally first, so push them (debounced) to the cloud copy too.
-                            syncRepository.schedulePush()
-                        }
-                        startPrefetch(current.videoId)
-                        startAutoplay(current)
-                    }
+                    queueManager.state.value.current?.let(::recordTrackStarted)
                 }
+            }
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                // A track can change while ExoPlayer remains continuously in the playing state.
+                // Pair this callback with onIsPlayingChanged so session accounting isn't missed.
+                if (player.isPlaying) queueManager.state.value.current?.let(::recordTrackStarted)
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 when (playbackState) {
@@ -272,6 +284,7 @@ class PlaybackService : MediaSessionService() {
                     Player.STATE_ENDED -> {
                         bufferingWatchdogJob?.cancel()
                         bufferingWatchdogJob = null
+                        finishListeningSession(completed = true)
                         // Forget the finished play so a replay (repeat, or play again) is recorded again.
                         lastPlayingVideoId = null
                         queueManager.next()
@@ -302,9 +315,17 @@ class PlaybackService : MediaSessionService() {
                         if (playedSinceRetryMs >= RETRY_RESET_AFTER_MS) { resolveRetries = 0; playedSinceRetryMs = 0L }
                     }
 
-                    // Count a play only after a real listen (30 s, or half of a short song), not on a skip.
+                    // Accumulate actual playing time independently of play-count qualification. A qualifying
+                    // play is still counted only once, after 30 seconds or half of a short track.
+                    listenedMs += 500
+                    if (activeListeningSessionId != null && activeListeningTrack?.videoId == queueManager.state.value.current?.videoId) {
+                        activeListeningMs += 500
+                        if (activeListeningMs - lastListeningCheckpointMs >= LISTENING_CHECKPOINT_MS) {
+                            checkpointListeningSession()
+                            lastListeningCheckpointMs = activeListeningMs
+                        }
+                    }
                     if (!playCounted) {
-                        listenedMs += 500
                         val threshold = if (dur > 0L) minOf(30_000L, dur / 2) else 30_000L
                         val current = queueManager.state.value.current
                         if (current != null && current.videoId == lastPlayingVideoId && listenedMs >= threshold) {
@@ -327,6 +348,10 @@ class PlaybackService : MediaSessionService() {
         queueManager.state.onEach { state ->
             if (player.volume != state.volume) player.volume = state.volume
             val track = state.current ?: return@onEach
+            if (activeListeningTrack != null && activeListeningTrack?.videoId != track.videoId && activeListeningSessionId != null) {
+                // A current-item change before STATE_ENDED is a manual skip or replacement, not a completion.
+                finishListeningSession(skipped = true)
+            }
             // Before the very first stream is prepared Media3 has no item, so it posts no notification and Android
             // could keep the service background-only. Promote the service with a one-off placeholder in that gap only.
             // Once the player has a media item Media3 owns notification id 1001 (it carries the artwork and the
@@ -674,6 +699,25 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    private fun recordTrackStarted(current: Track) {
+        if (activeListeningTrack?.videoId != current.videoId) {
+            if (activeListeningSessionId != null) finishListeningSession(skipped = true)
+            startListeningSession(current)
+        }
+        if (current.videoId != lastPlayingVideoId) {
+            lastPlayingVideoId = current.videoId
+            listenedMs = 0L
+            playCounted = false
+            scope.launch {
+                historyRepository.add(current)
+                // Plays are written locally first, so push them (debounced) to the cloud copy too.
+                syncRepository.schedulePush()
+            }
+            startPrefetch(current.videoId)
+            startAutoplay(current)
+        }
+    }
+
     private fun startPrefetch(currentId: String) {
         prefetchJob?.cancel()
         prefetchJob = scope.launch {
@@ -701,9 +745,98 @@ class PlaybackService : MediaSessionService() {
         autoplayJob = scope.launch {
             val result = musicSource.related(track.videoId)
             if (result is com.geekify.android.data.source.MusicResult.Success) {
-                queueManager.appendRelated(result.value)
+                val latestQueue = queueManager.state.value
+                val latestUpcoming = latestQueue.queue.size - latestQueue.index - 1
+                if (latestQueue.current?.videoId != track.videoId || latestQueue.repeat != RepeatMode.OFF || latestQueue.shuffle || latestUpcoming >= 2) {
+                    return@launch
+                }
+                val queuedIds = latestQueue.queue.map { it.videoId }.toSet()
+                val candidates = result.value.filter { it.videoId !in queuedIds }
+                if (candidates.isEmpty()) return@launch
+                val sessions = listeningStatsRepository.latest(2_000)
+                val plays = historyRepository.topPlayed(500)
+                val liked = libraryRepository.likedOnce()
+                val ranked = SmartQueueRanker.rank(
+                    candidates = candidates,
+                    current = latestQueue.current ?: track,
+                    sessions = sessions,
+                    playCounts = plays,
+                    likedTracks = liked,
+                    upcoming = latestQueue.queue.drop(latestQueue.index + 1)
+                )
+                queueManager.appendRelated(
+                    ranked.map { it.track },
+                    ranked.associate { it.track.videoId to it.reason }
+                )
             }
         }
+    }
+
+    private fun startListeningSession(track: Track) {
+        activeListeningSessionId = UUID.randomUUID().toString()
+        activeListeningTrack = track
+        activeListeningStartedAt = System.currentTimeMillis()
+        lastListeningUpdatedAt = activeListeningStartedAt
+        activeListeningMs = 0L
+        lastListeningCheckpointMs = 0L
+    }
+
+    private fun checkpointListeningSession() {
+        val sessionId = activeListeningSessionId ?: return
+        val track = activeListeningTrack ?: return
+        val listened = activeListeningMs
+        if (listened <= 0L) return
+        val duration = player.duration.takeIf { it > 0L } ?: (track.durationSeconds?.toLong()?.times(1_000L) ?: 0L)
+        val record = ListeningSessionEntity(
+            sessionId = sessionId,
+            videoId = track.videoId,
+            title = track.title,
+            artist = track.artist,
+            artists = track.artists,
+            listenedMs = listened,
+            durationMs = duration.coerceAtLeast(0L),
+            startedAt = activeListeningStartedAt,
+            updatedAt = nextListeningUpdatedAt(),
+            completed = false,
+            skipped = false
+        )
+        listeningPersistenceScope.launch { runCatching { listeningStatsRepository.save(record) } }
+    }
+
+    private fun finishListeningSession(completed: Boolean = false, skipped: Boolean = false) {
+        val sessionId = activeListeningSessionId ?: return
+        val track = activeListeningTrack
+        if (track != null && activeListeningMs > 0L) {
+            val duration = player.duration.takeIf { it > 0L } ?: (track.durationSeconds?.toLong()?.times(1_000L) ?: 0L)
+            val playThreshold = if (duration > 0L) minOf(30_000L, duration / 2L) else 30_000L
+            val meaningfulCompletion = completed && listenedMs >= playThreshold
+            val record = ListeningSessionEntity(
+                sessionId = sessionId,
+                videoId = track.videoId,
+                title = track.title,
+                artist = track.artist,
+                artists = track.artists,
+                listenedMs = activeListeningMs,
+                durationMs = duration.coerceAtLeast(0L),
+                startedAt = activeListeningStartedAt,
+                updatedAt = nextListeningUpdatedAt(),
+                completed = meaningfulCompletion,
+                skipped = skipped && !meaningfulCompletion
+            )
+            listeningPersistenceScope.launch { runCatching { listeningStatsRepository.save(record) } }
+        }
+        activeListeningSessionId = null
+        activeListeningTrack = null
+        activeListeningStartedAt = 0L
+        lastListeningUpdatedAt = 0L
+        activeListeningMs = 0L
+        lastListeningCheckpointMs = 0L
+    }
+
+    private fun nextListeningUpdatedAt(): Long {
+        val next = maxOf(System.currentTimeMillis(), lastListeningUpdatedAt + 1L)
+        lastListeningUpdatedAt = next
+        return next
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = mediaSession
@@ -719,6 +852,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        finishListeningSession()
         queueManager.persistProgress()
         progressJob?.cancel()
         bufferingWatchdogJob?.cancel()
