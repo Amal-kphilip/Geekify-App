@@ -59,10 +59,60 @@ class ListeningStatsCalculatorTest {
     }
 
     @Test
-    fun `language classifier identifies Indic script without guessing Latin titles`() {
+    fun `language classifier identifies distinct scripts`() {
         assertEquals("Malayalam", ListeningLanguageClassifier.classify("മലയാളം പാട്ട്", "കലാകാരൻ"))
-        assertEquals("Latin script (language unclear)", ListeningLanguageClassifier.classify("Canción", "Artista"))
         assertEquals("Tamil", ListeningLanguageClassifier.classify("தமிழ் பாடல்", "கலைஞர்"))
+        assertEquals("Devanagari (Hindi/Marathi etc.)", ListeningLanguageClassifier.classify("दिल से", "कलाकार"))
+    }
+
+    @Test
+    fun `language classifier recognizes explicit title language tags`() {
+        assertEquals("Malayalam", ListeningLanguageClassifier.classify("A Song [Malayalam]", "Artist"))
+        assertEquals("Tamil", ListeningLanguageClassifier.classify("Track - Tamil", "Artist"))
+    }
+
+    @Test
+    fun `language classifier recognizes high confidence romanized Indian titles`() {
+        assertEquals("Malayalam", ListeningLanguageClassifier.classify("Pavizha Mazha", "Jonita Gandhi"))
+        assertEquals("Tamil", ListeningLanguageClassifier.classify("Arabic Kuthu", "Jonita Gandhi"))
+        assertEquals("Hindi", ListeningLanguageClassifier.classify("Tum Hi Ho", "Arijit Singh"))
+        assertEquals("Telugu", ListeningLanguageClassifier.classify("Nuvvu Nenu Prema", "Artist"))
+    }
+
+    @Test
+    fun `language classifier leaves ambiguous Latin titles unclassified`() {
+        assertEquals("Latin script (language unclear)", ListeningLanguageClassifier.classify("Canción", "Artista"))
+        assertEquals("Latin script (language unclear)", ListeningLanguageClassifier.classify("Summer Dreams", "The Band"))
+    }
+
+
+
+    @Test
+    fun `language metadata parser maps ISO language codes`() {
+        assertEquals(
+            "Tamil",
+            LyricsLanguageResponseParser.parse("""{"metadata":{"language":"ta"}}""")
+        )
+        assertEquals(
+            "Malayalam",
+            LyricsLanguageResponseParser.parse("""{"language":"ml-IN"}""")
+        )
+    }
+
+    @Test
+    fun `language metadata parser falls back to native lyrics script`() {
+        assertEquals(
+            "Malayalam",
+            LyricsLanguageResponseParser.parse(
+                """{"lyrics":"മഴത്തുള്ളികൾ പൊഴിഞ്ഞീടുമീ നാടൻ വഴി"}"""
+            )
+        )
+    }
+
+    @Test
+    fun `language metadata parser ignores unavailable or malformed metadata`() {
+        assertEquals(null, LyricsLanguageResponseParser.parse("""{"metadata":{"title":"A song"}}"""))
+        assertEquals(null, LyricsLanguageResponseParser.parse("not json"))
     }
 
     @Test

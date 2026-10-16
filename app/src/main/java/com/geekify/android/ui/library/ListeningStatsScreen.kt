@@ -45,7 +45,6 @@ import com.geekify.android.domain.listening.ListeningStatsCalculator
 import com.geekify.android.domain.listening.ListeningStatsSnapshot
 import com.geekify.android.domain.listening.TrackListeningTotal
 import com.geekify.android.domain.listening.ArtistListeningTotal
-import com.geekify.android.domain.listening.LanguageListeningTotal
 import com.geekify.android.domain.listening.DiscoveredArtist
 import com.geekify.android.domain.listening.DailyListeningTotal
 import com.geekify.android.ui.components.AuroraBackground
@@ -68,7 +67,7 @@ class ListeningStatsViewModel @Inject constructor(
     repository: ListeningStatsRepository
 ) : ViewModel() {
     val stats: StateFlow<ListeningStatsSnapshot> = repository.observeSessions()
-        .map { ListeningStatsCalculator.calculate(it) }
+        .map { rows -> ListeningStatsCalculator.calculate(rows) }
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5_000L),
@@ -153,19 +152,6 @@ fun ListeningStatsScreen(
                 stats.topArtists.forEachIndexed { index, artist -> ArtistTotalRow(index + 1, artist) }
 
                 Spacer(Modifier.height(22.dp))
-                SectionHeading("Most-played languages", "Estimated from title and artist script")
-                if (stats.languages.isEmpty()) EmptyLine("Language estimates will appear as metadata becomes available.")
-                val maxLanguageMs = stats.languages.maxOfOrNull { it.listenedMs } ?: 0L
-                stats.languages.forEach { LanguageTotalBar(it, maxLanguageMs) }
-                Text(
-                    "Language detection is approximate. Latin-script and transliterated songs may be listed as unclassified rather than incorrectly assumed to be English.",
-                    color = TextMuted,
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-
-                Spacer(Modifier.height(22.dp))
                 SectionHeading("Recently discovered artists", "First tracked meaningful listen in the last 30 days")
                 if (stats.recentlyDiscoveredArtists.isEmpty()) EmptyLine("New-to-you artists will appear here after you spend time with their music.")
                 stats.recentlyDiscoveredArtists.forEach { DiscoveredArtistRow(it) }
@@ -213,32 +199,6 @@ private fun ArtistTotalRow(rank: Int, artist: ArtistListeningTotal) {
 }
 
 @Composable
-private fun LanguageTotalBar(language: LanguageListeningTotal, maximumMs: Long) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                language.name,
-                color = TextPrimary,
-                fontSize = 13.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            Text(ListeningStatsCalculator.formatDuration(language.listenedMs), color = TextSecondary, fontSize = 12.sp)
-        }
-        Spacer(Modifier.height(7.dp))
-        Box(
-            Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)).background(InkElevated)
-        ) {
-            val fraction = if (maximumMs > 0L) (language.listenedMs.toFloat() / maximumMs).coerceIn(0f, 1f) else 0f
-            Box(
-                Modifier.fillMaxWidth(fraction).fillMaxHeight().clip(RoundedCornerShape(50)).background(Lime)
-            )
-        }
-    }
-}
-
-@Composable
 private fun WeeklyListeningChart(days: List<DailyListeningTotal>) {
     val maximumMs = days.maxOfOrNull { it.listenedMs }?.coerceAtLeast(1L) ?: 1L
     Surface(
@@ -250,39 +210,66 @@ private fun WeeklyListeningChart(days: List<DailyListeningTotal>) {
             Text("Listening over time", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(3.dp))
             Text("Daily listening · last 7 days", color = TextSecondary, fontSize = 12.sp)
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(20.dp))
+
+            // Separate rows prevent the weekday labels from being clipped by a fixed-height chart row.
             Row(
-                modifier = Modifier.fillMaxWidth().height(126.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                days.forEach { day ->
+                    Text(
+                        shortDuration(day.listenedMs),
+                        modifier = Modifier.weight(1f),
+                        color = TextSecondary,
+                        fontSize = 9.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().height(84.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.Bottom
             ) {
                 days.forEach { day ->
                     val ratio = (day.listenedMs.toFloat() / maximumMs).coerceIn(0f, 1f)
-                    val barHeight = if (day.listenedMs > 0L) (72f * ratio).coerceAtLeast(4f) else 2f
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Bottom
+                    val barHeight = if (day.listenedMs > 0L) (82f * ratio).coerceAtLeast(4f) else 2f
+                    Box(
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        contentAlignment = Alignment.BottomCenter
                     ) {
-                        Text(
-                            shortDuration(day.listenedMs),
-                            color = TextSecondary,
-                            fontSize = 9.sp,
-                            maxLines = 1
-                        )
-                        Spacer(Modifier.height(7.dp))
                         Box(
-                            modifier = Modifier.fillMaxWidth().height(74.dp),
-                            contentAlignment = Alignment.BottomCenter
-                        ) {
-                            Box(
-                                Modifier.width(18.dp).height(barHeight.dp).clip(CircleShape)
-                                    .background(if (day.listenedMs > 0L) Lime else InkElevated)
-                            )
-                        }
-                        Spacer(Modifier.height(7.dp))
-                        Text(day.label, color = TextMuted, fontSize = 10.sp, maxLines = 1)
+                            Modifier.width(18.dp).height(barHeight.dp).clip(CircleShape)
+                                .background(if (day.listenedMs > 0L) Lime else InkElevated)
+                        )
                     }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                days.forEach { day ->
+                    Text(
+                        day.label,
+                        modifier = Modifier.weight(1f),
+                        color = TextMuted,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip,
+                        textAlign = TextAlign.Center
+                    )
                 }
             }
         }
