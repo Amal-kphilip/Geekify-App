@@ -39,7 +39,11 @@ data class QueueState(
     /** Short, user-readable reason the current track could not be played (null when fine). */
     val error: String? = null,
     /** Local, transparent explanations for tracks added by radio/autoplay, keyed by video ID. */
-    val recommendationReasons: Map<String, String> = emptyMap()
+    val recommendationReasons: Map<String, String> = emptyMap(),
+    /** Direction hint for the most recent track transition: +1 next/auto-advance, -1 previous. */
+    val skipDirection: Int = 1,
+    /** While true, playback waits for the Now Playing tonearm animation to finish. */
+    val tonearmTransitionPending: Boolean = false
 ) {
     val current: Track? get() = queue.getOrNull(index)
     val hasNext: Boolean get() = when {
@@ -56,6 +60,28 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _state = MutableStateFlow(QueueState())
     val state: StateFlow<QueueState> = _state.asStateFlow()
+
+    /** Enabled only while the expanded Now Playing screen is visible. */
+    @Volatile private var tonearmSyncEnabled = false
+
+    fun setTonearmSyncEnabled(enabled: Boolean) {
+        tonearmSyncEnabled = enabled
+        if (!enabled) {
+            val current = _state.value
+            if (current.tonearmTransitionPending) {
+                // Do not leave playback blocked if the screen closes during an animation.
+                _state.value = current.copy(tonearmTransitionPending = false)
+            }
+        }
+    }
+
+    /** Called by the tonearm animation after the stylus has settled onto this exact track. */
+    fun completeTonearmTransition(trackVideoId: String) {
+        val current = _state.value
+        if (current.current?.videoId == trackVideoId && current.tonearmTransitionPending) {
+            _state.value = current.copy(tonearmTransitionPending = false)
+        }
+    }
 
     private val _seekEvents = MutableSharedFlow<Long>(extraBufferCapacity = 1)
     val seekEvents: SharedFlow<Long> = _seekEvents.asSharedFlow()
@@ -122,7 +148,8 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
             isBuffering = true,
             progressMs = 0L,
             error = null,
-            recommendationReasons = if (sameQueue) old.recommendationReasons else emptyMap()
+            recommendationReasons = if (sameQueue) old.recommendationReasons else emptyMap(),
+            skipDirection = 1
         ))
     }
 
@@ -138,7 +165,8 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
             progressMs = 0L,
             shuffle = true,
             error = null,
-            recommendationReasons = emptyMap()
+            recommendationReasons = emptyMap(),
+            skipDirection = 1
         ))
     }
 
@@ -211,7 +239,15 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
             update(s.copy(isPlaying = true, progressMs = 0L))
             return
         }
-        update(s.copy(index = next, isPlaying = true, isBuffering = true, progressMs = 0L, error = null))
+        update(s.copy(
+            index = next,
+            isPlaying = true,
+            isBuffering = true,
+            progressMs = 0L,
+            error = null,
+            skipDirection = 1,
+            tonearmTransitionPending = tonearmSyncEnabled
+        ))
     }
 
     fun previous(progressSeconds: Long): Boolean {
@@ -228,7 +264,15 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
             update(s.copy(isPlaying = true, progressMs = 0L, error = null))
             return false
         }
-        update(s.copy(index = s.index - 1, isPlaying = true, isBuffering = true, progressMs = 0L, error = null))
+        update(s.copy(
+            index = s.index - 1,
+            isPlaying = true,
+            isBuffering = true,
+            progressMs = 0L,
+            error = null,
+            skipDirection = -1,
+            tonearmTransitionPending = tonearmSyncEnabled
+        ))
         return true
     }
 
@@ -250,7 +294,12 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
             else -> s.index
         }
         val remainingIds = q.map { it.videoId }.toSet()
-        update(s.copy(queue = q, index = newIdx, recommendationReasons = s.recommendationReasons.filterKeys { it in remainingIds }))
+        update(s.copy(
+            queue = q,
+            index = newIdx,
+            recommendationReasons = s.recommendationReasons.filterKeys { it in remainingIds },
+            skipDirection = if (index == s.index && newIdx >= 0) 1 else s.skipDirection
+        ))
     }
     fun reorder(from: Int, to: Int) {
         val s = _state.value

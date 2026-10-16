@@ -249,6 +249,10 @@ class PlaybackService : MediaSessionService() {
             // onIsPlayingChanged(false). Mirroring that false here used to flip the intent back
             // off, so the next song was loaded paused and auto-advance never started playback.
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                val queueState = queueManager.state.value
+                // A false playWhenReady can be the deliberate tonearm gate during a track swap,
+                // not a user pause. Preserve the queue's play intent until the stylus lands.
+                if (!playWhenReady && queueState.tonearmTransitionPending && queueState.isPlaying) return
                 queueManager.setPlaying(playWhenReady)
                 // Remember where a pause happened so reopening the app can offer to continue from here.
                 if (!playWhenReady) {
@@ -360,14 +364,20 @@ class PlaybackService : MediaSessionService() {
                 placeholderShown = true
                 showForegroundPlaybackNotification(track)
             }
+            val shouldPlay = state.isPlaying && !state.tonearmTransitionPending
+            if (state.tonearmTransitionPending && player.playWhenReady) {
+                // Stop the previous track as soon as the skip is observed; do not let it continue
+                // underneath the record-swap animation while the next stream is being resolved.
+                player.pause()
+            }
             if (player.currentMediaItem?.mediaId != track.videoId) {
-                // After a restart the restored queue loads paused; only auto-play when the user asked to play.
-                loadAndPlay(track, autoPlay = state.isPlaying)
-            } else if (state.isPlaying && !player.isPlaying && player.playbackState != Player.STATE_BUFFERING) {
+                // During a visible vinyl transition, the new item is prepared but held until the stylus lands.
+                loadAndPlay(track, autoPlay = shouldPlay)
+            } else if (shouldPlay && !player.isPlaying && player.playbackState != Player.STATE_BUFFERING) {
                 // Repeat-one / replay after the end of the queue: an ended player must be rewound first.
                 if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
                 player.play()
-            } else if (!state.isPlaying && player.playWhenReady) {
+            } else if (!shouldPlay && player.playWhenReady) {
                 player.pause()
             }
         }.launchIn(scope)
@@ -578,7 +588,8 @@ class PlaybackService : MediaSessionService() {
                 val item = buildMediaItem(track, stream.url, stream.mimeType, stream.itag)
                 player.setMediaItem(item, startMs)
                 // The user may have pressed play/pause while the stream was being resolved.
-                player.playWhenReady = queueManager.state.value.isPlaying
+                val latestState = queueManager.state.value
+                player.playWhenReady = latestState.isPlaying && !latestState.tonearmTransitionPending
                 player.prepare()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -655,7 +666,8 @@ class PlaybackService : MediaSessionService() {
                 audioEffects.setTrackLoudness(stream.loudnessDb)
                 val item = buildMediaItem(track, stream.url, stream.mimeType, stream.itag)
                 player.setMediaItem(item, resumeAt)
-                player.playWhenReady = queueManager.state.value.isPlaying
+                val latestState = queueManager.state.value
+                player.playWhenReady = latestState.isPlaying && !latestState.tonearmTransitionPending
                 player.prepare()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e

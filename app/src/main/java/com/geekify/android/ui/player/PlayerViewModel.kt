@@ -28,6 +28,9 @@ class PlayerViewModel @Inject constructor(
     private val _isCurrentLiked = MutableStateFlow(false)
     val isCurrentLiked: StateFlow<Boolean> = _isCurrentLiked.asStateFlow()
 
+    /** Direction attached atomically to the queue's current track transition. */
+    val lastSkipDirection: Int get() = state.value.skipDirection
+
     init {
         combine(
             state.map { it.current?.videoId }.distinctUntilChanged(),
@@ -46,10 +49,13 @@ class PlayerViewModel @Inject constructor(
     fun seek(positionMs: Long) = controller.seekTo(positionMs)
     fun next() = controller.next()
     fun previous() = controller.previous(state.value.progressMs / 1000)
+
     fun toggleShuffle() = controller.toggleShuffle()
     fun cycleRepeat() = controller.cycleRepeat()
     fun setVolume(volume: Float) = controller.setVolume(volume)
     fun setReactiveArtworkMeterEnabled(enabled: Boolean) = audioEffects.setReactiveMeterEnabled(enabled)
+    fun setTonearmSyncEnabled(enabled: Boolean) = controller.queueManager.setTonearmSyncEnabled(enabled)
+    fun completeTonearmTransition(trackVideoId: String) = controller.queueManager.completeTonearmTransition(trackVideoId)
     fun addToQueue(track: Track) = controller.addToQueue(track)
     fun removeFromQueue(index: Int) = controller.removeFromQueue(index)
     fun reorder(from: Int, to: Int) = controller.reorder(from, to)

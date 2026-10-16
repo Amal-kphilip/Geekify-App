@@ -61,7 +61,6 @@ import com.geekify.android.data.model.Track
 import com.geekify.android.player.RepeatMode
 import com.geekify.android.ui.components.CircleIconButton
 import com.geekify.android.ui.components.MarqueeText
-import com.geekify.android.ui.components.MusicReactiveArtwork
 import com.geekify.android.ui.components.SeekBar
 import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.components.DialogButtonStyle
@@ -87,6 +86,7 @@ fun ExpandedPlayerScreen(
     onQueueClick: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
+    val lastSkipDirection = viewModel.lastSkipDirection
     val isLiked by viewModel.isCurrentLiked.collectAsState()
     val sleepTimerRemainingMs by viewModel.sleepTimerRemainingMs.collectAsState()
     var showSleepTimer by remember { mutableStateOf(false) }
@@ -116,18 +116,21 @@ fun ExpandedPlayerScreen(
     val dismissScope = rememberCoroutineScope()
     val screenHeightPx = with(LocalDensity.current) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
 
-    // The existing paused-state shrink is preserved, while the reactive artwork component
-    // applies rotation + beat scaling to the complete cover layer.
+    // Preserve the existing paused-state shrink; the vinyl component keeps beat scaling on the disc only.
     val artBaseScale by animateFloatAsState(
         targetValue = if (state.isPlaying) 1f else 0.92f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
         label = "artBaseScale"
     )
 
-    // Only enable the shared audio meter while this Now Playing destination is composed.
-    DisposableEffect(Unit) {
+    // Only enable the shared audio meter and tonearm/playback sync while this destination is composed.
+    DisposableEffect(viewModel) {
+        viewModel.setTonearmSyncEnabled(true)
         viewModel.setReactiveArtworkMeterEnabled(state.isPlaying)
-        onDispose { viewModel.setReactiveArtworkMeterEnabled(false) }
+        onDispose {
+            viewModel.setTonearmSyncEnabled(false)
+            viewModel.setReactiveArtworkMeterEnabled(false)
+        }
     }
     LaunchedEffect(state.isPlaying) {
         viewModel.setReactiveArtworkMeterEnabled(state.isPlaying)
@@ -236,55 +239,43 @@ fun ExpandedPlayerScreen(
 
             Spacer(Modifier.weight(0.7f))
 
-            // ---- Circular cover ----
-            MusicReactiveArtwork(
-                isPlaying = state.isPlaying,
-                beatIntensity = viewModel.beatIntensity,
-                baseScale = artBaseScale,
+            // ---- Vinyl cover + fixed tonearm ----
+            Box(
                 modifier = Modifier
                     .align(Alignment.CenterHorizontally)
-                    .size(artSize)
+                    .size(artSize),
+                contentAlignment = Alignment.Center
             ) {
-                // The complete rendered artwork layer is rotated/scaled together. The circular
-                // clip is only the artwork's existing shape; there is no separate fixed pulse mask.
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .shadow(28.dp, CircleShape, ambientColor = Color.Black, spotColor = Color.Black)
-                        .clip(CircleShape)
-                        .background(InkElevated),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Crossfade(targetState = thumbUrl, animationSpec = tween(400), label = "bigArt") { url ->
-                        if (url != null) {
-                            AsyncImage(
-                                model = url,
-                                contentDescription = track.title,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Icon(Icons.Default.MusicNote, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(80.dp))
-                        }
-                    }
-                }
+                VinylTonearmCover(
+                    trackId = track.videoId,
+                    coverUrl = thumbUrl,
+                    direction = lastSkipDirection,
+                    isPlaying = state.isPlaying,
+                    beatIntensity = viewModel.beatIntensity,
+                    baseScale = artBaseScale,
+                    onTonearmLanded = viewModel::completeTonearmTransition,
+                    modifier = Modifier.fillMaxSize(),
+                    discSize = artSize
+                )
             }
 
             Spacer(Modifier.weight(0.6f))
 
             // ---- Title / artist ----
-            MarqueeText(
-                text = track.title,
-                modifier = Modifier.fillMaxWidth(),
-                style = androidx.compose.ui.text.TextStyle(
-                    fontFamily = MontserratFamily,
-                    fontSize = 27.sp,
-                    lineHeight = 32.sp,
-                    fontWeight = FontWeight.Medium
-                ),
-                color = TextPrimary,
-                textAlign = TextAlign.Center
-            )
+            Crossfade(targetState = track, animationSpec = tween(280), label = "trackTitle") { displayedTrack ->
+                MarqueeText(
+                    text = displayedTrack.title,
+                    modifier = Modifier.fillMaxWidth(),
+                    style = androidx.compose.ui.text.TextStyle(
+                        fontFamily = MontserratFamily,
+                        fontSize = 27.sp,
+                        lineHeight = 32.sp,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    color = TextPrimary,
+                    textAlign = TextAlign.Center
+                )
+            }
             Spacer(Modifier.height(4.dp))
             MarqueeText(
                 text = track.artist,
@@ -544,14 +535,15 @@ private fun PlayerBackdrop(thumbUrl: String?, tint: Color) {
                         model = url,
                         contentDescription = null,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(520.dp)
+                            // The artwork must occupy the whole screen: a fixed-height blurred layer
+                            // leaves a visible horizontal seam when the track artwork crossfades.
+                            .fillMaxSize()
                             .blur(60.dp, BlurredEdgeTreatment.Unbounded)
                             .graphicsLayer {
-                                scaleX = 1.4f
-                                scaleY = 1.4f
+                                scaleX = 1.18f
+                                scaleY = 1.18f
                             }
-                            .alpha(0.85f),
+                            .alpha(0.72f),
                         contentScale = ContentScale.Crop
                     )
                 }
