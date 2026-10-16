@@ -75,6 +75,10 @@ fun VinylTonearmCover(
     val extraSpin = remember { Animatable(0f) }
     val spin = remember { Animatable(0f) }
     val arm = remember { Animatable(PLAY_ANGLE) }
+    // A tiny independent sway gives the tonearm a gentle tracking motion while playing.
+    // It remains separate from the main arm animation so skip/park/landing timing is preserved.
+    val tonearmSway = remember { Animatable(0f) }
+    var tonearmLanded by remember { mutableStateOf(true) }
 
     val currentBeatIntensity by beatIntensity.collectAsState()
     val normalizedBeat = ((currentBeatIntensity - BEAT_FLOOR) / (1f - BEAT_FLOOR))
@@ -100,6 +104,38 @@ fun VinylTonearmCover(
         }
     }
 
+    // Gently swing the stylus back and forth while the record is playing. The sway is disabled
+    // during track transitions and eased back to center whenever playback pauses.
+    LaunchedEffect(isPlaying, trackId, shownTrackId, tonearmLanded) {
+        if (!isPlaying || !tonearmLanded || trackId != shownTrackId) {
+            tonearmSway.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(
+                    durationMillis = 220,
+                    easing = androidx.compose.animation.core.FastOutSlowInEasing
+                )
+            )
+            return@LaunchedEffect
+        }
+
+        while (true) {
+            tonearmSway.animateTo(
+                targetValue = 1.35f,
+                animationSpec = tween(
+                    durationMillis = 2_400,
+                    easing = androidx.compose.animation.core.FastOutSlowInEasing
+                )
+            )
+            tonearmSway.animateTo(
+                targetValue = -1.35f,
+                animationSpec = tween(
+                    durationMillis = 2_400,
+                    easing = androidx.compose.animation.core.FastOutSlowInEasing
+                )
+            )
+        }
+    }
+
     // The track ID—not the artwork URL—is the transition key so songs with shared album art animate too.
     LaunchedEffect(trackId) {
         if (trackId == shownTrackId) {
@@ -112,6 +148,8 @@ fun VinylTonearmCover(
 
         // Reset every transient value first, preventing a rapid series of skips from leaving the
         // arm or record stranded halfway through an interrupted animation.
+        tonearmLanded = false
+        tonearmSway.snapTo(0f)
         discX.snapTo(0f)
         extraSpin.snapTo(0f)
         dropScale.snapTo(1f)
@@ -161,6 +199,7 @@ fun VinylTonearmCover(
             spring(dampingRatio = 0.5f, stiffness = 200f)
         )
         // Playback is released only after the stylus reaches the playing position.
+        tonearmLanded = true
         onTonearmLanded(trackId)
     }
 
@@ -259,9 +298,10 @@ fun VinylTonearmCover(
                 sin(Math.toRadians(angle.toDouble())).toFloat()
             )
 
-            val angle = arm.value
+            val angle = arm.value + tonearmSway.value
             val armDirection = unitVector(angle)
-            val lift = ((PLAY_ANGLE - angle) / (PLAY_ANGLE - PARK_ANGLE) * 3f).coerceIn(0f, 1f)
+            // Lift is derived from the main animation only, not from the small playing sway.
+            val lift = ((PLAY_ANGLE - arm.value) / (PLAY_ANGLE - PARK_ANGLE) * 3f).coerceIn(0f, 1f)
 
             fun drawTonearm(offset: Offset, shadow: Boolean) {
                 fun toneColor(color: Color) = if (shadow) Color.Black.copy(alpha = 0.35f) else color
