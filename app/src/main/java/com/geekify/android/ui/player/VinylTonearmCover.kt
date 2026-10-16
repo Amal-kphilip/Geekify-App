@@ -46,6 +46,11 @@ import kotlin.math.sin
 private const val PLAY_ANGLE = 120f
 private const val PARK_ANGLE = 80f
 private const val ROTATION_DURATION_MS = 8_000
+// With the existing arm geometry, these offsets sweep the stylus from ~94% of
+// the record radius to ~16%, leaving a small gap before the center spindle.
+private const val TONEARM_OUTER_SWEEP_OFFSET = -23f
+private const val TONEARM_INNER_SWEEP_OFFSET = 11f
+private const val TONEARM_SWEEP_DURATION_MS = 5_200
 private const val BEAT_FLOOR = 0.08f
 private const val MAX_PULSE_SCALE = 0.05f
 private val VinylLime = Color(0xFFC6EA5A)
@@ -104,8 +109,9 @@ fun VinylTonearmCover(
         }
     }
 
-    // Gently swing the stylus back and forth while the record is playing. The sway is disabled
-    // during track transitions and eased back to center whenever playback pauses.
+    // Slowly track from near the outer rim to just before the center, then back out.
+    // Geometry is expressed as offsets from PLAY_ANGLE; the separate track-swap arm animation
+    // still owns lift/park/landing and suppresses this sweep until the stylus has landed.
     LaunchedEffect(isPlaying, trackId, shownTrackId, tonearmLanded) {
         if (!isPlaying || !tonearmLanded || trackId != shownTrackId) {
             tonearmSway.animateTo(
@@ -120,17 +126,17 @@ fun VinylTonearmCover(
 
         while (true) {
             tonearmSway.animateTo(
-                targetValue = 1.35f,
+                targetValue = TONEARM_OUTER_SWEEP_OFFSET,
                 animationSpec = tween(
-                    durationMillis = 2_400,
-                    easing = androidx.compose.animation.core.FastOutSlowInEasing
+                    durationMillis = TONEARM_SWEEP_DURATION_MS,
+                    easing = LinearEasing
                 )
             )
             tonearmSway.animateTo(
-                targetValue = -1.35f,
+                targetValue = TONEARM_INNER_SWEEP_OFFSET,
                 animationSpec = tween(
-                    durationMillis = 2_400,
-                    easing = androidx.compose.animation.core.FastOutSlowInEasing
+                    durationMillis = TONEARM_SWEEP_DURATION_MS,
+                    easing = LinearEasing
                 )
             )
         }

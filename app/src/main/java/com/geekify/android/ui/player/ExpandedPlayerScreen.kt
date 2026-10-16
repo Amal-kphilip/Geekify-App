@@ -2,6 +2,9 @@ package com.geekify.android.ui.player
 
 import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.animateColorAsState
@@ -123,11 +126,32 @@ fun ExpandedPlayerScreen(
         label = "artBaseScale"
     )
 
-    // Only enable the shared audio meter and tonearm/playback sync while this destination is composed.
-    DisposableEffect(viewModel) {
-        viewModel.setTonearmSyncEnabled(true)
+    // Tonearm-gated playback is only valid while Now Playing is in the foreground.
+    // A composable can remain composed after the app enters the background, so composition
+    // disposal alone is not sufficient: release any pending transition on ON_STOP so
+    // service-owned auto-advance can continue without waiting for a UI animation.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(viewModel, lifecycleOwner) {
+        fun updateTonearmSync(enabled: Boolean) {
+            viewModel.setTonearmSyncEnabled(enabled)
+        }
+
+        val lifecycleObserver = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> updateTonearmSync(true)
+                Lifecycle.Event.ON_STOP -> updateTonearmSync(false)
+                else -> Unit
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
+        updateTonearmSync(
+            lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        )
         viewModel.setReactiveArtworkMeterEnabled(state.isPlaying)
+
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
             viewModel.setTonearmSyncEnabled(false)
             viewModel.setReactiveArtworkMeterEnabled(false)
         }
