@@ -38,7 +38,6 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.components.bestArtworkUrl
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import com.geekify.android.ui.glass.GlassStyle
@@ -50,11 +49,15 @@ import com.geekify.android.ui.theme.*
 /**
  * Floating mini player: a frosted capsule with the cover, title / artist, a lime play button,
  * next, a hairline divider and shuffle (same grammar as the compact pill in the design).
+ *
+ * Supports [isInline] mode: collapses to a compact pill that sits between the active tab
+ * circle and the search circle in the adaptive bottom bar.
  */
 @Composable
 fun NowPlayingBar(
     viewModel: PlayerViewModel,
     modifier: Modifier = Modifier,
+    isInline: Boolean = false,
     onClick: () -> Unit,
     onDismiss: () -> Unit = {}
 ) {
@@ -66,12 +69,14 @@ fun NowPlayingBar(
     val pressed = remember { mutableStateOf(false) }
     val pressAnim by animateFloatAsState(if (pressed.value) 1f else 0f, label = "miniPress")
     val dismissThresholdPx = with(LocalDensity.current) { 72.dp.toPx() }
+    val shape = if (isInline) RoundedCornerShape(26.dp) else RoundedCornerShape(40.dp)
 
     Box(
         modifier = modifier
             .fillMaxWidth()
+            .then(if (isInline) Modifier.height(52.dp) else Modifier)
             // Floating glass surface only: the cover, title, artist and controls inside it stay sharp and opaque.
-            .liquidGlass(RoundedCornerShape(40.dp), GlassStyle.Floating, pressProgress = { pressAnim })
+            .liquidGlass(shape, GlassStyle.Floating, pressProgress = { pressAnim })
             .trackPress(pressed)
             .bouncyClickable(pressedScale = 0.985f, onClick = onClick)
             .pointerInput(state.isPlaying, onDismiss) {
@@ -99,12 +104,18 @@ fun NowPlayingBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 10.dp, end = 6.dp, top = 10.dp, bottom = 12.dp),
+                .padding(
+                    start = if (isInline) 8.dp else 10.dp,
+                    end = if (isInline) 8.dp else 6.dp,
+                    top = if (isInline) 6.dp else 10.dp,
+                    bottom = if (isInline) 8.dp else 12.dp
+                ),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            val artSize = if (isInline) 36.dp else 48.dp
             Box(
                 modifier = Modifier
-                    .size(48.dp)
+                    .size(artSize)
                     .clip(CircleShape)
                     .background(InkElevated),
                 contentAlignment = Alignment.Center
@@ -123,13 +134,13 @@ fun NowPlayingBar(
                 }
             }
 
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(if (isInline) 8.dp else 12.dp))
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = track.title,
                     color = TextPrimary,
-                    fontSize = 15.sp,
+                    fontSize = if (isInline) 13.5.sp else 15.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -137,24 +148,30 @@ fun NowPlayingBar(
                 Text(
                     text = state.error ?: track.artist,
                     color = if (state.error != null) Color(0xFFFCD34D) else TextSecondary,
-                    fontSize = 13.sp,
+                    fontSize = if (isInline) 11.sp else 13.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
 
-            Spacer(Modifier.width(8.dp))
+            if (!isInline) {
+                Spacer(Modifier.width(8.dp))
 
-            LikeButton(
-                liked = liked,
-                onClick = { viewModel.toggleLikeCurrent() },
-                modifier = Modifier.size(40.dp),
-                size = 22.dp
-            )
+                LikeButton(
+                    liked = liked,
+                    onClick = { viewModel.toggleLikeCurrent() },
+                    modifier = Modifier.size(40.dp),
+                    size = 22.dp
+                )
+            } else {
+                Spacer(Modifier.width(6.dp))
+            }
 
+            val playSize = if (isInline) 36.dp else 44.dp
+            val playIconSize = if (isInline) 20.dp else 26.dp
             Box(
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(playSize)
                     .clip(CircleShape)
                     .background(Lime)
                     .bouncyClickable(pressedScale = 0.92f) { viewModel.togglePlay() },
@@ -162,7 +179,7 @@ fun NowPlayingBar(
             ) {
                 if (state.isBuffering) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(18.dp),
                         color = OnAccent,
                         strokeWidth = 2.dp
                     )
@@ -172,33 +189,35 @@ fun NowPlayingBar(
                             imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = if (playing) "Pause" else "Play",
                             tint = OnAccent,
-                            modifier = Modifier.size(26.dp)
+                            modifier = Modifier.size(playIconSize)
                         )
                     }
                 }
             }
 
-            Spacer(Modifier.width(2.dp))
+            if (!isInline) {
+                Spacer(Modifier.width(2.dp))
 
-            IconButton(onClick = { viewModel.next() }, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(26.dp))
-            }
+                IconButton(onClick = { viewModel.next() }, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(26.dp))
+                }
 
-            Box(
-                modifier = Modifier
-                    .padding(horizontal = 4.dp)
-                    .width(1.dp)
-                    .height(22.dp)
-                    .background(Color.White.copy(alpha = 0.22f))
-            )
-
-            IconButton(onClick = { viewModel.toggleShuffle() }, modifier = Modifier.size(40.dp)) {
-                Icon(
-                    Icons.Default.Shuffle,
-                    contentDescription = "Shuffle",
-                    tint = if (state.shuffle) Lime else Color.White,
-                    modifier = Modifier.size(22.dp)
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 4.dp)
+                        .width(1.dp)
+                        .height(22.dp)
+                        .background(Color.White.copy(alpha = 0.22f))
                 )
+
+                IconButton(onClick = { viewModel.toggleShuffle() }, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        Icons.Default.Shuffle,
+                        contentDescription = "Shuffle",
+                        tint = if (state.shuffle) Lime else Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
             }
         }
 
@@ -210,7 +229,10 @@ fun NowPlayingBar(
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(horizontal = 30.dp, vertical = 5.dp)
+                .padding(
+                    horizontal = if (isInline) 14.dp else 30.dp,
+                    vertical = if (isInline) 3.dp else 5.dp
+                )
                 .fillMaxWidth()
                 .height(2.dp)
                 .clip(RoundedCornerShape(1.dp))

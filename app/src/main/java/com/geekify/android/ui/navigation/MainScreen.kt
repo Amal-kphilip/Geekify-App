@@ -33,6 +33,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
@@ -226,8 +228,10 @@ fun MainScreen(
     // Height of the floating mini player + navigation pill, so scrolling lists can leave room for them.
     var floatingBarsHeightPx by remember { mutableIntStateOf(0) }
     val floatingBarsHeight = with(LocalDensity.current) { floatingBarsHeightPx.toDp() }
+    val scrollConnection = rememberFloatingTabBarScrollConnection()
 
     val navigateToTab: (String) -> Unit = { route ->
+        scrollConnection.expand()
         when (route) {
             Screen.Home.route -> {
                 // Return directly to the existing Home root instead of restoring
@@ -291,17 +295,23 @@ fun MainScreen(
     val sceneBackdrop = rememberGlassBackdrop()
     val overlayHost = remember { GlassOverlayHost() }
 
+    val animatedFloatingBarsHeight by animateDpAsState(
+        targetValue = with(LocalDensity.current) { floatingBarsHeightPx.toDp() },
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "floatingBarsHeight"
+    )
+
     CompositionLocalProvider(
         LocalNowPlayingId provides playerState.current?.videoId,
-        LocalBottomInset provides floatingBarsHeight,
-        LocalGlassOverlayHost provides overlayHost
+        LocalBottomInset provides animatedFloatingBarsHeight,
+        LocalGlassOverlayHost provides overlayHost,
+        LocalGlassBackdrop provides contentBackdrop
     ) {
     Box(modifier = Modifier.fillMaxSize().background(InkBackground)) {
       // ---- SCENE: everything that sits underneath popups / dialogs / panels ----
       Box(modifier = Modifier.fillMaxSize().glassBackdropSource(sceneBackdrop, enabled = overlayHost.entries.isNotEmpty() || showQueue).background(InkBackground)) {
-      CompositionLocalProvider(LocalGlassBackdrop provides contentBackdrop) {
         // Main content stays clean, sharp and opaque. It is only RECORDED so the floating bars can sample it.
-        Box(modifier = Modifier.fillMaxSize().glassBackdropSource(contentBackdrop).background(InkBackground)) {
+        Box(modifier = Modifier.fillMaxSize().glassBackdropSource(contentBackdrop).nestedScroll(scrollConnection).background(InkBackground)) {
                 NavHost(
                     modifier = Modifier.fillMaxSize(),
                     navController = navController,
@@ -473,39 +483,31 @@ fun MainScreen(
                     }
                 }
         }
-    }
 
-        // ---- Floating mini player + navigation pill (content scrolls underneath) ----
+        // ---- Floating adaptive navigation bar + mini player (content scrolls underneath) ----
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .onSizeChanged { floatingBarsHeightPx = it.height }
-                // Topmost pointer target for the whole bottom strip (pills AND the gaps between/around them):
-                // a tap here can never reach a song, album or card underneath.
                 .consumeTaps()
         ) {
-            Column(
+            Box(
                 modifier = Modifier
                     .navigationBarsPadding()
-                    .padding(start = 16.dp, end = 16.dp, top = 30.dp, bottom = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 12.dp)
             ) {
-                AnimatedVisibility(
-                    visible = playerState.current != null && !miniPlayerDismissed
-                ) {
-                    NowPlayingBar(
-                        viewModel = playerViewModel,
-                        onClick = { showExpandedPlayer = true },
-                        onDismiss = {
-                            if (!playerState.isPlaying) miniPlayerDismissed = true
-                        }
-                    )
-                }
-                FloatingNavBar(
+                AdaptiveBottomBar(
+                    scrollConnection = scrollConnection,
+                    playerViewModel = playerViewModel,
                     currentRoute = currentRoute,
                     libraryDetailActive = navBackStackEntry?.destination?.route in setOf(Screen.Liked.route, Screen.Playlist.route, Screen.Collection.route) &&
                         navController.previousBackStackEntry?.destination?.route == Screen.Library.route,
+                    miniPlayerDismissed = miniPlayerDismissed,
+                    onDismissMiniPlayer = {
+                        if (!playerState.isPlaying) miniPlayerDismissed = true
+                    },
+                    onOpenExpandedPlayer = { showExpandedPlayer = true },
                     onHome = { navigateToTab(Screen.Home.route) },
                     onSearch = { navigateToTab(Screen.Search.route) },
                     onLibrary = { navigateToTab(Screen.Library.route) },
@@ -637,97 +639,5 @@ fun MainScreen(
         // Popups, dialogs and the profile panel register here so they can be glass over the scene.
         GlassOverlays(overlayHost)
       }
-    }
-}
-
-/**
- * Floating Liquid Glass pill with the primary destinations. The lime selection circle slides between items on a spring.
- * Settings lives in the profile menu. Every item is a 56dp target with a content description.
- */
-@Composable
-private fun FloatingNavBar(
-    currentRoute: String?,
-    libraryDetailActive: Boolean,
-    onHome: () -> Unit,
-    onSearch: () -> Unit,
-    onLibrary: () -> Unit,
-    onCreate: () -> Unit
-) {
-    val selectedIndex = when {
-        currentRoute == Screen.Home.route -> 0
-        currentRoute == Screen.Search.route -> 1
-        currentRoute == Screen.Library.route -> 2
-        libraryDetailActive -> 2
-        else -> -1
-    }
-    val reduced = rememberReducedMotion()
-    val pressed = remember { mutableStateOf(false) }
-    val pressAnim by animateFloatAsState(if (pressed.value) 1f else 0f, label = "navPress")
-
-    BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxWidth()
-            .liquidGlass(CircleShape, GlassStyle.Navigation, pressProgress = { pressAnim })
-            .trackPress(pressed)
-            .consumeTaps() // the bar itself is a pointer target; item clicks still win because children are handled first
-    ) {
-        val itemSize = 56.dp
-        val inner = maxWidth - 20.dp
-        val gap = (inner - itemSize * 4) / 3
-        val targetX = (itemSize + gap) * selectedIndex.coerceAtLeast(0)
-        val indicatorX by animateDpAsState(
-            targetValue = targetX,
-            animationSpec = if (reduced) snap() else spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMedium),
-            label = "navIndicatorX"
-        )
-        val indicatorAlpha by animateFloatAsState(if (selectedIndex >= 0) 1f else 0f, label = "navIndicatorAlpha")
-
-        Box(modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp)) {
-            Box(
-                modifier = Modifier
-                    .offset(x = indicatorX)
-                    .size(itemSize)
-                    .graphicsLayer { alpha = indicatorAlpha }
-                    .clip(CircleShape)
-                    .background(Color(0xFF2E2E2E).copy(alpha = 0.70f))
-                    .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                NavPillItem(selectedIndex == 0, Icons.Filled.Home, Icons.Outlined.Home, "Home", onHome)
-                NavPillItem(selectedIndex == 1, Icons.Filled.Search, Icons.Outlined.Search, "Search", onSearch)
-                NavPillItem(selectedIndex == 2, Icons.Filled.LibraryMusic, Icons.Outlined.LibraryMusic, "My Music", onLibrary)
-                // "Create" is an action, never a destination.
-                NavPillItem(false, Icons.Filled.Add, Icons.Outlined.Add, "Create playlist", onCreate)
-            }
-        }
-    }
-}
-
-@Composable
-private fun NavPillItem(
-    selected: Boolean,
-    selectedIcon: ImageVector,
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit
-) {
-    val fg by animateColorAsState(if (selected) Lime else Color.White.copy(alpha = 0.94f), tween(220), label = "navFg")
-    Box(
-        modifier = Modifier
-            .size(56.dp)
-            .clip(CircleShape)
-            .bouncyClickable(pressedScale = 0.9f, onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = if (selected) selectedIcon else icon,
-            contentDescription = label,
-            tint = fg,
-            modifier = Modifier.size(26.dp)
-        )
     }
 }

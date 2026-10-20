@@ -249,7 +249,7 @@ fun Modifier.liquidGlass(
                 }
             }
             .clip(shape)
-            .background(style.tint.copy(alpha = if (backdrop == null) 0.94f else style.tintAlpha + 0.35f))
+            .background(style.tint.copy(alpha = if (backdrop == null) 0.35f else (style.tintAlpha + 0.20f).coerceIn(0.15f, 0.40f)))
             .drawWithContent {
                 val press = pressProgress().coerceIn(0f, 1f)
                 if (dim > 0f) drawRect(Color.Black.copy(alpha = dim))
