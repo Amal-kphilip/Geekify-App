@@ -136,31 +136,31 @@ data class GlassStyle(
             blur = 3.dp,
             tint = BaseGlassColor,
             tintAlpha = 0.12f,
-            rimAlpha = 0.55f,
+            rimAlpha = 0.38f,
             specularAlpha = 0.0f,
-            shadowRadius = 16.dp,
-            shadowAlpha = 0.40f,
+            shadowRadius = 8.dp,
+            shadowAlpha = 0.15f,
             frost = 0.0f,
-            saturation = 2.0f,
-            lensHeight = 28.dp, // 0.60 * 48dp (Convx Nav spec)
-            lensAmount = 33.dp, // 0.69 * 48dp (Convx Nav spec)
-            darkRimAlpha = 0.32f
+            saturation = 1.8f,
+            lensHeight = 14.dp,
+            lensAmount = 12.dp,
+            darkRimAlpha = 0.0f
         )
 
         /** Mini player and small floating controls: crystal-clear glass. */
         val Floating = GlassStyle(
             blur = 3.dp,
             tint = BaseGlassColor,
-            tintAlpha = 0.14f,
-            rimAlpha = 0.50f,
+            tintAlpha = 0.12f,
+            rimAlpha = 0.38f,
             specularAlpha = 0.0f,
-            shadowRadius = 14.dp,
-            shadowAlpha = 0.35f,
+            shadowRadius = 8.dp,
+            shadowAlpha = 0.15f,
             frost = 0.0f,
-            saturation = 2.0f,
-            lensHeight = 22.dp,
-            lensAmount = 26.dp,
-            darkRimAlpha = 0.28f
+            saturation = 1.8f,
+            lensHeight = 14.dp,
+            lensAmount = 12.dp,
+            darkRimAlpha = 0.0f
         )
 
         /** Popups and dialogs: strong glass but readable. */

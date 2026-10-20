@@ -17,6 +17,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Home
@@ -160,11 +161,11 @@ class FloatingTabBarScrollConnection(
  * Adaptive Liquid Glass Bottom Navigation Bar adapted from Convx:
  *
  * - EXPANDED (at top of page / initial):
- *   - Mini player capsule on top (if song active)
- *   - Row below: Main Tab Capsule (Home, Library, Create) + standalone circular Search button
+ *   - Mini player capsule on top (height 64dp, if song active)
+ *   - Row below (height 64dp): Main Tab Capsule (Home, Library, Create) + standalone circular Search button (64dp)
  *
  * - INLINE (when scrolling down):
- *   - Single row: [Active Tab Circle] + [Compact Mini Player] + [Search Circle]
+ *   - Single row (height 56dp): [Active Tab Circle] (56dp) + [Compact Mini Player] (56dp) + [Search Circle] (56dp)
  *   - If no song active: [Active Tab Circle] + [Search Circle] centered
  */
 @Composable
@@ -208,13 +209,14 @@ fun AdaptiveBottomBar(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(52.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        .height(56.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     ActiveTabCircleButton(
                         currentRoute = currentRoute,
                         libraryDetailActive = libraryDetailActive,
+                        size = 56.dp,
                         onClick = { scrollConnection.expand() }
                     )
                     NowPlayingBar(
@@ -226,7 +228,7 @@ fun AdaptiveBottomBar(
                     )
                     SearchCircleButton(
                         isSelected = currentRoute == Screen.Search.route,
-                        size = 52.dp,
+                        size = 56.dp,
                         onClick = onSearch
                     )
                 }
@@ -235,19 +237,20 @@ fun AdaptiveBottomBar(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(52.dp),
+                        .height(56.dp),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     ActiveTabCircleButton(
                         currentRoute = currentRoute,
                         libraryDetailActive = libraryDetailActive,
+                        size = 56.dp,
                         onClick = { scrollConnection.expand() }
                     )
                     Spacer(Modifier.width(14.dp))
                     SearchCircleButton(
                         isSelected = currentRoute == Screen.Search.route,
-                        size = 52.dp,
+                        size = 56.dp,
                         onClick = onSearch
                     )
                 }
@@ -266,12 +269,16 @@ fun AdaptiveBottomBar(
                         )
                     }
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(64.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         MainTabCapsule(
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
                             currentRoute = currentRoute,
                             libraryDetailActive = libraryDetailActive,
                             onHome = onHome,
@@ -280,7 +287,7 @@ fun AdaptiveBottomBar(
                         )
                         SearchCircleButton(
                             isSelected = currentRoute == Screen.Search.route,
-                            size = 54.dp,
+                            size = 64.dp,
                             onClick = onSearch
                         )
                     }
@@ -311,7 +318,7 @@ private fun MainTabCapsule(
 
     BoxWithConstraints(
         modifier = modifier
-            .height(54.dp)
+            .height(64.dp)
             .liquidGlass(CircleShape, GlassStyle.Navigation, pressProgress = { pressAnim })
             .trackPress(pressed)
             .consumeTaps()
@@ -341,9 +348,9 @@ private fun MainTabCapsule(
                     .width(tabWidth)
                     .fillMaxHeight()
                     .graphicsLayer { alpha = indicatorAlpha }
-                    .clip(CircleShape)
-                    .background(Color(0xFF2E2E2E).copy(alpha = 0.70f))
-                    .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Color(0xFF2E2E2E).copy(alpha = 0.75f))
+                    .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(28.dp))
             )
 
             Row(
@@ -356,7 +363,9 @@ private fun MainTabCapsule(
                     selectedIcon = Icons.Filled.Home,
                     icon = Icons.Outlined.Home,
                     label = "Home",
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
                     onClick = onHome
                 )
                 TabItem(
@@ -364,7 +373,9 @@ private fun MainTabCapsule(
                     selectedIcon = Icons.Filled.LibraryMusic,
                     icon = Icons.Outlined.LibraryMusic,
                     label = "Library",
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
                     onClick = onLibrary
                 )
                 TabItem(
@@ -372,7 +383,9 @@ private fun MainTabCapsule(
                     selectedIcon = Icons.Filled.Add,
                     icon = Icons.Outlined.Add,
                     label = "Create",
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
                     onClick = onCreate
                 )
             }
@@ -407,9 +420,9 @@ private fun TabItem(
             imageVector = if (selected) selectedIcon else icon,
             contentDescription = label,
             tint = fg,
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier.size(22.dp)
         )
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(3.dp))
         Text(
             text = label,
             color = fg,
@@ -424,7 +437,7 @@ private fun TabItem(
 @Composable
 private fun SearchCircleButton(
     isSelected: Boolean,
-    size: Dp = 54.dp,
+    size: Dp = 64.dp,
     onClick: () -> Unit
 ) {
     val pressed = remember { mutableStateOf(false) }
@@ -442,9 +455,9 @@ private fun SearchCircleButton(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(4.dp)
+                    .padding(3.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF2E2E2E).copy(alpha = 0.70f))
+                    .background(Color(0xFF2E2E2E).copy(alpha = 0.75f))
                     .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
             )
         }
@@ -452,7 +465,7 @@ private fun SearchCircleButton(
             imageVector = if (isSelected) Icons.Filled.Search else Icons.Outlined.Search,
             contentDescription = "Search",
             tint = if (isSelected) Lime else Color.White.copy(alpha = 0.90f),
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(if (size >= 60.dp) 24.dp else 22.dp)
         )
     }
 }
@@ -462,6 +475,7 @@ private fun SearchCircleButton(
 private fun ActiveTabCircleButton(
     currentRoute: String?,
     libraryDetailActive: Boolean,
+    size: Dp = 56.dp,
     onClick: () -> Unit
 ) {
     val pressed = remember { mutableStateOf(false) }
@@ -475,7 +489,7 @@ private fun ActiveTabCircleButton(
 
     Box(
         modifier = Modifier
-            .size(52.dp)
+            .size(size)
             .liquidGlass(CircleShape, GlassStyle.Navigation, pressProgress = { pressAnim })
             .trackPress(pressed)
             .bouncyClickable(pressedScale = 0.92f, onClick = onClick),
@@ -484,16 +498,16 @@ private fun ActiveTabCircleButton(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(4.dp)
+                .padding(3.dp)
                 .clip(CircleShape)
-                .background(Color(0xFF2E2E2E).copy(alpha = 0.70f))
+                .background(Color(0xFF2E2E2E).copy(alpha = 0.75f))
                 .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
         )
         Icon(
             imageVector = icon,
             contentDescription = desc,
             tint = Lime,
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(24.dp)
         )
     }
 }

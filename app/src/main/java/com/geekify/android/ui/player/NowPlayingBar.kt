@@ -69,12 +69,12 @@ fun NowPlayingBar(
     val pressed = remember { mutableStateOf(false) }
     val pressAnim by animateFloatAsState(if (pressed.value) 1f else 0f, label = "miniPress")
     val dismissThresholdPx = with(LocalDensity.current) { 72.dp.toPx() }
-    val shape = if (isInline) RoundedCornerShape(26.dp) else RoundedCornerShape(40.dp)
+    val shape = if (isInline) RoundedCornerShape(28.dp) else RoundedCornerShape(32.dp)
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .then(if (isInline) Modifier.height(52.dp) else Modifier)
+            .then(if (isInline) Modifier.height(56.dp) else Modifier.height(64.dp))
             // Floating glass surface only: the cover, title, artist and controls inside it stay sharp and opaque.
             .liquidGlass(shape, GlassStyle.Floating, pressProgress = { pressAnim })
             .trackPress(pressed)
@@ -107,12 +107,12 @@ fun NowPlayingBar(
                 .padding(
                     start = if (isInline) 8.dp else 10.dp,
                     end = if (isInline) 8.dp else 6.dp,
-                    top = if (isInline) 6.dp else 10.dp,
-                    bottom = if (isInline) 8.dp else 12.dp
+                    top = if (isInline) 8.dp else 10.dp,
+                    bottom = if (isInline) 8.dp else 10.dp
                 ),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val artSize = if (isInline) 36.dp else 48.dp
+            val artSize = if (isInline) 38.dp else 46.dp
             Box(
                 modifier = Modifier
                     .size(artSize)
@@ -134,21 +134,27 @@ fun NowPlayingBar(
                 }
             }
 
-            Spacer(Modifier.width(if (isInline) 8.dp else 12.dp))
+            Spacer(Modifier.width(if (isInline) 10.dp else 12.dp))
 
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.Center
+            ) {
                 Text(
                     text = track.title,
                     color = TextPrimary,
                     fontSize = if (isInline) 13.5.sp else 15.sp,
+                    lineHeight = if (isInline) 17.sp else 20.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                Spacer(Modifier.height(if (isInline) 1.dp else 2.dp))
                 Text(
                     text = state.error ?: track.artist,
                     color = if (state.error != null) Color(0xFFFCD34D) else TextSecondary,
                     fontSize = if (isInline) 11.sp else 13.sp,
+                    lineHeight = if (isInline) 14.sp else 16.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -167,8 +173,8 @@ fun NowPlayingBar(
                 Spacer(Modifier.width(6.dp))
             }
 
-            val playSize = if (isInline) 36.dp else 44.dp
-            val playIconSize = if (isInline) 20.dp else 26.dp
+            val playSize = if (isInline) 38.dp else 44.dp
+            val playIconSize = if (isInline) 22.dp else 26.dp
             Box(
                 modifier = Modifier
                     .size(playSize)
@@ -230,11 +236,11 @@ fun NowPlayingBar(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(
-                    horizontal = if (isInline) 14.dp else 30.dp,
-                    vertical = if (isInline) 3.dp else 5.dp
+                    horizontal = if (isInline) 18.dp else 30.dp,
+                    vertical = if (isInline) 2.dp else 5.dp
                 )
                 .fillMaxWidth()
-                .height(2.dp)
+                .height(if (isInline) 1.5.dp else 2.dp)
                 .clip(RoundedCornerShape(1.dp))
                 .background(Color.White.copy(alpha = 0.16f))
         ) {
