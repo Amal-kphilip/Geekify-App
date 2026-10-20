@@ -12,6 +12,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -471,8 +472,8 @@ fun MainScreen(
                         AddAccountScreen(viewModel = accountViewModel, onBack = { navController.popBackStack() })
                     }
                 }
-
         }
+    }
 
         // ---- Floating mini player + navigation pill (content scrolls underneath) ----
         Box(
@@ -484,18 +485,6 @@ fun MainScreen(
                 // a tap here can never reach a song, album or card underneath.
                 .consumeTaps()
         ) {
-            // Fades the list into the background behind the pills.
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .background(
-                        Brush.verticalGradient(
-                            0f to Color.Transparent,
-                            0.5f to InkBackground.copy(alpha = 0.55f),
-                            1f to InkBackground.copy(alpha = 0.85f)
-                        )
-                    )
-            )
             Column(
                 modifier = Modifier
                     .navigationBarsPadding()
@@ -649,7 +638,6 @@ fun MainScreen(
         GlassOverlays(overlayHost)
       }
     }
-    }
 }
 
 /**
@@ -701,7 +689,8 @@ private fun FloatingNavBar(
                     .size(itemSize)
                     .graphicsLayer { alpha = indicatorAlpha }
                     .clip(CircleShape)
-                    .background(Lime)
+                    .background(Color(0xFF2E2E2E).copy(alpha = 0.70f))
+                    .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -726,7 +715,7 @@ private fun NavPillItem(
     label: String,
     onClick: () -> Unit
 ) {
-    val fg by animateColorAsState(if (selected) OnAccent else Color.White.copy(alpha = 0.94f), tween(220), label = "navFg")
+    val fg by animateColorAsState(if (selected) Lime else Color.White.copy(alpha = 0.94f), tween(220), label = "navFg")
     Box(
         modifier = Modifier
             .size(56.dp)

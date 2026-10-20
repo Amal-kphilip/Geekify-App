@@ -129,51 +129,51 @@ data class GlassStyle(
     val darkRimAlpha: Float = 0.32f
 ) {
     companion object {
-        private val Smoke = Color(0xFF2B2934)
+        private val BaseGlassColor = Color(0xFF171717)
 
-        /** Bottom navigation: the strongest, most "physical" liquid glass. */
+        /** Bottom navigation: Convx crystal-clear liquid glass. */
         val Navigation = GlassStyle(
             blur = 3.dp,
-            tint = Smoke,
-            tintAlpha = 0.34f,
-            rimAlpha = 0.85f,
-            specularAlpha = 0.30f,
-            shadowRadius = 22.dp,
-            shadowAlpha = 0.50f,
-            frost = 0.07f,
+            tint = BaseGlassColor,
+            tintAlpha = 0.12f,
+            rimAlpha = 0.55f,
+            specularAlpha = 0.0f,
+            shadowRadius = 16.dp,
+            shadowAlpha = 0.40f,
+            frost = 0.0f,
             saturation = 2.0f,
-            lensHeight = 28.dp, // 0.60 * 48dp (Nav spec)
-            lensAmount = 33.dp, // 0.69 * 48dp (Nav spec)
+            lensHeight = 28.dp, // 0.60 * 48dp (Convx Nav spec)
+            lensAmount = 33.dp, // 0.69 * 48dp (Convx Nav spec)
             darkRimAlpha = 0.32f
         )
 
-        /** Mini player and small floating controls: subtler. */
+        /** Mini player and small floating controls: crystal-clear glass. */
         val Floating = GlassStyle(
             blur = 3.dp,
-            tint = Smoke,
-            tintAlpha = 0.42f,
-            rimAlpha = 0.60f,
-            specularAlpha = 0.20f,
-            shadowRadius = 16.dp,
-            shadowAlpha = 0.42f,
-            frost = 0.06f,
-            saturation = 1.8f,
-            lensHeight = 18.dp,
-            lensAmount = 22.dp,
+            tint = BaseGlassColor,
+            tintAlpha = 0.14f,
+            rimAlpha = 0.50f,
+            specularAlpha = 0.0f,
+            shadowRadius = 14.dp,
+            shadowAlpha = 0.35f,
+            frost = 0.0f,
+            saturation = 2.0f,
+            lensHeight = 22.dp,
+            lensAmount = 26.dp,
             darkRimAlpha = 0.28f
         )
 
-        /** Popups and dialogs: strong glass but dense enough to read text on. */
+        /** Popups and dialogs: strong glass but readable. */
         val Overlay = GlassStyle(
             blur = 14.dp,
-            tint = Smoke,
-            tintAlpha = 0.58f,
-            rimAlpha = 0.80f,
-            specularAlpha = 0.26f,
-            shadowRadius = 34.dp,
-            shadowAlpha = 0.55f,
-            frost = 0.06f,
-            saturation = 1.5f,
+            tint = BaseGlassColor,
+            tintAlpha = 0.45f,
+            rimAlpha = 0.60f,
+            specularAlpha = 0.0f,
+            shadowRadius = 24.dp,
+            shadowAlpha = 0.45f,
+            frost = 0.0f,
+            saturation = 1.6f,
             lensHeight = 16.dp,
             lensAmount = 20.dp,
             darkRimAlpha = 0.25f
@@ -182,14 +182,14 @@ data class GlassStyle(
         /** Large surfaces with lots of text (profile panel, queue). */
         val Panel = GlassStyle(
             blur = 16.dp,
-            tint = Smoke,
-            tintAlpha = 0.64f,
-            rimAlpha = 0.80f,
-            specularAlpha = 0.22f,
-            shadowRadius = 28.dp,
-            shadowAlpha = 0.50f,
-            frost = 0.05f,
-            saturation = 1.4f,
+            tint = BaseGlassColor,
+            tintAlpha = 0.50f,
+            rimAlpha = 0.60f,
+            specularAlpha = 0.0f,
+            shadowRadius = 24.dp,
+            shadowAlpha = 0.45f,
+            frost = 0.0f,
+            saturation = 1.5f,
             lensHeight = 14.dp,
             lensAmount = 18.dp,
             darkRimAlpha = 0.22f
@@ -329,28 +329,22 @@ fun Modifier.liquidGlass(
                 val press = pressProgress().coerceIn(0f, 1f)
                 if (dim > 0f) drawRect(Color.Black.copy(alpha = dim))
                 if (style.frost > 0f) drawRect(Color.White.copy(alpha = style.frost))
-                drawRect(
-                    Brush.verticalGradient(
-                        0f to Color.White.copy(alpha = 0.10f),
-                        0.45f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = 0.10f)
-                    )
-                )
                 if (style.tintAlpha > 0f) {
                     drawRect(style.tint.copy(alpha = style.tintAlpha))
                 }
                 if (press > 0f) drawRect(Color.White.copy(alpha = 0.05f * press))
             },
             onDrawFront = {
-                val press = pressProgress().coerceIn(0f, 1f)
-                // Specular radial highlight
-                drawRect(
-                    Brush.radialGradient(
-                        colors = listOf(Color.White.copy(alpha = style.specularAlpha + 0.12f * press), Color.Transparent),
-                        center = Offset(size.width * 0.20f, size.height * 0.02f),
-                        radius = size.maxDimension * 0.55f
+                if (style.specularAlpha > 0f) {
+                    val press = pressProgress().coerceIn(0f, 1f)
+                    drawRect(
+                        Brush.radialGradient(
+                            colors = listOf(Color.White.copy(alpha = style.specularAlpha + 0.12f * press), Color.Transparent),
+                            center = Offset(size.width * 0.20f, size.height * 0.02f),
+                            radius = size.maxDimension * 0.55f
+                        )
                     )
-                )
+                }
 
                 if (highlightEnd) {
                     val x = size.width - 1.dp.toPx()
