@@ -22,34 +22,82 @@ jobs:
           java-version: '17'
 
       - name: Restore release keystore
+        id: keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+        run: |
+          if [[ -n "$ANDROID_KEYSTORE_BASE64" ]]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::ANDROID_KEYSTORE_BASE64 secret is not set — APK will be debug-signed (installable, but not Play-signed)."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Restore Firebase configuration
         env:
           GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
-        run: echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > app/google-services.json
+        run: |
+          if [[ -n "$GOOGLE_SERVICES_JSON_BASE64" ]]; then
+            echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > app/google-services.json
+          else
+            echo "::warning::GOOGLE_SERVICES_JSON_BASE64 secret is not set — using placeholder google-services.json."
+            cat > app/google-services.json <<'JSON'
+          {
+            "project_info": {
+              "project_id": "geekify-40226",
+              "project_number": "000000000000",
+              "firebase_url": "",
+              "storage_bucket": ""
+            },
+            "client": [{
+              "client_info": {
+                "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
+                "android_client_info": { "package_name": "com.geekify.android" }
+              },
+              "oauth_client": [],
+              "api_key": [{ "current_key": "" }],
+              "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+            }],
+            "configuration_version": "1"
+          }
+          JSON
+          fi
 
-      - name: Build signed APK
+      - name: Build APK
+        id: build
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEYSTORE_AVAILABLE: ${{ steps.keystore.outputs.available }}
         run: |
           chmod +x gradlew
           VERSION_NAME="${GITHUB_REF_NAME#v}"
           VERSION_CODE="$(echo "$VERSION_NAME" | awk -F. '{ printf "%d%02d%02d", $1, $2, $3 }')"
-          ./gradlew :app:assembleRelease \
-            -PappVersionName="$VERSION_NAME" \
-            -PappVersionCode="$VERSION_CODE" \
-            -Pandroid.injected.signing.store.file="$ANDROID_KEYSTORE_PATH" \
-            -Pandroid.injected.signing.store.password="$ANDROID_KEYSTORE_PASSWORD" \
-            -Pandroid.injected.signing.key.alias="$ANDROID_KEY_ALIAS" \
-            -Pandroid.injected.signing.key.password="$ANDROID_KEY_PASSWORD"
-          cp app/build/outputs/apk/release/app-release.apk "Geekify-v${VERSION_NAME}.apk"
-          cp app/build/outputs/apk/release/app-release.apk "Geekify-latest.apk"
+
+          if [[ "$KEYSTORE_AVAILABLE" == "true" ]]; then
+            echo "Building release APK with release signing..."
+            ./gradlew :app:assembleRelease \
+              -PappVersionName="$VERSION_NAME" \
+              -PappVersionCode="$VERSION_CODE" \
+              -Pandroid.injected.signing.store.file="$ANDROID_KEYSTORE_PATH" \
+              -Pandroid.injected.signing.store.password="$ANDROID_KEYSTORE_PASSWORD" \
+              -Pandroid.injected.signing.key.alias="$ANDROID_KEY_ALIAS" \
+              -Pandroid.injected.signing.key.password="$ANDROID_KEY_PASSWORD"
+            APK_PATH="$(find app/build/outputs/apk/release -name '*.apk' | head -1)"
+          else
+            echo "Building debug APK (debug-signed — installable on any device)..."
+            ./gradlew :app:assembleDebug \
+              -PappVersionName="$VERSION_NAME" \
+              -PappVersionCode="$VERSION_CODE"
+            APK_PATH="$(find app/build/outputs/apk/debug -name '*.apk' | head -1)"
+          fi
+
+          echo "APK resolved: $APK_PATH"
+          cp "$APK_PATH" "Geekify-v${VERSION_NAME}.apk"
+          cp "$APK_PATH" "Geekify-latest.apk"
 
       - name: Create GitHub Release
         env:
@@ -59,22 +107,22 @@ jobs:
           VERSIONED_APK="Geekify-${TAG}.apk"
           LATEST_APK="Geekify-latest.apk"
 
-          # Start or resume the release; avoid duplicate asset uploads on reruns.
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
+          # Create or resume draft release
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
             gh release create "$TAG" --draft --generate-notes
           fi
 
-          # Upload only missing assets and preserve assets already present.
+          # Upload only missing assets (idempotent on reruns)
           EXISTING_ASSETS="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
           for ASSET in "$VERSIONED_APK" "$LATEST_APK"; do
             if printf '%s\n' "$EXISTING_ASSETS" | grep -Fxq "$ASSET"; then
-              echo "Asset already exists; keeping it: $ASSET"
+              echo "Asset already present, skipping: $ASSET"
             else
               gh release upload "$TAG" "$ASSET"
             fi
           done
 
-          # Publish an interrupted draft before later notification steps run.
+          # Publish the draft
           gh release edit "$TAG" --draft=false
 
       - name: Validate stable release version for update notification
