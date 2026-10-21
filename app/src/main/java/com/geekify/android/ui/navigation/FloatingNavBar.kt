@@ -158,7 +158,7 @@ class FloatingTabBarScrollConnection(
 }
 
 /**
- * Adaptive Liquid Glass Bottom Navigation Bar adapted from Convx:
+ * Adaptive Liquid Glass Bottom Navigation Bar:
  *
  * - EXPANDED (at top of page / initial):
  *   - Mini player capsule on top (height 64dp, if song active)

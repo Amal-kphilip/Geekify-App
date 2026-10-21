@@ -1,8 +1,8 @@
-﻿/*
+/*
  * Copyright 2026, compose-miuix-ui contributors
  * SPDX-License-Identifier: Apache-2.0
  *
- * Ported one-to-one from the reference app's DampedDragAnimation. The only Convx extension is
+ * Ported one-to-one from the reference DampedDragAnimation. The only extension is
  * snapValue(), used when an external pager already owns the position animation;
  * it is not used by pointer drag/press/release behavior.
  */
@@ -180,7 +180,7 @@ class DampedDragAnimation(
         }
     }
 
-    /** Convx pager extension; pointer drag behavior remains identical to the reference app. */
+    /** Pager extension; pointer drag behavior remains identical to the reference implementation. */
     suspend fun snapValue(value: Float) {
         valueAnimation.snapTo(if (value.isFinite()) value.coerceIn(valueRange) else valueAnimation.value)
     }

@@ -15,7 +15,7 @@ object NotificationPolicy {
     /** Tips + engagement together: at most 2 in any rolling 7 days. Update notices are one-per-version and not counted here. */
     const val MAX_SOFT_PER_WEEK = 2
     /** No "come back" style message if the app was opened in the last 3 days. */
-    const val ENGAGEMENT_QUIET_AFTER_OPEN_MS = 3 * DAY_MS
+    const val ENGAGEMENT_QUIET_AFTER_OPEN_MS = 6 * HOUR_MS
     /** No tip within a day of the user having the app open. */
     const val TIP_QUIET_AFTER_OPEN_MS = DAY_MS
 
@@ -62,7 +62,7 @@ object NotificationPolicy {
             Kind.FEATURE -> {
                 if (!i.prefs.tips) return Decision.Deny("tips turned off")
                 if (isUpdatePending(i.prefs, s, i.installedVersionCode)) return Decision.Deny("update notification has priority")
-                val firstTipPending = s.tipHandledForVersion == 0 ||
+                val firstTipPending = s.tipHandledForVersion < i.installedVersionCode ||
                     (s.tipHandledForVersion == i.installedVersionCode && s.allSentAt.isEmpty())
                 if (!firstTipPending && i.now - s.lastOpenedAt < TIP_QUIET_AFTER_OPEN_MS) return Decision.Deny("app opened recently")
             }

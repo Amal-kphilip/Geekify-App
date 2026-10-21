@@ -58,6 +58,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
@@ -96,6 +97,7 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var http: OkHttpClient
     @Inject lateinit var audioCache: SimpleCache
     @Inject lateinit var syncRepository: com.geekify.android.data.sync.SyncRepository
+    @Inject lateinit var appSettings: com.geekify.android.settings.AppSettingsRepository
 
     private lateinit var player: ExoPlayer
     private lateinit var mediaSession: MediaSession
@@ -122,6 +124,9 @@ class PlaybackService : MediaSessionService() {
     private var activeListeningMs = 0L
     private var lastListeningCheckpointMs = 0L
     private var restoredPositionUsed = false
+    private var prevEqEnabled = false
+    private var prevPreset = ""
+    private var prevNormalize = false
 
     override fun onCreate() {
         super.onCreate()
@@ -167,7 +172,7 @@ class PlaybackService : MediaSessionService() {
                 enableFloatOutput: Boolean,
                 enableAudioTrackPlaybackParams: Boolean
             ): AudioSink? = DefaultAudioSink.Builder(context)
-                .setEnableFloatOutput(enableFloatOutput)
+                .setEnableFloatOutput(false)
                 .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
                 .setAudioProcessors(audioEffects.processors)
                 .build()
@@ -234,12 +239,17 @@ class PlaybackService : MediaSessionService() {
             .launchIn(scope)
 
         // Tempo, pitch and silence skipping change on the running player (no re-initialisation).
+        prevEqEnabled = audioEffects.settings.value.eqEnabled
+        prevPreset = audioEffects.settings.value.preset
+        prevNormalize = audioEffects.settings.value.normalize
+        observeRuntimeAppSettings()
         audioEffects.settings.onEach { s ->
             val current = player.playbackParameters
             if (current.speed != s.speed || current.pitch != s.pitch) {
                 player.playbackParameters = PlaybackParameters(s.speed, s.pitch)
             }
             if (player.skipSilenceEnabled != s.skipSilence) player.skipSilenceEnabled = s.skipSilence
+            handleAudioEffectFlush(s)
         }.launchIn(scope)
 
         player.addListener(object : Player.Listener {
@@ -334,7 +344,7 @@ class PlaybackService : MediaSessionService() {
                         val current = queueManager.state.value.current
                         if (current != null && current.videoId == lastPlayingVideoId && listenedMs >= threshold) {
                             playCounted = true
-                            scope.launch { historyRepository.countPlay(current) }
+                            if (!appSettings.state.value.pauseListenHistory) scope.launch { historyRepository.countPlay(current) }
                         }
                     }
                     if (++tick % 10 == 0) queueManager.persistProgress()
@@ -503,6 +513,68 @@ class PlaybackService : MediaSessionService() {
         override fun seekToPreviousMediaItem() { queueManager.previous(currentPosition.coerceAtLeast(0L) / 1000) }
     }
 
+    private fun handleAudioEffectFlush(s: com.geekify.android.audio.AudioSettings) {
+        val eqToggled = s.eqEnabled != prevEqEnabled
+        val presetSwitched = s.preset != prevPreset && s.preset != com.geekify.android.audio.EqPresets.CUSTOM
+        val normalizeToggled = s.normalize != prevNormalize
+        prevEqEnabled = s.eqEnabled
+        prevPreset = s.preset
+        prevNormalize = s.normalize
+        if ((eqToggled || presetSwitched || normalizeToggled) &&
+            player.playbackState == Player.STATE_READY &&
+            player.currentMediaItem != null
+        ) {
+            player.seekTo(player.currentPosition.coerceAtLeast(0L))
+        }
+    }
+
+    private fun observeRuntimeAppSettings() {
+        appSettings.state
+            .map { it.audioQuality }
+            .distinctUntilChanged()
+            .drop(1)
+            .onEach {
+                streamResolver.clearCache()
+                val currentTrack = queueManager.state.value.current
+                if (currentTrack != null && player.currentMediaItem != null) {
+                    resolveRetries = 0
+                    retryCurrentStream(
+                        track = currentTrack,
+                        resumeAt = player.currentPosition.coerceAtLeast(0L),
+                        wasPlaying = queueManager.state.value.isPlaying,
+                        markFailed = false
+                    )
+                    startPrefetch(currentTrack.videoId)
+                }
+            }
+            .launchIn(scope)
+
+        appSettings.state
+            .map { it.autoplayRelated }
+            .distinctUntilChanged()
+            .drop(1)
+            .onEach { enabled ->
+                if (enabled) {
+                    queueManager.state.value.current?.let(::startAutoplay)
+                } else {
+                    autoplayJob?.cancel()
+                    queueManager.removeAutoplayTracks()
+                }
+            }
+            .launchIn(scope)
+
+        appSettings.state
+            .map { it.hideExplicit }
+            .distinctUntilChanged()
+            .drop(1)
+            .onEach { hideExplicit ->
+                if (hideExplicit) {
+                    queueManager.removeExplicitUpcomingTracks()
+                }
+            }
+            .launchIn(scope)
+    }
+
     private fun createPlaybackNotificationChannel() = NotificationChannels.ensureAll(this)
 
     private fun showForegroundPlaybackNotification(track: Track) {
@@ -606,6 +678,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun skipAfterError(failed: Track) {
+        if (!appSettings.state.value.autoSkipOnError) return
         scope.launch {
             delay(3000)
             val s = queueManager.state.value
@@ -721,9 +794,13 @@ class PlaybackService : MediaSessionService() {
             listenedMs = 0L
             playCounted = false
             scope.launch {
-                historyRepository.add(current)
+                if (!appSettings.state.value.pauseListenHistory) {
+                    historyRepository.add(current)
+                    syncRepository.schedulePush()
+                        // Plays are written locally first, so push them (debounced) to the cloud copy too.
+                }
                 // Plays are written locally first, so push them (debounced) to the cloud copy too.
-                syncRepository.schedulePush()
+                    // Plays are written locally first, so push them (debounced) to the cloud copy too.
             }
             startPrefetch(current.videoId)
             startAutoplay(current)
@@ -750,6 +827,7 @@ class PlaybackService : MediaSessionService() {
      * queue already loops by itself.
      */
     private fun startAutoplay(track: Track) {
+        if (!appSettings.state.value.autoplayRelated) return
         val s = queueManager.state.value
         val upcoming = s.queue.size - s.index - 1
         if (upcoming >= 2 || s.repeat != RepeatMode.OFF || s.shuffle) return
@@ -812,7 +890,11 @@ class PlaybackService : MediaSessionService() {
             completed = false,
             skipped = false
         )
-        listeningPersistenceScope.launch { runCatching { listeningStatsRepository.save(record) } }
+        if (!appSettings.state.value.pauseListenHistory) {
+            if (!appSettings.state.value.pauseListenHistory) {
+                listeningPersistenceScope.launch { runCatching { listeningStatsRepository.save(record) } }
+            }
+        }
     }
 
     private fun finishListeningSession(completed: Boolean = false, skipped: Boolean = false) {
@@ -835,7 +917,11 @@ class PlaybackService : MediaSessionService() {
                 completed = meaningfulCompletion,
                 skipped = skipped && !meaningfulCompletion
             )
-            listeningPersistenceScope.launch { runCatching { listeningStatsRepository.save(record) } }
+            if (!appSettings.state.value.pauseListenHistory) {
+            if (!appSettings.state.value.pauseListenHistory) {
+                listeningPersistenceScope.launch { runCatching { listeningStatsRepository.save(record) } }
+            }
+        }
         }
         activeListeningSessionId = null
         activeListeningTrack = null

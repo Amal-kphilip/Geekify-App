@@ -3,7 +3,9 @@ package com.geekify.android.domain.listening
 import com.geekify.android.data.local.ListeningSessionEntity
 import com.geekify.android.data.local.PlayStat
 import com.geekify.android.data.model.Track
+import com.geekify.android.domain.recommend.Recommender
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.ln
 
 /** A radio candidate plus a transparent, user-facing reason for its placement. */
@@ -11,7 +13,8 @@ data class RankedQueueTrack(val track: Track, val reason: String, val score: Dou
 
 /**
  * Re-ranks only the new related-track batch. It never reorders or removes the current/manual queue.
- * Signals are local: meaningful play counts, completed sessions, skips, likes and artist diversity.
+ * Signals are local: meaningful play counts, completed sessions, skips, likes, artist session affinity,
+ * language/vibe continuity, and artist diversity.
  */
 object SmartQueueRanker {
     private const val MIN_MEANINGFUL_MS = 10_000L
@@ -30,9 +33,11 @@ object SmartQueueRanker {
         if (pool.isEmpty()) return emptyList()
 
         val sessionsByTrack = sessions.groupBy { it.videoId }
+        val sessionsByArtist = sessions.groupBy { key(it.artist) }.filterKeys(String::isNotBlank)
         val playsByTrack = playCounts.associate { it.videoId to it }
         val likedIds = likedTracks.map { it.videoId }.toSet()
         val likedArtists = likedTracks.flatMap { artistNames(it) }.map(::key).filter(String::isNotBlank).toSet()
+        val currentLanguage = Recommender.languageOf(current.title, current.artist)
         val artistCounts = mutableMapOf<String, Int>()
         (listOf(current) + upcoming).flatMap(::artistNames).map(::key).filter(String::isNotBlank).forEach { artist ->
             artistCounts[artist] = (artistCounts[artist] ?: 0) + 1
@@ -46,7 +51,8 @@ object SmartQueueRanker {
             val playCount: Int,
             val recentRepeatCount: Int,
             val outcomes: Int,
-            val completionRate: Double
+            val completionRate: Double,
+            val languageMatched: Boolean
         )
         val staticScores = pool.associate { track ->
             val rows = sessionsByTrack[track.videoId].orEmpty()
@@ -67,9 +73,33 @@ object SmartQueueRanker {
             if (playCount > 0) score += minOf(1.5, ln(playCount + 1.0) * 0.65)
             if (outcomes > 0) score += (completionRate - 0.5) * 2.6
             score -= skipRate * 2.8
+
+            // Artist session affinity: reward artists whose songs the listener finishes
+            val artistRows = artistKeys.flatMap { sessionsByArtist[it].orEmpty() }
+            if (artistRows.isNotEmpty() && rows.isEmpty()) {
+                val artistComplete = artistRows.count { it.completed }.toDouble() / artistRows.size
+                val artistSkip = artistRows.count { it.skipped }.toDouble() / artistRows.size
+                score += (artistComplete - 0.5) * 0.75 - artistSkip * 0.85
+            }
+
+            // Language / script session continuity
+            val trackLang = Recommender.languageOf(track.title, track.artist)
+            val languageMatched = currentLanguage != null && trackLang == currentLanguage
+            if (languageMatched) {
+                score += 0.90
+            }
+
+            // Smooth pacing bonus when track lengths are in a similar sonic window
+            val curDur = current.durationSeconds
+            val candDur = track.durationSeconds
+            if (curDur != null && candDur != null && curDur > 0 && candDur > 0) {
+                val diff = abs(curDur - candDur)
+                if (diff <= 45) score += 0.15
+            }
+
             // Reward familiar tracks a little, but avoid recommending something just heard repeatedly.
             score -= minOf(2.0, maxOf(0, recentRepeatCount - 1) * 0.45)
-            track.videoId to Scored(track, score, likedTrack, likedArtist, playCount, recentRepeatCount, outcomes, completionRate)
+            track.videoId to Scored(track, score, likedTrack, likedArtist, playCount, recentRepeatCount, outcomes, completionRate, languageMatched)
         }
         val ranked = mutableListOf<RankedQueueTrack>()
         while (pool.isNotEmpty()) {
@@ -95,6 +125,7 @@ object SmartQueueRanker {
                 scored.likedArtist -> "From an artist you like"
                 scored.playCount >= 3 && scored.recentRepeatCount <= 1 -> "You return to this track"
                 scored.outcomes >= 2 && scored.completionRate >= 0.75 -> "You often finish this track"
+                scored.languageMatched -> "Matches your current $currentLanguage vibe"
                 primaryArtist.isNotBlank() && (artistCounts[primaryArtist] ?: 0) == 0 -> "A different artist to keep the queue varied"
                 else -> "Related to the track you’re playing"
             }

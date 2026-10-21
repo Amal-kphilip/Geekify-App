@@ -2,6 +2,8 @@ package com.geekify.android.audio
 
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -36,6 +38,7 @@ import com.geekify.android.ui.components.LocalBottomInset
 import com.geekify.android.ui.components.PillChip
 import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.theme.*
+import kotlin.math.abs
 
 /** Equalizer, tempo / pitch, silence skipping and volume normalisation. Every control applies instantly. */
 @OptIn(UnstableApi::class)
@@ -82,13 +85,29 @@ fun AudioSettingsScreen(
 @OptIn(UnstableApi::class)
 @Composable
 private fun Content(s: AudioSettings, vm: AudioSettingsViewModel) {
+    val presetNames = buildList {
+        addAll(EqPresets.presets.keys)
+        if (s.preset == EqPresets.CUSTOM || !contains(EqPresets.CUSTOM)) {
+            add(EqPresets.CUSTOM)
+        }
+    }
+
     // ---- Equalizer ----
     Card {
-        SwitchRow("Equalizer", "Shape the sound with five bands", s.eqEnabled, vm::setEqEnabled)
+        SwitchRow(
+            title = "Equalizer",
+            subtitle = if (s.eqEnabled) "Active · ${s.preset} preset" else "Shape the sound with five bands",
+            checked = s.eqEnabled,
+            onChecked = vm::setEqEnabled
+        )
         Spacer(Modifier.height(14.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(EqPresets.presets.keys.toList()) { name ->
-                PillChip(text = name, selected = s.preset == name, onClick = { vm.selectPreset(name) })
+            items(presetNames) { name ->
+                PillChip(
+                    text = name,
+                    selected = s.preset == name,
+                    onClick = { vm.selectPreset(name) }
+                )
             }
         }
         Spacer(Modifier.height(10.dp))
@@ -99,8 +118,17 @@ private fun Content(s: AudioSettings, vm: AudioSettingsViewModel) {
                 value = gain,
                 valueText = "%+.1f dB".format(gain),
                 range = -AudioSettings.MAX_GAIN_DB..AudioSettings.MAX_GAIN_DB,
-                enabled = s.eqEnabled,
+                active = s.eqEnabled,
+                onValueClick = if (abs(gain) > 0.05f) ({ vm.setBand(index, 0f) }) else null,
                 onChange = { vm.setBand(index, it) }
+            )
+        }
+        if (s.bandGainsDb.any { abs(it) > 0.05f }) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Tip: Tap any dB badge to reset that band to 0.0 dB",
+                color = TextMuted,
+                fontSize = 11.sp
             )
         }
     }
@@ -109,9 +137,57 @@ private fun Content(s: AudioSettings, vm: AudioSettingsViewModel) {
 
     // ---- Tempo & pitch ----
     Card {
-        Text("Tempo & pitch", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
-        LabeledSlider("Speed", s.speed, "%.2f×".format(s.speed), AudioSettings.MIN_RATE..AudioSettings.MAX_RATE, true, vm::setSpeed)
-        LabeledSlider("Pitch", s.pitch, "%.2f×".format(s.pitch), AudioSettings.MIN_RATE..AudioSettings.MAX_RATE, true, vm::setPitch)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("Tempo & pitch", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+            if (abs(s.speed - 1f) > 0.01f || abs(s.pitch - 1f) > 0.01f) {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Lime.copy(alpha = 0.14f))
+                        .border(1.dp, Lime.copy(alpha = 0.35f), CircleShape)
+                        .clickable {
+                            vm.setSpeed(1f)
+                            vm.setPitch(1f)
+                        }
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text("Reset 1.0×", color = Lime, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { rate ->
+                val selected = abs(s.speed - rate) < 0.03f
+                PillChip(
+                    text = if (rate == 1.0f) "1×" else "${rate}×",
+                    selected = selected,
+                    onClick = { vm.setSpeed(rate) }
+                )
+            }
+        }
+        LabeledSlider(
+            label = "Speed",
+            value = s.speed,
+            valueText = "%.2f×".format(s.speed),
+            range = AudioSettings.MIN_RATE..AudioSettings.MAX_RATE,
+            active = true,
+            onValueClick = if (abs(s.speed - 1f) > 0.01f) ({ vm.setSpeed(1f) }) else null,
+            onChange = vm::setSpeed
+        )
+        LabeledSlider(
+            label = "Pitch",
+            value = s.pitch,
+            valueText = "%.2f×".format(s.pitch),
+            range = AudioSettings.MIN_RATE..AudioSettings.MAX_RATE,
+            active = true,
+            onValueClick = if (abs(s.pitch - 1f) > 0.01f) ({ vm.setPitch(1f) }) else null,
+            onChange = vm::setPitch
+        )
     }
 
     Spacer(Modifier.height(16.dp))
@@ -177,26 +253,43 @@ private fun LabeledSlider(
     value: Float,
     valueText: String,
     range: ClosedFloatingPointRange<Float>,
-    enabled: Boolean,
+    active: Boolean,
+    onValueClick: (() -> Unit)? = null,
     onChange: (Float) -> Unit
 ) {
     Column(modifier = Modifier.padding(top = 10.dp)) {
-        Row {
-            Text(label, color = if (enabled) TextSecondary else TextMuted, fontSize = 13.sp, modifier = Modifier.weight(1f))
-            Text(valueText, color = if (enabled) Lime else TextMuted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = label,
+                color = if (active) TextSecondary else TextMuted,
+                fontSize = 13.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                text = valueText,
+                color = if (active) Lime else TextSecondary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = if (onValueClick != null) {
+                    Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable(onClick = onValueClick)
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                } else {
+                    Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                }
+            )
         }
+        // Keep sliders always draggable so moving a band automatically enables EQ & switches to Custom.
         Slider(
             value = value.coerceIn(range),
             onValueChange = onChange,
             valueRange = range,
-            enabled = enabled,
+            enabled = true,
             colors = SliderDefaults.colors(
-                thumbColor = Lime,
-                activeTrackColor = Lime,
-                inactiveTrackColor = Color.White.copy(alpha = 0.18f),
-                disabledThumbColor = TextMuted,
-                disabledActiveTrackColor = TextMuted,
-                disabledInactiveTrackColor = Color.White.copy(alpha = 0.08f)
+                thumbColor = if (active) Lime else TextSecondary,
+                activeTrackColor = if (active) Lime else Lime.copy(alpha = 0.45f),
+                inactiveTrackColor = Color.White.copy(alpha = if (active) 0.18f else 0.10f)
             )
         )
     }

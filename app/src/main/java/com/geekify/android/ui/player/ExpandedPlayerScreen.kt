@@ -50,6 +50,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import com.geekify.android.settings.LocalAppSettings
 import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -101,6 +103,12 @@ fun ExpandedPlayerScreen(
     // This handler is declared inside the full-screen destination, giving it precedence
     // over NavHost back handling. One system-back gesture now always collapses the player.
     BackHandler(onBack = onDismiss)
+    val keepScreenOn = LocalAppSettings.current.keepScreenOn
+    val currentView = LocalView.current
+    DisposableEffect(keepScreenOn, currentView) {
+        if (keepScreenOn) currentView.keepScreenOn = true
+        onDispose { if (keepScreenOn) currentView.keepScreenOn = false }
+    }
 
     var isDragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableStateOf(0f) }

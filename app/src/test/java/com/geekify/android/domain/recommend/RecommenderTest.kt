@@ -336,4 +336,26 @@ class RecommenderTest {
         assertTrue(seeds.take(3).contains("v1"))
         assertTrue((result.affinity["artist a"] ?: 0.0) > (result.affinity["artist b"] ?: 0.0))
     }
+
+    @Test
+    fun SessionCompletionBoostsAndSkipsDemoteSeedWeights() {
+        val recent = listOf(
+            Recommender.Signal("completedSong", "Artist A", "Finished Track"),
+            Recommender.Signal("skippedSong", "Artist B", "Skipped Track")
+        )
+        val sessions = listOf(
+            Recommender.SessionSignal("completedSong", "Artist A", "Finished Track", completionRate = 1.0, skipRate = 0.0, recentPlays7d = 4),
+            Recommender.SessionSignal("skippedSong", "Artist B", "Skipped Track", completionRate = 0.0, skipRate = 1.0, recentPlays7d = 0)
+        )
+        val res = Recommender.seedWeights(emptyList(), recent, sessions = sessions)
+        assertTrue((res.weights["completedSong"] ?: 0.0) > (res.weights["skippedSong"] ?: 0.0))
+        assertTrue((res.affinity["artist a"] ?: 0.0) > (res.affinity["artist b"] ?: 0.0))
+    }
+
+    @Test
+    fun TimeOfDayVibeMultiplierBoostsContextualTracks() {
+        assertTrue(Recommender.timeOfDayVibeMultiplier("Late Night Lofi Chill", "Artist", 23) > 1.0)
+        assertTrue(Recommender.timeOfDayVibeMultiplier("Party Dance Remix", "Artist", 19) > 1.0)
+        assertEquals(1.0, Recommender.timeOfDayVibeMultiplier("Standard Track", "Artist", null), 0.001)
+    }
 }

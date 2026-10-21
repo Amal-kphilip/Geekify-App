@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.math.log10
 import kotlin.math.sqrt
 
@@ -28,6 +29,7 @@ class MusicReactiveMeterProcessor : BaseAudioProcessor() {
     @Volatile
     private var enabled = false
 
+    private var encoding = C.ENCODING_INVALID
     private var initialized = false
     private var fastEnvelope = 0f
     private var slowEnvelope = 0f
@@ -38,18 +40,21 @@ class MusicReactiveMeterProcessor : BaseAudioProcessor() {
         if (!enabled) resetMeter()
     }
 
-    override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat =
-        if (inputAudioFormat.encoding == C.ENCODING_PCM_16BIT && inputAudioFormat.channelCount > 0) {
-            inputAudioFormat
-        } else {
-            AudioProcessor.AudioFormat.NOT_SET
+    override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
+        val enc = inputAudioFormat.encoding
+        if ((enc == C.ENCODING_PCM_16BIT || enc == C.ENCODING_PCM_FLOAT) && inputAudioFormat.channelCount > 0) {
+            encoding = enc
+            return inputAudioFormat
         }
+        return AudioProcessor.AudioFormat.NOT_SET
+    }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
         val size = inputBuffer.remaining()
         if (size == 0) return
 
-        val out = replaceOutputBuffer(size)
+        inputBuffer.order(ByteOrder.nativeOrder())
+        val out = replaceOutputBuffer(size).order(ByteOrder.nativeOrder())
 
         if (!enabled) {
             out.put(inputBuffer)
@@ -60,12 +65,22 @@ class MusicReactiveMeterProcessor : BaseAudioProcessor() {
         var sumSquares = 0.0
         var sampleCount = 0
 
-        while (inputBuffer.remaining() >= 2) {
-            val sample = inputBuffer.getShort()
-            val normalized = sample / 32768.0
-            sumSquares += normalized * normalized
-            sampleCount++
-            out.putShort(sample)
+        if (encoding == C.ENCODING_PCM_FLOAT) {
+            while (inputBuffer.remaining() >= 4) {
+                val sample = inputBuffer.getFloat()
+                val normalized = sample.toDouble()
+                sumSquares += normalized * normalized
+                sampleCount++
+                out.putFloat(sample)
+            }
+        } else {
+            while (inputBuffer.remaining() >= 2) {
+                val sample = inputBuffer.getShort()
+                val normalized = sample / 32768.0
+                sumSquares += normalized * normalized
+                sampleCount++
+                out.putShort(sample)
+            }
         }
 
         while (inputBuffer.hasRemaining()) out.put(inputBuffer.get())
@@ -103,6 +118,7 @@ class MusicReactiveMeterProcessor : BaseAudioProcessor() {
     }
 
     override fun onReset() {
+        encoding = C.ENCODING_INVALID
         resetMeter()
     }
 

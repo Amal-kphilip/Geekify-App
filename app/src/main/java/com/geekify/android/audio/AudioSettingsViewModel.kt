@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @OptIn(UnstableApi::class)
 @HiltViewModel
@@ -20,26 +22,39 @@ class AudioSettingsViewModel @Inject constructor(
 
     val state: StateFlow<UiState<AudioSettings>> = controller.settings
         .map<AudioSettings, UiState<AudioSettings>> { UiState.Success(it) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UiState.Loading)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UiState.Success(controller.settings.value))
 
     fun setEqEnabled(enabled: Boolean) = controller.update { it.copy(eqEnabled = enabled) }
 
     fun selectPreset(name: String) {
+        if (name == EqPresets.CUSTOM) {
+            controller.update { it.copy(preset = EqPresets.CUSTOM) }
+            return
+        }
         val gains = EqPresets.presets[name] ?: return
-        controller.update { it.copy(preset = name, bandGainsDb = gains, eqEnabled = true) }
+        controller.update { it.copy(preset = name, bandGainsDb = gains) }
     }
 
-    /** Moving a slider turns the preset into "Custom" and switches the equalizer on. */
+    /** Moving a slider switches the preset to "Custom" while keeping the user's current Equalizer on/off state. */
     fun setBand(index: Int, gainDb: Float) = controller.update { s ->
+        // Snap near-zero to 0.0 dB and round to 0.5 dB steps for clean control.
+        val snapped = if (abs(gainDb) < 0.25f) 0f else (gainDb * 2f).roundToInt() / 2f
         s.copy(
             preset = EqPresets.CUSTOM,
-            eqEnabled = true,
-            bandGainsDb = s.bandGainsDb.toMutableList().also { if (index in it.indices) it[index] = gainDb }
+            bandGainsDb = s.bandGainsDb.toMutableList().also { if (index in it.indices) it[index] = snapped }
         )
     }
 
-    fun setSpeed(speed: Float) = controller.update { it.copy(speed = speed) }
-    fun setPitch(pitch: Float) = controller.update { it.copy(pitch = pitch) }
+    fun setSpeed(speed: Float) = controller.update {
+        val snapped = if (abs(speed - 1f) < 0.02f) 1f else (speed * 20f).roundToInt() / 20f
+        it.copy(speed = snapped)
+    }
+
+    fun setPitch(pitch: Float) = controller.update {
+        val snapped = if (abs(pitch - 1f) < 0.02f) 1f else (pitch * 20f).roundToInt() / 20f
+        it.copy(pitch = snapped)
+    }
+
     fun setSkipSilence(enabled: Boolean) = controller.update { it.copy(skipSilence = enabled) }
     fun setNormalize(enabled: Boolean) = controller.update { it.copy(normalize = enabled) }
     fun resetAll() = controller.update { AudioSettings() }

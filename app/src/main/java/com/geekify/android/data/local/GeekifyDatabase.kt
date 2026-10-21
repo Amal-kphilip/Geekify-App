@@ -7,6 +7,7 @@ import com.geekify.android.data.model.ArtistRef
 import com.geekify.android.data.model.Thumbnail
 import com.geekify.android.data.model.Track
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -163,6 +164,7 @@ fun HistoryTrackEntity.toTrack() = Track(videoId, title, artist, artists, album,
 fun PlaylistTrackEntity.toTrack() = Track(videoId, title, artist, artists, album, albumId, thumbnails, duration, durationSeconds, explicit, type)
 fun Track.toPlaylistTrack(playlistId: String, position: Int) = PlaylistTrackEntity(playlistId, position, videoId, title, artist, artists, album, albumId, thumbnails, duration, durationSeconds, explicit, type)
 
+@Serializable
 data class LocalPlaylist(val id: String, val name: String, val createdAt: Long, val tracks: List<Track>)
 
 // ---- DAOs ----
@@ -232,6 +234,9 @@ interface ListeningSessionDao {
 
     @Query("DELETE FROM listening_sessions WHERE startedAt < :before")
     suspend fun pruneBefore(before: Long)
+
+    @Query("DELETE FROM listening_sessions")
+    suspend fun clear()
 }
 
 @Dao
@@ -252,6 +257,7 @@ interface CatalogDao {
 interface ShelfCacheDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun put(e: CachedShelfEntity)
     @Query("SELECT * FROM cached_shelves WHERE cacheKey = :key") suspend fun get(key: String): CachedShelfEntity?
+    @Query("DELETE FROM cached_shelves") suspend fun clear()
 }
 
 @Dao

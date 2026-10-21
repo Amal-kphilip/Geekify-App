@@ -3,6 +3,8 @@ package com.geekify.android.player.extraction
 import android.content.Context
 import android.net.ConnectivityManager
 import com.geekify.android.player.potoken.PoTokenGenerator
+import com.geekify.android.settings.AppSettingsRepository
+import com.geekify.android.settings.AudioQualityPreference
 import com.geekify.android.innertube.YouTube
 import com.geekify.android.innertube.models.YouTubeLocale
 import com.metrolist.innertubex.InnerTubeLogLevel
@@ -37,7 +39,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class InnerTubePlaybackExtractor @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val appSettings: AppSettingsRepository
 ) {
     data class PlaybackStream(
         val url: String,
@@ -111,6 +114,13 @@ class InnerTubePlaybackExtractor @Inject constructor(
     }
 
     suspend fun resolve(videoId: String): PlaybackStream {
+        val currentSettings = appSettings.state.value
+        YouTube.locale = YouTubeLocale(hl = currentSettings.contentLanguage, gl = currentSettings.contentCountry)
+        val effectiveAudioQuality = when (currentSettings.audioQuality) {
+            AudioQualityPreference.HIGH -> InnerTubeXAudioQuality.HIGH
+            AudioQualityPreference.LOW -> InnerTubeXAudioQuality.LOW
+            AudioQualityPreference.AUTO -> if (connectivityManager.isActiveNetworkMetered) InnerTubeXAudioQuality.LOW else InnerTubeXAudioQuality.AUTO
+        }
         val stream = try {
             requireNotNull(
                 bundle().extractor.extract(
@@ -121,12 +131,14 @@ class InnerTubePlaybackExtractor @Inject constructor(
                         allowBoundedRange = true
                     ),
                     excludedClients = failedStreamClients(videoId),
-                    audioQuality = if (connectivityManager.isActiveNetworkMetered) {
-                        InnerTubeXAudioQuality.LOW
-                    } else {
-                        InnerTubeXAudioQuality.AUTO
-                    },
+                    audioQuality = effectiveAudioQuality,
                     clientPlaybackNonce = generateClientPlaybackNonce()
+
+
+
+
+
+
                 )
             ) { "InnerTubeX returned no playable stream" }
         } catch (error: CancellationException) {

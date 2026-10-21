@@ -31,32 +31,42 @@ class NotificationWorker(context: Context, params: WorkerParameters) : Coroutine
         private const val UNIQUE_NAME = "geekify_notification_check"
 
         private const val KICK_NAME = "geekify_notification_kick"
+        private const val ENGAGEMENT_FOLLOWUP_NAME = "geekify_engagement_followup"
 
         private val networkConstraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
 
         fun schedule(context: Context) {
-            val request = PeriodicWorkRequestBuilder<NotificationWorker>(12, TimeUnit.HOURS)
-                .setConstraints(networkConstraints)
+            val request = PeriodicWorkRequestBuilder<NotificationWorker>(6, TimeUnit.HOURS)
                 .build()
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                 UNIQUE_NAME,
-                ExistingPeriodicWorkPolicy.UPDATE,
+                ExistingPeriodicWorkPolicy.KEEP,
                 request
             )
         }
 
-        /** Starts a small, persisted notification check after the app leaves the foreground. */
+        /** Starts a small, persisted notification check after the app leaves the foreground, plus a scheduled follow-up after the quiet window. */
         fun kick(context: Context) {
-            val request = OneTimeWorkRequestBuilder<NotificationWorker>()
-                .setConstraints(networkConstraints)
+            val wm = WorkManager.getInstance(context)
+            val immediateRequest = OneTimeWorkRequestBuilder<NotificationWorker>()
                 .setInitialDelay(3, TimeUnit.SECONDS)
                 .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(
+            wm.enqueueUniqueWork(
                 KICK_NAME,
                 ExistingWorkPolicy.REPLACE,
-                request
+                immediateRequest
+            )
+
+            val followupDelayMs = NotificationPolicy.ENGAGEMENT_QUIET_AFTER_OPEN_MS + 60_000L
+            val followupRequest = OneTimeWorkRequestBuilder<NotificationWorker>()
+                .setInitialDelay(followupDelayMs, TimeUnit.MILLISECONDS)
+                .build()
+            wm.enqueueUniqueWork(
+                ENGAGEMENT_FOLLOWUP_NAME,
+                ExistingWorkPolicy.REPLACE,
+                followupRequest
             )
         }
     }

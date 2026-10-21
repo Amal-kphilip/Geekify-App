@@ -87,7 +87,7 @@ fun HomeScreen(
     val mixCards = state.mixes.map { mix ->
         val lead = mix.tracks.firstOrNull()
         DiscoverItem(
-            key = "mix:" + mix.id,
+            key = "mix:${mix.id}:${mix.title}",
             title = mix.title,
             description = mix.subtitle,
             art = lead?.thumbnails?.bestArtworkUrl(720),
@@ -109,7 +109,7 @@ fun HomeScreen(
             lead = null,
             onPlay = { onCardClick(item.value) }
         )
-    }).take(6)
+    }).take(10)
 
     val discoverListState = rememberLazyListState()
     LaunchedEffect(discover.isNotEmpty()) {

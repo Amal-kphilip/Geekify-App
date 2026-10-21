@@ -1,5 +1,6 @@
 package com.geekify.android.data.source.innertube
 
+import com.geekify.android.innertube.YouTube
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -81,8 +82,8 @@ class InnerTubeClient @Inject constructor(
                     put("clientName", "WEB_EMBEDDED_PLAYER")
                     put("clientVersion", WEB_EMBEDDED_VERSION)
                     put("userAgent", WEB_EMBEDDED_USER_AGENT)
-                    put("hl", "en")
-                    put("gl", "IN")
+                    put("hl", YouTube.locale.hl)
+                    put("gl", YouTube.locale.gl)
                     visitorData?.let { put("visitorData", it) }
                 })
                 put("thirdParty", buildJsonObject {
@@ -136,8 +137,8 @@ class InnerTubeClient @Inject constructor(
                     put("osName", "visionOS")
                     put("osVersion", "26.5.23O471")
                     put("userAgent", PLAYER_USER_AGENT)
-                    put("hl", "en")
-                    put("gl", "IN")
+                    put("hl", YouTube.locale.hl)
+                    put("gl", YouTube.locale.gl)
                     visitorData?.let { put("visitorData", it) }
                 })
             })
@@ -193,7 +194,7 @@ class InnerTubeClient @Inject constructor(
                     put("context", buildJsonObject {
                         put("client", buildJsonObject {
                             put("clientName", "WEB_REMIX"); put("clientVersion", c.version)
-                            put("hl", "en"); put("gl", "IN")
+                            put("hl", YouTube.locale.hl); put("gl", YouTube.locale.gl)
                         })
                     })
                     payload.forEach { (k, v) -> put(k, v) }

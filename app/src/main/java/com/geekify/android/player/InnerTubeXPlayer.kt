@@ -17,6 +17,7 @@ interface InnerTubeXPlayer {
     suspend fun resolve(videoId: String, forceRefresh: Boolean = false): StreamResolver.ResolvedStream
     fun prefetch(videoIds: List<String>)
     fun invalidate(videoId: String)
+    fun clearCache() {}
 
     /** The stream last returned for [videoId] was rejected by the server (for example HTTP 403). */
     fun markFailed(videoId: String)

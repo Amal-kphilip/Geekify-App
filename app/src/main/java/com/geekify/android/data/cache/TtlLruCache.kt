@@ -17,4 +17,5 @@ class TtlLruCache @Inject constructor() {
     }
     @Synchronized fun put(key: String, value: Any, ttlMillis: Long) { entries[key] = Entry(value, System.currentTimeMillis() + ttlMillis) }
     @Synchronized fun remove(key: String) { entries.remove(key) }
+    @Synchronized fun clear() { entries.clear() }
 }

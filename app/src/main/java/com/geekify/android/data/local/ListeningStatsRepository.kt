@@ -17,4 +17,6 @@ class ListeningStatsRepository @Inject constructor(
         dao.latest(limit.coerceIn(1, 20_000))
 
     suspend fun pruneOlderThan(timestamp: Long) = dao.pruneBefore(timestamp)
+
+    suspend fun clear() = dao.clear()
 }

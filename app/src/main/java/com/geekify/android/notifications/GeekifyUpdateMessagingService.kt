@@ -23,7 +23,24 @@ class GeekifyUpdateMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         val data = message.data
-        if (data[KEY_TYPE] != TYPE_APP_UPDATE) return
+        val type = data[KEY_TYPE]
+        if (type == TYPE_ENGAGEMENT || type == TYPE_TIP || (type == null && message.notification != null)) {
+            val title = data[KEY_TITLE] ?: message.notification?.title ?: "Geekify"
+            val body = data[KEY_BODY] ?: message.notification?.body ?: return
+            val route = data[KEY_ROUTE]
+            val isEngagement = type != TYPE_TIP
+            try {
+                runBlocking(Dispatchers.IO) {
+                    coordinator.handlePushedEngagementOrTip(title, body, route, isEngagement)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.e(TAG, "Failed to handle engagement/tip push", error)
+            }
+            return
+        }
+        if (type != TYPE_APP_UPDATE) return
 
         val versionName = data[KEY_VERSION]
             ?.trim()
@@ -63,6 +80,11 @@ class GeekifyUpdateMessagingService : FirebaseMessagingService() {
         const val KEY_VERSION = "version"
         const val KEY_VERSION_CODE = "version_code"
         const val TYPE_APP_UPDATE = "app_update"
+        const val TYPE_ENGAGEMENT = "engagement"
+        const val TYPE_TIP = "tip"
+        const val KEY_TITLE = "title"
+        const val KEY_BODY = "body"
+        const val KEY_ROUTE = "route"
         const val RELEASES_URL = "https://github.com/Amal-kphilip/Geekify-App/releases"
     }
 }

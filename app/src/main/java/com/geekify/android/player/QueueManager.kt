@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.geekify.android.data.model.Track
+import com.geekify.android.settings.AppSettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -105,13 +106,19 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
     private fun load() {
         scope.launch {
             val prefs = dataStore.data.first()
-            val queueJson = prefs[KEY_QUEUE] ?: return@launch
+            val persistentQueue = prefs[AppSettingsRepository.KEY_PERSISTENT_QUEUE] ?: true
+            val rememberShuffleRepeat = prefs[AppSettingsRepository.KEY_REMEMBER_SHUFFLE_REPEAT] ?: true
+            val vol = prefs[KEY_VOLUME] ?: 0.85f
+            val shuf = if (rememberShuffleRepeat) prefs[KEY_SHUFFLE] == "true" else false
+            val rep = if (rememberShuffleRepeat) prefs[KEY_REPEAT]?.let { runCatching { RepeatMode.valueOf(it) }.getOrNull() } ?: RepeatMode.OFF else RepeatMode.OFF
+            val queueJson = prefs[KEY_QUEUE]
+            if (!persistentQueue || queueJson == null) {
+                _state.value = QueueState(shuffle = shuf, repeat = rep, volume = vol)
+                return@launch
+            }
             try {
                 val queue = json.decodeFromString<List<Track>>(queueJson)
                 val index = prefs[KEY_INDEX] ?: -1
-                val shuffle = prefs[KEY_SHUFFLE] == "true"
-                val repeat = prefs[KEY_REPEAT]?.let { runCatching { RepeatMode.valueOf(it) }.getOrNull() } ?: RepeatMode.OFF
-                val volume = prefs[KEY_VOLUME] ?: 0.85f
                 val progress = (prefs[KEY_PROGRESS] ?: 0L).coerceAtLeast(0L)
                 val reasons = prefs[KEY_RECOMMENDATION_REASONS]?.let {
                     runCatching { json.decodeFromString<Map<String, String>>(it) }.getOrNull()
@@ -125,9 +132,9 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
                     isBuffering = false,
                     progressMs = progress,
                     durationMs = 0L,
-                    shuffle = shuffle,
-                    repeat = repeat,
-                    volume = volume,
+                    shuffle = shuf,
+                    repeat = rep,
+                    volume = vol,
                     recommendationReasons = reasons.filterKeys { id -> queue.any { it.videoId == id } }
                 )
             } catch (_: Exception) {}
@@ -332,6 +339,43 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
         }
     }
 
+    /** Removes upcoming auto-recommended tracks when Endless Autoplay is switched off. */
+    fun removeAutoplayTracks() {
+        val s = _state.value
+        if (s.recommendationReasons.isEmpty() || s.queue.isEmpty()) return
+        val autoIds = s.recommendationReasons.keys
+        val filtered = s.queue.filterIndexed { idx, track ->
+            idx <= s.index || track.videoId !in autoIds
+        }
+        if (filtered.size != s.queue.size) {
+            val remainingIds = filtered.map { it.videoId }.toSet()
+            update(
+                s.copy(
+                    queue = filtered,
+                    recommendationReasons = s.recommendationReasons.filterKeys { it in remainingIds }
+                )
+            )
+        }
+    }
+
+    /** Removes upcoming explicit tracks when Hide Explicit Content is enabled. */
+    fun removeExplicitUpcomingTracks() {
+        val s = _state.value
+        if (s.queue.isEmpty()) return
+        val filtered = s.queue.filterIndexed { idx, track ->
+            idx <= s.index || !track.explicit
+        }
+        if (filtered.size != s.queue.size) {
+            val remainingIds = filtered.map { it.videoId }.toSet()
+            update(
+                s.copy(
+                    queue = filtered,
+                    recommendationReasons = s.recommendationReasons.filterKeys { it in remainingIds }
+                )
+            )
+        }
+    }
+
     private fun update(newState: QueueState) {
         _state.value = newState
         persist(newState)
@@ -340,19 +384,40 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
     /** Saves just the playback position (called every few seconds while playing and on pause). */
     fun persistProgress() {
         val progress = _state.value.progressMs
-        scope.launch { dataStore.edit { it[KEY_PROGRESS] = progress } }
+        scope.launch {
+            dataStore.edit { prefs ->
+                val persistentQueue = prefs[AppSettingsRepository.KEY_PERSISTENT_QUEUE] ?: true
+                if (persistentQueue) {
+                    prefs[KEY_PROGRESS] = progress
+                }
+            }
+        }
     }
 
     private fun persist(s: QueueState) {
         scope.launch {
             dataStore.edit { prefs ->
-                prefs[KEY_PROGRESS] = s.progressMs
-                prefs[KEY_QUEUE] = json.encodeToString(s.queue)
-                prefs[KEY_INDEX] = s.index
-                prefs[KEY_SHUFFLE] = s.shuffle.toString()
-                prefs[KEY_REPEAT] = s.repeat.name
+                val persistentQueue = prefs[AppSettingsRepository.KEY_PERSISTENT_QUEUE] ?: true
+                val rememberShuffleRepeat = prefs[AppSettingsRepository.KEY_REMEMBER_SHUFFLE_REPEAT] ?: true
                 prefs[KEY_VOLUME] = s.volume
-                prefs[KEY_RECOMMENDATION_REASONS] = json.encodeToString(s.recommendationReasons)
+                if (persistentQueue) {
+                    prefs[KEY_PROGRESS] = s.progressMs
+                    prefs[KEY_QUEUE] = json.encodeToString(s.queue)
+                    prefs[KEY_INDEX] = s.index
+                    prefs[KEY_RECOMMENDATION_REASONS] = json.encodeToString(s.recommendationReasons)
+                } else {
+                    prefs.remove(KEY_PROGRESS)
+                    prefs.remove(KEY_QUEUE)
+                    prefs.remove(KEY_INDEX)
+                    prefs.remove(KEY_RECOMMENDATION_REASONS)
+                }
+                if (rememberShuffleRepeat) {
+                    prefs[KEY_SHUFFLE] = s.shuffle.toString()
+                    prefs[KEY_REPEAT] = s.repeat.name
+                } else {
+                    prefs.remove(KEY_SHUFFLE)
+                    prefs.remove(KEY_REPEAT)
+                }
             }
         }
     }
