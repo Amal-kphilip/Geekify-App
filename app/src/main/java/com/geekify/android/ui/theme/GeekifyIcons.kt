@@ -807,4 +807,17 @@ object GeekifyIcons {
             )
         )
     }
+
+    val Speed: ImageVector by lazy {
+        strokedVector(
+            name = "Speed",
+            paths = listOf(
+                "m12 14 4-4",
+                "M3.34 19a10 10 0 1 1 17.32 0"
+            )
+        )
+    }
+
+    val Tune: ImageVector get() = Sliders
+    val PlayArrow: ImageVector get() = Play
 }

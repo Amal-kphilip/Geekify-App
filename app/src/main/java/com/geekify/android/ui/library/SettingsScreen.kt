@@ -8,9 +8,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -18,11 +21,15 @@ import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -30,14 +37,18 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,13 +61,7 @@ import com.geekify.android.notifications.NotificationSettingsViewModel
 import com.geekify.android.settings.AppSettingsState
 import com.geekify.android.settings.AudioQualityPreference
 import com.geekify.android.settings.SettingsViewModel
-import com.geekify.android.ui.components.AuroraBackground
-import com.geekify.android.ui.components.CircleIconButton
-import com.geekify.android.ui.components.DialogButtonStyle
-import com.geekify.android.ui.components.DialogPillButton
-import com.geekify.android.ui.components.GeekifyDialog
-import com.geekify.android.ui.components.LocalBottomInset
-import com.geekify.android.ui.components.bouncyClickable
+import com.geekify.android.ui.components.*
 import com.geekify.android.ui.glass.GlassStyle
 import com.geekify.android.ui.glass.LocalGlassBackdrop
 import com.geekify.android.ui.glass.glassBackdropSource
@@ -71,29 +76,36 @@ import kotlin.math.roundToInt
 
 private enum class SettingsSubPage(val title: String) {
     ROOT("Settings"),
-    APPEARANCE("Appearance & Glass"),
-    PLAYER("Player & Audio"),
-    CONTENT("Content & Region"),
+    APPEARANCE("Appearance"),
+    PLAYER("Player & audio"),
+    CONTENT("Content & region"),
     NOTIFICATIONS("Notifications"),
-    PRIVACY("Privacy & Security"),
-    STORAGE("Storage & Backup"),
-    UPDATES("Software Update"),
+    PRIVACY("Privacy & security"),
+    STORAGE("Storage & backup"),
+    UPDATES("Software update"),
     ABOUT("About")
 }
 
-// Vibrant icon tile palette
-private val TilePink = Color(0xFFFF2D55)
-private val TileRed = Color(0xFFFF3B30)
-private val TileOrange = Color(0xFFFF9500)
-private val TileAmber = Color(0xFFFFCC00)
-private val TileGreen = Color(0xFF34C759)
-private val TileMint = Color(0xFF00C7BE)
-private val TileTeal = Color(0xFF30B0C7)
-private val TileCyan = Color(0xFF32ADE6)
-private val TileBlue = Color(0xFF007AFF)
-private val TileIndigo = Color(0xFF5856D6)
-private val TilePurple = Color(0xFFAF52DE)
-private val TileGray = Color(0xFF8E8E93)
+private data class SettingsRootItem(
+    val key: String,
+    val title: String,
+    val subtitle: String? = null,
+    val value: String? = null,
+    val icon: ImageVector,
+    val tint: Color,
+    val subPage: SettingsSubPage? = null,
+    val onClick: () -> Unit
+)
+
+private data class SearchableSettingEntry(
+    val title: String,
+    val subtitle: String,
+    val category: String,
+    val keywords: List<String>,
+    val icon: ImageVector,
+    val tint: Color,
+    val onSelect: () -> Unit
+)
 
 private val COUNTRIES = listOf(
     "IN" to "India",
@@ -146,6 +158,7 @@ fun SettingsScreen(
     val bottomInset = LocalBottomInset.current
 
     var currentPage by rememberSaveable { mutableStateOf(SettingsSubPage.ROOT) }
+    var splitActivePage by rememberSaveable { mutableStateOf(SettingsSubPage.APPEARANCE) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     val rootScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
 
@@ -165,8 +178,310 @@ fun SettingsScreen(
         if (uri != null) settingsViewModel.importBackup(uri)
     }
 
-    AuroraBackground {
-        Box(modifier = Modifier.fillMaxSize()) {
+    val countryName = COUNTRIES.firstOrNull { it.first == state.contentCountry }?.second ?: state.contentCountry
+
+    val openSubPage: (SettingsSubPage, Boolean) -> Unit = { target, isSplit ->
+        if (isSplit) {
+            splitActivePage = target
+        } else {
+            currentPage = target
+        }
+    }
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(IosPalette.systemGroupedBackground)
+    ) {
+        val isSplitLayout = maxWidth >= 840.dp
+
+        val rootGroups = remember(
+            state,
+            storageStats.totalBytes,
+            countryName,
+            isSplitLayout
+        ) {
+            listOf(
+                listOf(
+                    SettingsRootItem(
+                        key = "listen_together",
+                        title = "Listen Together",
+                        subtitle = "Host or join synchronized listening rooms",
+                        icon = GeekifyIcons.Groups,
+                        tint = IosPalette.systemCyan,
+                        onClick = onListenTogetherClick
+                    ),
+                    SettingsRootItem(
+                        key = "listening_stats",
+                        title = "Listening Statistics",
+                        subtitle = "Top songs, artists, and listening streaks",
+                        icon = GeekifyIcons.Insights,
+                        tint = IosPalette.systemPurple,
+                        onClick = onListeningStatsClick
+                    ),
+                    SettingsRootItem(
+                        key = "recents",
+                        title = "Recents & History",
+                        subtitle = "Recently played tracks across sessions",
+                        icon = GeekifyIcons.History,
+                        tint = IosPalette.systemOrange,
+                        onClick = onRecentsClick
+                    )
+                ),
+                listOf(
+                    SettingsRootItem(
+                        key = "appearance",
+                        title = "Appearance & Liquid Glass",
+                        value = if (state.glass.enabled) "${state.glass.blurDp.roundToInt()} dp" else "Off",
+                        icon = GeekifyIcons.AutoAwesome,
+                        tint = IosPalette.systemCyan,
+                        subPage = SettingsSubPage.APPEARANCE,
+                        onClick = { openSubPage(SettingsSubPage.APPEARANCE, isSplitLayout) }
+                    ),
+                    SettingsRootItem(
+                        key = "app_icon",
+                        title = "App Icon",
+                        icon = GeekifyIcons.Apps,
+                        tint = IosPalette.systemBlue,
+                        onClick = onAppIconClick
+                    ),
+                    SettingsRootItem(
+                        key = "player",
+                        title = "Player & Audio",
+                        value = state.audioQuality.label,
+                        icon = GeekifyIcons.PlayCircleFilled,
+                        tint = IosPalette.systemRed,
+                        subPage = SettingsSubPage.PLAYER,
+                        onClick = { openSubPage(SettingsSubPage.PLAYER, isSplitLayout) }
+                    ),
+                    SettingsRootItem(
+                        key = "equalizer",
+                        title = "Equalizer & Effects",
+                        icon = GeekifyIcons.GraphicEq,
+                        tint = IosPalette.systemGreen,
+                        onClick = onAudioClick
+                    )
+                ),
+                listOf(
+                    SettingsRootItem(
+                        key = "content",
+                        title = "Content & Region",
+                        value = countryName,
+                        icon = GeekifyIcons.Language,
+                        tint = IosPalette.systemBlue,
+                        subPage = SettingsSubPage.CONTENT,
+                        onClick = { openSubPage(SettingsSubPage.CONTENT, isSplitLayout) }
+                    ),
+                    SettingsRootItem(
+                        key = "notifications",
+                        title = "Notifications",
+                        icon = GeekifyIcons.Notifications,
+                        tint = IosPalette.systemYellow,
+                        subPage = SettingsSubPage.NOTIFICATIONS,
+                        onClick = { openSubPage(SettingsSubPage.NOTIFICATIONS, isSplitLayout) }
+                    )
+                ),
+                listOf(
+                    SettingsRootItem(
+                        key = "privacy",
+                        title = "Privacy & Security",
+                        value = if (state.pauseListenHistory) "Paused" else null,
+                        icon = GeekifyIcons.Shield,
+                        tint = IosPalette.systemIndigo,
+                        subPage = SettingsSubPage.PRIVACY,
+                        onClick = { openSubPage(SettingsSubPage.PRIVACY, isSplitLayout) }
+                    ),
+                    SettingsRootItem(
+                        key = "storage",
+                        title = "Storage & Backup",
+                        value = formatBytes(storageStats.totalBytes),
+                        icon = GeekifyIcons.Storage,
+                        tint = IosPalette.systemGreen,
+                        subPage = SettingsSubPage.STORAGE,
+                        onClick = { openSubPage(SettingsSubPage.STORAGE, isSplitLayout) }
+                    )
+                ),
+                listOf(
+                    SettingsRootItem(
+                        key = "updates",
+                        title = "Software Update",
+                        value = "v${BuildConfig.VERSION_NAME}",
+                        icon = GeekifyIcons.SystemUpdate,
+                        tint = IosPalette.systemTeal,
+                        subPage = SettingsSubPage.UPDATES,
+                        onClick = { openSubPage(SettingsSubPage.UPDATES, isSplitLayout) }
+                    ),
+                    SettingsRootItem(
+                        key = "health",
+                        title = "Extractor Health",
+                        icon = GeekifyIcons.MonitorHeart,
+                        tint = IosPalette.systemMint,
+                        onClick = onHealthClick
+                    ),
+                    SettingsRootItem(
+                        key = "about",
+                        title = "About",
+                        icon = GeekifyIcons.Info,
+                        tint = IosPalette.systemGray,
+                        subPage = SettingsSubPage.ABOUT,
+                        onClick = { openSubPage(SettingsSubPage.ABOUT, isSplitLayout) }
+                    )
+                )
+            )
+        }
+
+        val searchRegistry = remember(isSplitLayout) {
+            buildSearchRegistry(
+                openPage = { openSubPage(it, isSplitLayout) },
+                onProfileClick = onProfileClick,
+                onListenTogetherClick = onListenTogetherClick,
+                onListeningStatsClick = onListeningStatsClick,
+                onRecentsClick = onRecentsClick,
+                onAudioClick = onAudioClick,
+                onAppIconClick = onAppIconClick,
+                onHealthClick = onHealthClick
+            )
+        }
+
+        @Composable
+        fun RenderSubPageContent(page: SettingsSubPage) {
+            // Optional status toast banner
+            AnimatedVisibility(visible = statusMessage != null) {
+                statusMessage?.let { msg ->
+                    IosStatusBanner(
+                        message = msg,
+                        onDismiss = settingsViewModel::clearStatusMessage
+                    )
+                }
+            }
+
+            when (page) {
+                SettingsSubPage.APPEARANCE -> AppearanceGlassSubPage(
+                    state = state,
+                    viewModel = settingsViewModel,
+                    onAppIconClick = onAppIconClick
+                )
+
+                SettingsSubPage.PLAYER -> PlayerAudioSubPage(
+                    state = state,
+                    viewModel = settingsViewModel,
+                    onAudioClick = onAudioClick
+                )
+
+                SettingsSubPage.CONTENT -> ContentRegionSubPage(
+                    state = state,
+                    viewModel = settingsViewModel
+                )
+
+                SettingsSubPage.NOTIFICATIONS -> NotificationsSubPage(
+                    updates = notif.updates,
+                    tips = notif.tips,
+                    engagement = notif.engagement,
+                    onUpdatesChange = notificationSettings::setUpdates,
+                    onTipsChange = notificationSettings::setTips,
+                    onEngagementChange = notificationSettings::setEngagement
+                )
+
+                SettingsSubPage.PRIVACY -> PrivacySubPage(
+                    state = state,
+                    viewModel = settingsViewModel
+                )
+
+                SettingsSubPage.STORAGE -> StorageBackupSubPage(
+                    stats = storageStats,
+                    viewModel = settingsViewModel,
+                    onExportBackup = {
+                        val dateStr = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())
+                        createBackupLauncher.launch("geekify_backup_$dateStr.json")
+                    },
+                    onImportBackup = {
+                        openBackupLauncher.launch(arrayOf("application/json", "*/*"))
+                    }
+                )
+
+                SettingsSubPage.UPDATES -> UpdatesSubPage(
+                    updateCacheBytes = storageStats.updateCacheBytes,
+                    onCheckUpdatesClick = onCheckUpdatesClick,
+                    onClearUpdateCache = settingsViewModel::clearUpdateCache
+                )
+
+                SettingsSubPage.ABOUT -> AboutSubPage()
+                SettingsSubPage.ROOT -> Unit
+            }
+        }
+
+        if (isSplitLayout) {
+            // Cupertino Split-View Master-Detail Layout for Tablets / Wide Screens
+            Row(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .width(380.dp)
+                        .fillMaxHeight()
+                ) {
+                    IosSettingsPageScaffold(
+                        title = "Settings",
+                        scrollState = rootScrollState,
+                        onBack = onBack,
+                        maxContentWidth = 380.dp,
+                        bottomPadding = bottomInset + 104.dp,
+                        floatingBottomBar = {
+                            DockedSearchPill(
+                                query = searchQuery,
+                                onQueryChange = { searchQuery = it },
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = bottomInset + 16.dp)
+                            )
+                        }
+                    ) {
+                        RootListBody(
+                            searchQuery = searchQuery,
+                            currentUser = currentUser,
+                            rootGroups = rootGroups,
+                            searchRegistry = searchRegistry,
+                            selectedSubPage = splitActivePage,
+                            onProfileClick = onProfileClick,
+                            onClearSearch = { searchQuery = "" }
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .width(0.5.dp)
+                        .fillMaxHeight()
+                        .background(IosPalette.separator)
+                )
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                ) {
+                    Crossfade(
+                        targetState = splitActivePage,
+                        animationSpec = tween(200),
+                        label = "splitSettingsDetail"
+                    ) { detailPage ->
+                        val detailScroll = rememberSaveable(
+                            "split_${detailPage.name}",
+                            saver = ScrollState.Saver
+                        ) { ScrollState(0) }
+                        IosSettingsPageScaffold(
+                            title = detailPage.title,
+                            scrollState = detailScroll,
+                            onBack = onBack,
+                            showBackButton = false,
+                            maxContentWidth = 680.dp,
+                            bottomPadding = bottomInset + 40.dp
+                        ) {
+                            RenderSubPageContent(detailPage)
+                        }
+                    }
+                }
+            }
+        } else {
+            // Single-pane push/pop navigation with preserved scroll state
             AnimatedContent(
                 targetState = currentPage,
                 transitionSpec = {
@@ -180,140 +495,51 @@ fun SettingsScreen(
                 },
                 label = "settingsSubPage"
             ) { page ->
-                val pageScroll = if (page == SettingsSubPage.ROOT) {
-                    rootScrollState
-                } else {
-                    rememberSaveable(page.name, saver = ScrollState.Saver) { ScrollState(0) }
-                }
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .statusBarsPadding()
-                        .padding(horizontal = 20.dp)
-                        .verticalScroll(pageScroll)
-                ) {
-                    // Top Bar
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 14.dp, bottom = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CircleIconButton(
-                            icon = GeekifyIcons.ArrowBack,
-                            contentDescription = "Back",
-                            onClick = {
-                                if (page == SettingsSubPage.ROOT) onBack()
-                                else currentPage = SettingsSubPage.ROOT
-                            },
-                            size = 48.dp
-                        )
-                        Text(
-                            text = page.title,
-                            color = TextPrimary,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(Modifier.size(48.dp))
-                    }
-
-                    // Toast / Status Banner
-                    AnimatedVisibility(visible = statusMessage != null) {
-                        statusMessage?.let { msg ->
-                            Surface(
-                                color = Lime.copy(alpha = 0.16f),
-                                shape = RoundedCornerShape(18.dp),
+                if (page == SettingsSubPage.ROOT) {
+                    IosSettingsPageScaffold(
+                        title = "Settings",
+                        scrollState = rootScrollState,
+                        onBack = onBack,
+                        bottomPadding = bottomInset + 108.dp,
+                        floatingBottomBar = {
+                            DockedSearchPill(
+                                query = searchQuery,
+                                onQueryChange = { searchQuery = it },
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 12.dp)
-                                    .border(1.dp, Lime.copy(alpha = 0.45f), RoundedCornerShape(18.dp))
-                                    .clickable { settingsViewModel.clearStatusMessage() }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(GeekifyIcons.CheckCircle, contentDescription = null, tint = Lime, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(10.dp))
-                                    Text(msg, color = TextPrimary, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
-                                    Icon(GeekifyIcons.Close, contentDescription = "Dismiss", tint = TextSecondary, modifier = Modifier.size(16.dp))
-                                }
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = bottomInset + 16.dp)
+                            )
+                        }
+                    ) {
+                        AnimatedVisibility(visible = statusMessage != null) {
+                            statusMessage?.let { msg ->
+                                IosStatusBanner(
+                                    message = msg,
+                                    onDismiss = settingsViewModel::clearStatusMessage
+                                )
                             }
                         }
-                    }
 
-                    when (page) {
-                        SettingsSubPage.ROOT -> RootSettingsContent(
+                        RootListBody(
                             searchQuery = searchQuery,
-                            onSearchQueryChange = { searchQuery = it },
                             currentUser = currentUser,
-                            state = state,
-                            storageTotalBytes = storageStats.totalBytes,
+                            rootGroups = rootGroups,
+                            searchRegistry = searchRegistry,
+                            selectedSubPage = null,
                             onProfileClick = onProfileClick,
-                            onListenTogetherClick = onListenTogetherClick,
-                            onListeningStatsClick = onListeningStatsClick,
-                            onRecentsClick = onRecentsClick,
-                            onAudioClick = onAudioClick,
-                            onAppIconClick = onAppIconClick,
-                            onHealthClick = onHealthClick,
-                            onOpenSubPage = { currentPage = it }
+                            onClearSearch = { searchQuery = "" }
                         )
-
-                        SettingsSubPage.APPEARANCE -> AppearanceGlassSubPage(
-                            state = state,
-                            viewModel = settingsViewModel,
-                            onAppIconClick = onAppIconClick
-                        )
-
-                        SettingsSubPage.PLAYER -> PlayerAudioSubPage(
-                            state = state,
-                            viewModel = settingsViewModel,
-                            onAudioClick = onAudioClick
-                        )
-
-                        SettingsSubPage.CONTENT -> ContentRegionSubPage(
-                            state = state,
-                            viewModel = settingsViewModel
-                        )
-
-                        SettingsSubPage.NOTIFICATIONS -> NotificationsSubPage(
-                            updates = notif.updates,
-                            tips = notif.tips,
-                            engagement = notif.engagement,
-                            onUpdatesChange = notificationSettings::setUpdates,
-                            onTipsChange = notificationSettings::setTips,
-                            onEngagementChange = notificationSettings::setEngagement
-                        )
-
-                        SettingsSubPage.PRIVACY -> PrivacySubPage(
-                            state = state,
-                            viewModel = settingsViewModel
-                        )
-
-                        SettingsSubPage.STORAGE -> StorageBackupSubPage(
-                            stats = storageStats,
-                            viewModel = settingsViewModel,
-                            onExportBackup = {
-                                val dateStr = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())
-                                createBackupLauncher.launch("geekify_backup_$dateStr.json")
-                            },
-                            onImportBackup = {
-                                openBackupLauncher.launch(arrayOf("application/json", "*/*"))
-                            }
-                        )
-
-                        SettingsSubPage.UPDATES -> UpdatesSubPage(
-                            updateCacheBytes = storageStats.updateCacheBytes,
-                            onCheckUpdatesClick = onCheckUpdatesClick,
-                            onClearUpdateCache = settingsViewModel::clearUpdateCache
-                        )
-
-                        SettingsSubPage.ABOUT -> AboutSubPage()
                     }
-
-                    Spacer(Modifier.height(bottomInset + 28.dp))
+                } else {
+                    val subScroll = rememberSaveable(page.name, saver = ScrollState.Saver) { ScrollState(0) }
+                    IosSettingsPageScaffold(
+                        title = page.title,
+                        scrollState = subScroll,
+                        onBack = { currentPage = SettingsSubPage.ROOT },
+                        bottomPadding = bottomInset + 40.dp
+                    ) {
+                        RenderSubPageContent(page)
+                    }
                 }
             }
         }
@@ -321,249 +547,324 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun RootSettingsContent(
+private fun RootListBody(
     searchQuery: String,
-    onSearchQueryChange: (String) -> Unit,
     currentUser: AccountUser?,
-    state: AppSettingsState,
-    storageTotalBytes: Long,
+    rootGroups: List<List<SettingsRootItem>>,
+    searchRegistry: List<SearchableSettingEntry>,
+    selectedSubPage: SettingsSubPage?,
     onProfileClick: () -> Unit,
-    onListenTogetherClick: () -> Unit,
-    onListeningStatsClick: () -> Unit,
-    onRecentsClick: () -> Unit,
-    onAudioClick: () -> Unit,
-    onAppIconClick: () -> Unit,
-    onHealthClick: () -> Unit,
-    onOpenSubPage: (SettingsSubPage) -> Unit
+    onClearSearch: () -> Unit
 ) {
-    // Search Bar
-    SettingsSearchBar(
-        query = searchQuery,
-        onQueryChange = onSearchQueryChange
-    )
-    Spacer(Modifier.height(16.dp))
+    val trimmedQuery = searchQuery.trim()
+    if (trimmedQuery.isEmpty()) {
+        ProfileCard(
+            user = currentUser,
+            onClick = onProfileClick
+        )
+        Spacer(Modifier.height(24.dp))
 
-    val q = searchQuery.trim().lowercase()
-    fun matches(vararg terms: String): Boolean {
-        if (q.isEmpty()) return true
-        return terms.any { it.lowercase().contains(q) }
-    }
-
-    // Profile Card at Top
-    if (matches("profile", "account", "sync", "sign in", "cloud", currentUser?.name.orEmpty(), currentUser?.email.orEmpty())) {
-        ProfileSettingsCard(user = currentUser, onClick = onProfileClick)
-        Spacer(Modifier.height(18.dp))
-    }
-
-    // Group 1: Social & Activity
-    val showListenTogether = matches("listen together", "room", "party", "sync", "friends")
-    val showStats = matches("listening statistics", "stats", "analytics", "top songs", "minutes", "artists")
-    val showHistory = matches("recents", "listening history", "recently played", "tracks")
-    if (showListenTogether || showStats || showHistory) {
-        SettingsSectionHeader("ACTIVITY & SOCIAL")
-        IosSettingsGroup {
-            val items = buildList<@Composable () -> Unit> {
-                if (showListenTogether) {
-                    add {
-                        IosSettingsRow(
-                            icon = GeekifyIcons.Groups,
-                            tileColor = TilePink,
-                            title = "Listen Together",
-                            subtitle = "Host or join live synchronized listening rooms",
-                            onClick = onListenTogetherClick
-                        )
-                    }
-                }
-                if (showStats) {
-                    add {
-                        IosSettingsRow(
-                            icon = GeekifyIcons.Insights,
-                            tileColor = TilePurple,
-                            title = "Listening Statistics",
-                            subtitle = "Your top tracks, artists, and listening streaks",
-                            onClick = onListeningStatsClick
-                        )
-                    }
-                }
-                if (showHistory) {
-                    add {
-                        IosSettingsRow(
-                            icon = GeekifyIcons.History,
-                            tileColor = TileOrange,
-                            title = "Recents & History",
-                            subtitle = "Recently played songs across your sessions",
-                            onClick = onRecentsClick
-                        )
+        rootGroups.forEachIndexed { groupIdx, group ->
+            IosSettingsSection {
+                group.forEachIndexed { idx, item ->
+                    IosSettingsRow(
+                        title = item.title,
+                        subtitle = item.subtitle,
+                        value = item.value,
+                        icon = item.icon,
+                        tileColor = item.tint,
+                        selected = selectedSubPage != null && item.subPage == selectedSubPage,
+                        onClick = item.onClick
+                    )
+                    if (idx < group.lastIndex) {
+                        IosSettingsDivider()
                     }
                 }
             }
-            items.forEachIndexed { idx, item ->
-                item()
-                if (idx < items.lastIndex) SettingsGroupDivider()
+            if (groupIdx < rootGroups.lastIndex) {
+                Spacer(Modifier.height(24.dp))
             }
         }
-        Spacer(Modifier.height(18.dp))
-    }
-
-    // Group 2: Experience & Customization
-    val showAppearance = matches("appearance", "liquid glass", "blur", "refraction", "lens", "saturation", "navigation bar", "adaptive", "default tab", "theme")
-    val showAppIcon = matches("app icon", "launcher icon", "logo")
-    val showPlayer = matches("player", "audio", "quality", "stream", "persistent queue", "autoplay", "shuffle", "repeat", "keep screen on", "error")
-    val showEq = matches("equalizer", "bass", "tempo", "speed", "pitch", "skip silence", "loudness", "normalization")
-    val showContent = matches("content", "region", "country", "language", "explicit", "locale")
-    val showNotif = matches("notifications", "alerts", "reminders", "tips", "updates")
-
-    if (showAppearance || showAppIcon || showPlayer || showEq || showContent || showNotif) {
-        SettingsSectionHeader("EXPERIENCE & PLAYBACK")
-        IosSettingsGroup {
-            val items = buildList<@Composable () -> Unit> {
-                if (showAppearance) {
-                    add {
-                        IosSettingsRow(
-                            icon = GeekifyIcons.AutoAwesome,
-                            tileColor = TileCyan,
-                            title = "Appearance & Liquid Glass",
-                            subtitle = if (state.glass.enabled) "Liquid Glass On • ${state.glass.blurDp.roundToInt()}dp blur" else "Liquid Glass Off",
-                            onClick = { onOpenSubPage(SettingsSubPage.APPEARANCE) }
-                        )
-                    }
-                }
-                if (showAppIcon) {
-                    add {
-                        IosSettingsRow(
-                            icon = GeekifyIcons.Apps,
-                            tileColor = TileIndigo,
-                            title = "App Icon",
-                            subtitle = "Choose the Geekify launcher icon",
-                            onClick = onAppIconClick
-                        )
-                    }
-                }
-                if (showPlayer) {
-                    add {
-                        IosSettingsRow(
-                            icon = GeekifyIcons.PlayCircleFilled,
-                            tileColor = TileRed,
-                            title = "Player & Playback",
-                            subtitle = "${state.audioQuality.label} quality • Queue & autoplay",
-                            onClick = { onOpenSubPage(SettingsSubPage.PLAYER) }
-                        )
-                    }
-                }
-                if (showEq) {
-                    add {
-                        IosSettingsRow(
-                            icon = GeekifyIcons.GraphicEq,
-                            tileColor = TileOrange,
-                            title = "Equalizer & Audio Effects",
-                            subtitle = "5-band EQ, presets, speed, pitch, normalization",
-                            onClick = onAudioClick
-                        )
-                    }
-                }
-                if (showContent) {
-                    val countryName = COUNTRIES.firstOrNull { it.first == state.contentCountry }?.second ?: state.contentCountry
-                    add {
-                        IosSettingsRow(
-                            icon = GeekifyIcons.Language,
-                            tileColor = TileBlue,
-                            title = "Content & Region",
-                            subtitle = "$countryName • ${if (state.hideExplicit) "Explicit hidden" else "All content"}",
-                            onClick = { onOpenSubPage(SettingsSubPage.CONTENT) }
-                        )
-                    }
-                }
-                if (showNotif) {
-                    add {
-                        IosSettingsRow(
-                            icon = GeekifyIcons.Notifications,
-                            tileColor = TileAmber,
-                            title = "Notifications",
-                            subtitle = "Updates, feature tips & listening reminders",
-                            onClick = { onOpenSubPage(SettingsSubPage.NOTIFICATIONS) }
-                        )
-                    }
-                }
-            }
-            items.forEachIndexed { idx, item ->
-                item()
-                if (idx < items.lastIndex) SettingsGroupDivider()
+    } else {
+        val results = remember(trimmedQuery, searchRegistry) {
+            searchRegistry.filter { entry ->
+                entry.title.contains(trimmedQuery, ignoreCase = true) ||
+                    entry.subtitle.contains(trimmedQuery, ignoreCase = true) ||
+                    entry.category.contains(trimmedQuery, ignoreCase = true) ||
+                    entry.keywords.any { it.contains(trimmedQuery, ignoreCase = true) }
             }
         }
-        Spacer(Modifier.height(18.dp))
+
+        if (results.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 56.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = GeekifyIcons.Search,
+                        contentDescription = null,
+                        tint = IosPalette.tertiaryLabel,
+                        modifier = Modifier.size(36.dp)
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = "No results for \"$trimmedQuery\"",
+                        color = IosPalette.secondaryLabel,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        } else {
+            IosSettingsSection(title = "Results (${results.size})") {
+                results.forEachIndexed { idx, entry ->
+                    IosSettingsRow(
+                        title = entry.title,
+                        subtitle = "${entry.category} · ${entry.subtitle}",
+                        icon = entry.icon,
+                        tileColor = entry.tint,
+                        onClick = {
+                            onClearSearch()
+                            entry.onSelect()
+                        }
+                    )
+                    if (idx < results.lastIndex) {
+                        IosSettingsDivider()
+                    }
+                }
+            }
+        }
     }
+}
 
-    // Group 3: Data, System & About
-    val showPrivacy = matches("privacy", "security", "pause history", "clear history", "screenshots", "incognito")
-    val showStorage = matches("storage", "cache", "backup", "restore", "export", "import", "disk", "clear cache")
-    val showUpdates = matches("software update", "update", "version", "github", "apk")
-    val showHealth = matches("extractor health", "diagnostics", "innertube", "stream", "status")
-    val showAbout = matches("about", "version", "credits", "github", "geekify")
+@Composable
+private fun ProfileCard(
+    user: AccountUser?,
+    onClick: () -> Unit
+) {
+    Surface(
+        color = IosPalette.secondarySystemGroupedBackground,
+        shape = IosCardShape,
+        modifier = Modifier
+            .fillMaxWidth()
+            .bouncyClickable(pressedScale = 0.98f, onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .clip(CircleShape)
+                    .background(IosPalette.tertiarySystemGroupedBackground),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!user?.photoUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = user?.photoUrl,
+                        contentDescription = user?.name,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(
+                        imageVector = GeekifyIcons.Person,
+                        contentDescription = null,
+                        tint = IosPalette.secondaryLabel,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = user?.name?.ifBlank { "Geekify Listener" } ?: "Sign in",
+                    color = IosPalette.label,
+                    fontSize = 20.sp,
+                    lineHeight = 25.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = (-0.4).sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = user?.email ?: "Cloud sync, playlists and backup",
+                    color = IosPalette.secondaryLabel,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Icon(
+                imageVector = GeekifyIcons.ChevronRight,
+                contentDescription = null,
+                tint = IosPalette.tertiaryLabel,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
 
-    if (showPrivacy || showStorage || showUpdates || showHealth || showAbout) {
-        SettingsSectionHeader("DATA & SYSTEM")
-        IosSettingsGroup {
-            val items = buildList<@Composable () -> Unit> {
-                if (showPrivacy) {
-                    add {
-                        IosSettingsRow(
-                            icon = GeekifyIcons.Shield,
-                            tileColor = TileIndigo,
-                            title = "Privacy & Security",
-                            subtitle = if (state.pauseListenHistory) "History paused" else "History & screenshot controls",
-                            onClick = { onOpenSubPage(SettingsSubPage.PRIVACY) }
+@Composable
+private fun DockedSearchPill(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val focusManager = LocalFocusManager.current
+    var focused by remember { mutableStateOf(false) }
+    val showCancel = focused || query.isNotEmpty()
+
+    Box(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            modifier = Modifier
+                .widthIn(max = 720.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .shadow(elevation = 10.dp, shape = CircleShape, clip = false)
+                    .clip(CircleShape)
+                    .background(IosPalette.secondarySystemGroupedBackground)
+                    .border(0.5.dp, Color.White.copy(alpha = 0.12f), CircleShape)
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = GeekifyIcons.Search,
+                    contentDescription = "Search",
+                    tint = IosPalette.secondaryLabel,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(10.dp))
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (query.isEmpty()) {
+                        Text(
+                            text = "Search settings",
+                            color = IosPalette.secondaryLabel,
+                            fontSize = 16.sp,
+                            maxLines = 1
                         )
                     }
+                    BasicTextField(
+                        value = query,
+                        onValueChange = onQueryChange,
+                        singleLine = true,
+                        textStyle = TextStyle(
+                            color = IosPalette.label,
+                            fontSize = 16.sp
+                        ),
+                        cursorBrush = SolidColor(IosPalette.systemBlue),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onFocusChanged { focused = it.isFocused }
+                    )
                 }
-                if (showStorage) {
-                    add {
-                        IosSettingsRow(
-                            icon = GeekifyIcons.Storage,
-                            tileColor = TileGreen,
-                            title = "Storage, Cache & Backup",
-                            subtitle = "${formatBytes(storageTotalBytes)} used • Library backup & restore",
-                            onClick = { onOpenSubPage(SettingsSubPage.STORAGE) }
-                        )
-                    }
-                }
-                if (showUpdates) {
-                    add {
-                        IosSettingsRow(
-                            icon = GeekifyIcons.SystemUpdate,
-                            tileColor = TileTeal,
-                            title = "Software Update",
-                            subtitle = "v${BuildConfig.VERSION_NAME} installed • Check for updates",
-                            onClick = { onOpenSubPage(SettingsSubPage.UPDATES) }
-                        )
-                    }
-                }
-                if (showHealth) {
-                    add {
-                        IosSettingsRow(
-                            icon = GeekifyIcons.MonitorHeart,
-                            tileColor = TileMint,
-                            title = "Extractor Health",
-                            subtitle = "Stream resolver & YouTube client diagnostics",
-                            onClick = onHealthClick
-                        )
-                    }
-                }
-                if (showAbout) {
-                    add {
-                        IosSettingsRow(
-                            icon = GeekifyIcons.Info,
-                            tileColor = TileGray,
-                            title = "About Geekify",
-                            subtitle = "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
-                            onClick = { onOpenSubPage(SettingsSubPage.ABOUT) }
+                if (query.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clip(CircleShape)
+                            .background(IosPalette.tertiaryLabel)
+                            .clickable(
+                                indication = null,
+                                interactionSource = remember { MutableInteractionSource() }
+                            ) { onQueryChange("") },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = GeekifyIcons.Close,
+                            contentDescription = "Clear",
+                            tint = IosPalette.secondarySystemGroupedBackground,
+                            modifier = Modifier.size(12.dp)
                         )
                     }
                 }
             }
-            items.forEachIndexed { idx, item ->
-                item()
-                if (idx < items.lastIndex) SettingsGroupDivider()
+
+            AnimatedVisibility(
+                visible = showCancel,
+                enter = fadeIn() + expandHorizontally(expandFrom = Alignment.Start),
+                exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.Start)
+            ) {
+                Text(
+                    text = "Cancel",
+                    color = IosPalette.systemBlue,
+                    fontSize = 17.sp,
+                    modifier = Modifier
+                        .padding(start = 12.dp)
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() }
+                        ) {
+                            onQueryChange("")
+                            focusManager.clearFocus()
+                        }
+                        .padding(vertical = 8.dp)
+                )
             }
+        }
+    }
+}
+
+@Composable
+private fun IosStatusBanner(
+    message: String,
+    onDismiss: () -> Unit
+) {
+    Surface(
+        color = IosPalette.secondarySystemGroupedBackground,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 16.dp)
+            .border(0.5.dp, IosPalette.systemGreen.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
+            .clickable(onClick = onDismiss)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = GeekifyIcons.CheckCircle,
+                contentDescription = null,
+                tint = IosPalette.systemGreen,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = message,
+                color = IosPalette.label,
+                fontSize = 14.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Icon(
+                imageVector = GeekifyIcons.Close,
+                contentDescription = "Dismiss",
+                tint = IosPalette.secondaryLabel,
+                modifier = Modifier.size(16.dp)
+            )
         }
     }
 }
@@ -578,138 +879,285 @@ private fun AppearanceGlassSubPage(
     onAppIconClick: () -> Unit
 ) {
     val glass = state.glass
-
-    // Live interactive Liquid Glass preview card
-    SettingsSectionHeader("LIVE GLASS PREVIEW")
+    val imageScroll = rememberScrollState()
     val previewBackdrop = rememberGlassBackdrop()
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(158.dp)
-            .clip(RoundedCornerShape(28.dp))
-            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(28.dp))
+
+    IosSettingsSection(
+        title = "Live preview",
+        footer = "Drag the backdrop horizontally to watch the refraction lens warp colors in real time."
     ) {
-        // Vibrant background scene recorded into previewBackdrop
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .glassBackdropSource(previewBackdrop)
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF0F172A),
-                            Color(0xFF4F46E5),
-                            Color(0xFFEC4899),
-                            Color(0xFF10B981)
+                .fillMaxWidth()
+                .height(206.dp)
+                .clip(IosCardShape)
+        ) {
+            // Horizontally pannable vibrant backdrop recorded into previewBackdrop
+            BoxWithConstraints(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .glassBackdropSource(previewBackdrop)
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                Color(0xFFFF2D55),
+                                Color(0xFF5856D6),
+                                Color(0xFF32ADE6),
+                                Color(0xFF34C759)
+                            )
                         )
                     )
-                )
-        ) {
-            // Colorful orbs & text behind glass so refraction and blur are clearly visible
-            Box(
-                modifier = Modifier
-                    .size(110.dp)
-                    .offset(x = 24.dp, y = 16.dp)
-                    .clip(CircleShape)
-                    .background(Lime.copy(alpha = 0.75f))
-            )
-            Box(
-                modifier = Modifier
-                    .size(95.dp)
-                    .align(Alignment.BottomEnd)
-                    .offset(x = (-28).dp, y = (-12).dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFF38BDF8).copy(alpha = 0.85f))
-            )
-            Text(
-                text = "GEEKIFY LIQUID GLASS",
-                color = Color.White.copy(alpha = 0.55f),
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Black,
-                letterSpacing = 2.sp,
-                modifier = Modifier.align(Alignment.Center)
-            )
-        }
-
-        // Foreground Liquid Glass capsule sampling previewBackdrop
-        CompositionLocalProvider(LocalGlassBackdrop provides previewBackdrop) {
-            Row(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .fillMaxWidth(0.86f)
-                    .height(64.dp)
-                    .liquidGlass(RoundedCornerShape(32.dp), GlassStyle.Preview)
-                    .padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
+                val panelWidth = maxWidth
+                Row(
                     modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(Lime),
-                    contentAlignment = Alignment.Center
+                        .fillMaxSize()
+                        .horizontalScroll(imageScroll)
                 ) {
-                    Icon(GeekifyIcons.AutoAwesome, contentDescription = null, tint = OnAccent, modifier = Modifier.size(20.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .width(panelWidth * 1.75f)
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(
+                                        Color(0xFF0F172A),
+                                        Color(0xFFFF375F),
+                                        Color(0xFF5E5CE6),
+                                        Color(0xFF64D2FF),
+                                        Color(0xFF30D158),
+                                        Color(0xFFFF9F0A)
+                                    )
+                                )
+                            )
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(130.dp)
+                                .offset(x = 28.dp, y = 18.dp)
+                                .clip(CircleShape)
+                                .background(Lime.copy(alpha = 0.78f))
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(115.dp)
+                                .align(Alignment.BottomCenter)
+                                .offset(x = 30.dp, y = (-12).dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFF375F).copy(alpha = 0.80f))
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(110.dp)
+                                .align(Alignment.TopEnd)
+                                .offset(x = (-36).dp, y = 24.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF64D2FF).copy(alpha = 0.85f))
+                        )
+                        Text(
+                            text = "LIQUID GLASS",
+                            color = Color.White.copy(alpha = 0.65f),
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 3.sp,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
                 }
-                Spacer(Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Crystal Liquid Glass", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        text = if (glass.enabled) "${glass.blurDp.roundToInt()}dp blur • ${(glass.saturation * 100).roundToInt()}% vibrancy" else "Glass disabled",
-                        color = TextSecondary,
-                        fontSize = 12.sp
-                    )
+            }
+
+            // Live Mini Player + Floating Nav Bar sampling previewBackdrop
+            CompositionLocalProvider(LocalGlassBackdrop provides previewBackdrop) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.SpaceBetween,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Mock Mini Player Pill
+                    val miniModifier = if (glass.enabled && glass.miniPlayerGlass) {
+                        Modifier.liquidGlass(RoundedCornerShape(24.dp), GlassStyle.Preview)
+                    } else {
+                        Modifier
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(IosPalette.secondarySystemGroupedBackground.copy(alpha = 0.94f))
+                            .border(0.5.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(24.dp))
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth(0.92f)
+                            .height(54.dp)
+                            .then(miniModifier)
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(IosPalette.systemPink),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = GeekifyIcons.MusicNote,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Midnight City",
+                                color = Color.White,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = if (glass.enabled && glass.miniPlayerGlass) {
+                                    "${glass.blurDp.roundToInt()}dp blur · ${(glass.saturation * 100).roundToInt()}% vibrancy"
+                                } else {
+                                    "Solid surface"
+                                },
+                                color = Color.White.copy(alpha = 0.72f),
+                                fontSize = 11.sp,
+                                maxLines = 1
+                            )
+                        }
+                        Icon(
+                            imageVector = GeekifyIcons.PlayArrow,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Icon(
+                            imageVector = GeekifyIcons.SkipNext,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    // Mock Floating Nav Bar + Search Orb
+                    val navModifier = if (glass.enabled && glass.navBarGlass) {
+                        Modifier.liquidGlass(CircleShape, GlassStyle.Preview)
+                    } else {
+                        Modifier
+                            .clip(CircleShape)
+                            .background(IosPalette.secondarySystemGroupedBackground.copy(alpha = 0.94f))
+                            .border(0.5.dp, Color.White.copy(alpha = 0.12f), CircleShape)
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth(0.92f)
+                            .height(56.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .then(navModifier)
+                                .padding(horizontal = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val tabs = listOf(
+                                GeekifyIcons.Home to "Home",
+                                GeekifyIcons.LibraryMusic to "Library",
+                                GeekifyIcons.Settings to "Settings"
+                            )
+                            tabs.forEachIndexed { idx, (icon, label) ->
+                                val selected = idx == 0
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = icon,
+                                        contentDescription = null,
+                                        tint = if (selected) Lime else Color.White.copy(alpha = 0.85f),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Text(
+                                        text = label,
+                                        color = if (selected) Lime else Color.White.copy(alpha = 0.85f),
+                                        fontSize = 10.sp,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                                    )
+                                }
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .then(navModifier),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = GeekifyIcons.Search,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
                 }
             }
         }
     }
 
-    Spacer(Modifier.height(18.dp))
-    SettingsSectionHeader("LIQUID GLASS ENGINE")
-    IosSettingsGroup {
+    Spacer(Modifier.height(24.dp))
+    IosSettingsSection(title = "Liquid Glass engine") {
         IosSettingsSwitchRow(
             icon = GeekifyIcons.BlurOn,
-            tileColor = TileCyan,
-            title = "Enable Liquid Glass",
+            tileColor = IosPalette.systemCyan,
+            title = "Liquid Glass",
             subtitle = "Real-time AGSL lens refraction and backdrop blur",
             checked = glass.enabled,
             onCheckedChange = viewModel::setGlassEnabled
         )
         if (glass.enabled) {
-            SettingsGroupDivider()
+            IosSettingsDivider()
             IosSettingsSwitchRow(
                 icon = GeekifyIcons.MusicNote,
-                tileColor = TilePink,
+                tileColor = IosPalette.systemPink,
                 title = "Mini Player Glass",
-                subtitle = "Use clear liquid glass on the floating Now Playing bar",
+                subtitle = "Apply liquid glass to the floating Now Playing pill",
                 checked = glass.miniPlayerGlass,
                 onCheckedChange = viewModel::setGlassMiniPlayer
             )
-            SettingsGroupDivider()
+            IosSettingsDivider()
             IosSettingsSwitchRow(
                 icon = GeekifyIcons.Navigation,
-                tileColor = TileBlue,
+                tileColor = IosPalette.systemBlue,
                 title = "Navigation Bar Glass",
-                subtitle = "Use clear liquid glass on the adaptive bottom bar",
+                subtitle = "Apply liquid glass to the bottom navigation bar",
                 checked = glass.navBarGlass,
                 onCheckedChange = viewModel::setGlassNavBar
             )
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                SettingsGroupDivider()
+                IosSettingsDivider()
                 IosSettingsSwitchRow(
                     icon = GeekifyIcons.Flare,
-                    tileColor = TilePurple,
+                    tileColor = IosPalette.systemPurple,
                     title = "Chromatic Aberration",
-                    subtitle = "Optical RGB color dispersion along curved glass edges",
+                    subtitle = "Optical RGB color dispersion along curved edges",
                     checked = glass.chromaticAberration,
                     onCheckedChange = viewModel::setGlassChromaticAberration
                 )
-                SettingsGroupDivider()
+                IosSettingsDivider()
                 IosSettingsSwitchRow(
                     icon = GeekifyIcons.Layers,
-                    tileColor = TileIndigo,
+                    tileColor = IosPalette.systemIndigo,
                     title = "Spherical Depth Effect",
-                    subtitle = "3D perspective magnification across the surface",
+                    subtitle = "3D perspective magnification across the lens",
                     checked = glass.depthEffect,
                     onCheckedChange = viewModel::setGlassDepthEffect
                 )
@@ -718,9 +1166,8 @@ private fun AppearanceGlassSubPage(
     }
 
     if (glass.enabled) {
-        Spacer(Modifier.height(18.dp))
-        SettingsSectionHeader("OPTICAL TUNING")
-        IosSettingsGroup {
+        Spacer(Modifier.height(24.dp))
+        IosSettingsSection(title = "Optical tuning") {
             IosSettingsSliderRow(
                 title = "Backdrop Blur Radius",
                 valueLabel = "${glass.blurDp.roundToInt()} dp",
@@ -728,16 +1175,16 @@ private fun AppearanceGlassSubPage(
                 valueRange = 0f..20f,
                 onValueChange = viewModel::setGlassBlurDp
             )
-            SettingsGroupDivider()
+            IosSettingsDivider(insetStart = 16.dp)
             IosSettingsSliderRow(
-                title = "Backdrop Vibrancy (Saturation)",
-                valueLabel = "${"%.1f".format(Locale.US, glass.saturation)}x",
+                title = "Backdrop Vibrancy",
+                valueLabel = "${"%.1f".format(Locale.US, glass.saturation)}×",
                 value = glass.saturation,
                 valueRange = 0.8f..2.5f,
                 onValueChange = viewModel::setGlassSaturation
             )
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                SettingsGroupDivider()
+                IosSettingsDivider(insetStart = 16.dp)
                 IosSettingsSliderRow(
                     title = "Edge Refraction Warp",
                     valueLabel = "${glass.lensAmountDp.roundToInt()} dp",
@@ -745,7 +1192,7 @@ private fun AppearanceGlassSubPage(
                     valueRange = 0f..28f,
                     onValueChange = viewModel::setGlassLensAmountDp
                 )
-                SettingsGroupDivider()
+                IosSettingsDivider(insetStart = 16.dp)
                 IosSettingsSliderRow(
                     title = "Refraction Bevel Depth",
                     valueLabel = "${glass.lensHeightDp.roundToInt()} dp",
@@ -754,7 +1201,7 @@ private fun AppearanceGlassSubPage(
                     onValueChange = viewModel::setGlassLensHeightDp
                 )
             }
-            SettingsGroupDivider()
+            IosSettingsDivider(insetStart = 16.dp)
             IosSettingsSliderRow(
                 title = "Surface Tint Opacity",
                 valueLabel = "${(glass.tintAlpha * 100).roundToInt()}%",
@@ -762,37 +1209,36 @@ private fun AppearanceGlassSubPage(
                 valueRange = 0f..0.50f,
                 onValueChange = viewModel::setGlassTintAlpha
             )
-            SettingsGroupDivider()
+            IosSettingsDivider(insetStart = 16.dp)
             IosSettingsRow(
                 icon = GeekifyIcons.RestartAlt,
-                tileColor = TileGray,
+                tileColor = IosPalette.systemGray,
                 title = "Reset Liquid Glass Defaults",
-                subtitle = "Restore crystal-clear 3dp optical preset",
+                subtitle = "Restore crystal-clear 3 dp optical preset",
                 onClick = viewModel::resetGlassDefaults
             )
         }
     }
 
-    Spacer(Modifier.height(18.dp))
-    SettingsSectionHeader("NAVIGATION & LAUNCH")
-    IosSettingsGroup {
+    Spacer(Modifier.height(24.dp))
+    IosSettingsSection(title = "Navigation & launch") {
         var showNavBehaviorDialog by remember { mutableStateOf(false) }
         var showDefaultTabDialog by remember { mutableStateOf(false) }
 
         val behaviorLabel = when (state.navInlineBehavior) {
-            FloatingTabBarInlineBehavior.OnScrollDown -> "Collapse on scroll down"
-            FloatingTabBarInlineBehavior.ExpandedAtTopOnly -> "Expanded at top only"
+            FloatingTabBarInlineBehavior.OnScrollDown -> "On scroll down"
+            FloatingTabBarInlineBehavior.ExpandedAtTopOnly -> "At top only"
             FloatingTabBarInlineBehavior.Never -> "Always expanded"
-            FloatingTabBarInlineBehavior.OnScrollUp -> "Collapse on scroll up"
+            FloatingTabBarInlineBehavior.OnScrollUp -> "On scroll up"
         }
         IosSettingsRow(
             icon = GeekifyIcons.ViewDay,
-            tileColor = TileTeal,
+            tileColor = IosPalette.systemTeal,
             title = "Adaptive Bottom Bar",
-            subtitle = behaviorLabel,
+            value = behaviorLabel,
             onClick = { showNavBehaviorDialog = true }
         )
-        SettingsGroupDivider()
+        IosSettingsDivider()
         val tabLabel = when (state.defaultTab) {
             "search" -> "Search"
             "library" -> "Library"
@@ -800,17 +1246,17 @@ private fun AppearanceGlassSubPage(
         }
         IosSettingsRow(
             icon = GeekifyIcons.Home,
-            tileColor = TileGreen,
+            tileColor = IosPalette.systemGreen,
             title = "Default Launch Tab",
-            subtitle = tabLabel,
+            value = tabLabel,
             onClick = { showDefaultTabDialog = true }
         )
-        SettingsGroupDivider()
+        IosSettingsDivider()
         IosSettingsRow(
             icon = GeekifyIcons.Apps,
-            tileColor = TileIndigo,
-            title = "App Launcher Icon",
-            subtitle = "Customize Geekify's home screen icon",
+            tileColor = IosPalette.systemBlue,
+            title = "App Icon",
+            subtitle = "Choose the home screen icon",
             onClick = onAppIconClick
         )
 
@@ -861,69 +1307,68 @@ private fun PlayerAudioSubPage(
 ) {
     var showQualityDialog by remember { mutableStateOf(false) }
 
-    SettingsSectionHeader("AUDIO & STREAMING")
-    IosSettingsGroup {
+    IosSettingsSection(title = "Audio & streaming") {
         IosSettingsRow(
             icon = GeekifyIcons.GraphicEq,
-            tileColor = TileOrange,
+            tileColor = IosPalette.systemGreen,
             title = "Equalizer & Audio Effects",
-            subtitle = "5-band equalizer, presets, tempo, pitch & loudness",
+            subtitle = "5-band EQ, presets, speed, pitch & loudness",
             onClick = onAudioClick
         )
-        SettingsGroupDivider()
+        IosSettingsDivider()
         IosSettingsRow(
             icon = GeekifyIcons.HighQuality,
-            tileColor = TileRed,
-            title = "Streaming Audio Quality",
-            subtitle = "${state.audioQuality.label} — ${state.audioQuality.subtitle}",
+            tileColor = IosPalette.systemRed,
+            title = "Streaming Quality",
+            value = state.audioQuality.label,
+            subtitle = state.audioQuality.subtitle,
             onClick = { showQualityDialog = true }
         )
     }
 
-    Spacer(Modifier.height(18.dp))
-    SettingsSectionHeader("QUEUE & PLAYBACK BEHAVIOR")
-    IosSettingsGroup {
+    Spacer(Modifier.height(24.dp))
+    IosSettingsSection(title = "Queue & playback") {
         IosSettingsSwitchRow(
             icon = GeekifyIcons.QueueMusic,
-            tileColor = TileBlue,
+            tileColor = IosPalette.systemBlue,
             title = "Persistent Queue",
-            subtitle = "Save and restore your queue and playback position across restarts",
+            subtitle = "Restore queue and playback position across restarts",
             checked = state.persistentQueue,
             onCheckedChange = viewModel::setPersistentQueue
         )
-        SettingsGroupDivider()
+        IosSettingsDivider()
         IosSettingsSwitchRow(
             icon = GeekifyIcons.AutoMode,
-            tileColor = TilePurple,
+            tileColor = IosPalette.systemPurple,
             title = "Endless Autoplay",
-            subtitle = "Automatically queue related songs when your queue runs out",
+            subtitle = "Automatically queue related songs when your queue ends",
             checked = state.autoplayRelated,
             onCheckedChange = viewModel::setAutoplayRelated
         )
-        SettingsGroupDivider()
+        IosSettingsDivider()
         IosSettingsSwitchRow(
             icon = GeekifyIcons.Shuffle,
-            tileColor = TileGreen,
+            tileColor = IosPalette.systemGreen,
             title = "Remember Shuffle & Repeat",
             subtitle = "Keep shuffle and repeat modes when reopening the app",
             checked = state.rememberShuffleRepeat,
             onCheckedChange = viewModel::setRememberShuffleRepeat
         )
-        SettingsGroupDivider()
+        IosSettingsDivider()
         IosSettingsSwitchRow(
             icon = GeekifyIcons.FastForward,
-            tileColor = TilePink,
+            tileColor = IosPalette.systemPink,
             title = "Auto-skip on Stream Error",
-            subtitle = "Automatically advance to the next song if a track cannot be played",
+            subtitle = "Advance to the next track if a stream fails to resolve",
             checked = state.autoSkipOnError,
             onCheckedChange = viewModel::setAutoSkipOnError
         )
-        SettingsGroupDivider()
+        IosSettingsDivider()
         IosSettingsSwitchRow(
             icon = GeekifyIcons.LightMode,
-            tileColor = TileAmber,
+            tileColor = IosPalette.systemOrange,
             title = "Keep Screen On in Player",
-            subtitle = "Prevent the display from sleeping while Expanded Player is open",
+            subtitle = "Prevent the screen from sleeping while Now Playing is open",
             checked = state.keepScreenOn,
             onCheckedChange = viewModel::setKeepScreenOn
         )
@@ -957,33 +1402,36 @@ private fun ContentRegionSubPage(
     val countryName = COUNTRIES.firstOrNull { it.first == state.contentCountry }?.second ?: state.contentCountry
     val languageName = LANGUAGES.firstOrNull { it.first == state.contentLanguage }?.second ?: state.contentLanguage
 
-    SettingsSectionHeader("CATALOG REGION & LANGUAGE")
-    IosSettingsGroup {
+    IosSettingsSection(
+        title = "Catalog region & language",
+        footer = "Changing your country or language immediately refreshes regional charts, trending shelves, and recommendations on Home."
+    ) {
         IosSettingsRow(
             icon = GeekifyIcons.Public,
-            tileColor = TileBlue,
+            tileColor = IosPalette.systemBlue,
             title = "Content Country",
-            subtitle = "$countryName (${state.contentCountry}) — Charts & new releases region",
+            value = countryName,
+            subtitle = "Charts & new releases region (${state.contentCountry})",
             onClick = { showCountryDialog = true }
         )
-        SettingsGroupDivider()
+        IosSettingsDivider()
         IosSettingsRow(
             icon = GeekifyIcons.Translate,
-            tileColor = TileTeal,
+            tileColor = IosPalette.systemTeal,
             title = "Content Language",
-            subtitle = "$languageName — YouTube Music catalog language",
+            value = languageName.substringBefore(" ("),
+            subtitle = languageName,
             onClick = { showLanguageDialog = true }
         )
     }
 
-    Spacer(Modifier.height(18.dp))
-    SettingsSectionHeader("CONTENT RESTRICTIONS")
-    IosSettingsGroup {
+    Spacer(Modifier.height(24.dp))
+    IosSettingsSection(title = "Content restrictions") {
         IosSettingsSwitchRow(
             icon = GeekifyIcons.Explicit,
-            tileColor = TileRed,
+            tileColor = IosPalette.systemRed,
             title = "Hide Explicit Content",
-            subtitle = "Filter out explicit tracks from Home, Search, and Autoplay",
+            subtitle = "Filter explicit tracks from Home, Search, and Autoplay",
             checked = state.hideExplicit,
             onCheckedChange = viewModel::setHideExplicit
         )
@@ -1028,42 +1476,37 @@ private fun NotificationsSubPage(
     onTipsChange: (Boolean) -> Unit,
     onEngagementChange: (Boolean) -> Unit
 ) {
-    SettingsSectionHeader("IN-APP & PUSH NOTIFICATIONS")
-    IosSettingsGroup {
+    IosSettingsSection(
+        title = "In-app & push notifications",
+        footer = "Media playback controls are managed automatically by the system while music is playing."
+    ) {
         IosSettingsSwitchRow(
             icon = GeekifyIcons.SystemUpdate,
-            tileColor = TileGreen,
+            tileColor = IosPalette.systemGreen,
             title = "App Updates",
-            subtitle = "Notify me when a new Geekify release is available",
+            subtitle = "Notify when a new Geekify release is available",
             checked = updates,
             onCheckedChange = onUpdatesChange
         )
-        SettingsGroupDivider()
+        IosSettingsDivider()
         IosSettingsSwitchRow(
             icon = GeekifyIcons.Lightbulb,
-            tileColor = TileAmber,
+            tileColor = IosPalette.systemYellow,
             title = "Tips & New Features",
             subtitle = "Occasional highlights after an app update",
             checked = tips,
             onCheckedChange = onTipsChange
         )
-        SettingsGroupDivider()
+        IosSettingsDivider()
         IosSettingsSwitchRow(
             icon = GeekifyIcons.LibraryMusic,
-            tileColor = TilePurple,
-            title = "Personalized Listening Reminders",
-            subtitle = "Based on recent and frequently played songs on this device",
+            tileColor = IosPalette.systemPurple,
+            title = "Listening Reminders",
+            subtitle = "Personalized picks based on your recent plays",
             checked = engagement,
             onCheckedChange = onEngagementChange
         )
     }
-    Spacer(Modifier.height(10.dp))
-    Text(
-        text = "Media playback controls are managed automatically while music is playing.",
-        color = TextMuted,
-        fontSize = 12.sp,
-        modifier = Modifier.padding(horizontal = 12.dp)
-    )
 }
 
 // ============================================================================
@@ -1076,32 +1519,31 @@ private fun PrivacySubPage(
 ) {
     var confirmClearHistory by remember { mutableStateOf(false) }
 
-    SettingsSectionHeader("LISTENING HISTORY")
-    IosSettingsGroup {
+    IosSettingsSection(title = "Listening history") {
         IosSettingsSwitchRow(
             icon = GeekifyIcons.PauseCircleFilled,
-            tileColor = TileOrange,
+            tileColor = IosPalette.systemOrange,
             title = "Pause Listening History",
             subtitle = "Do not record played songs, play counts, or listening stats",
             checked = state.pauseListenHistory,
             onCheckedChange = viewModel::setPauseListenHistory
         )
-        SettingsGroupDivider()
+        IosSettingsDivider()
         IosSettingsRow(
             icon = GeekifyIcons.DeleteSweep,
-            tileColor = TileRed,
+            tileColor = IosPalette.systemRed,
             title = "Clear Listening History & Stats",
-            subtitle = "Permanently delete local recent tracks, play counts, and sessions",
+            subtitle = "Delete local recent tracks, play counts, and sessions",
+            destructive = true,
             onClick = { confirmClearHistory = true }
         )
     }
 
-    Spacer(Modifier.height(18.dp))
-    SettingsSectionHeader("SCREEN SECURITY")
-    IosSettingsGroup {
+    Spacer(Modifier.height(24.dp))
+    IosSettingsSection(title = "Screen security") {
         IosSettingsSwitchRow(
             icon = GeekifyIcons.Security,
-            tileColor = TileIndigo,
+            tileColor = IosPalette.systemIndigo,
             title = "Disable Screenshots",
             subtitle = "Block screenshots and hide app preview in the recents switcher",
             checked = state.disableScreenshots,
@@ -1111,11 +1553,11 @@ private fun PrivacySubPage(
 
     if (confirmClearHistory) {
         GeekifyDialog(onDismissRequest = { confirmClearHistory = false }) {
-            Text("Clear Listening History?", color = TextPrimary, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            Text("Clear Listening History?", color = IosPalette.label, fontSize = 19.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
             Text(
                 "This will clear your Recents list, top play counts, and listening statistics on this device.",
-                color = TextSecondary,
+                color = IosPalette.secondaryLabel,
                 fontSize = 14.sp
             )
             Spacer(Modifier.height(20.dp))
@@ -1154,49 +1596,53 @@ private fun StorageBackupSubPage(
         viewModel.refreshStorageStats()
     }
 
-    SettingsSectionHeader("STORAGE USAGE (${formatBytes(stats.totalBytes)})")
-    IosSettingsGroup {
+    IosSettingsSection(title = "Storage usage (${formatBytes(stats.totalBytes)})") {
         IosSettingsRow(
             icon = GeekifyIcons.Audiotrack,
-            tileColor = TileGreen,
+            tileColor = IosPalette.systemGreen,
             title = "Clear Audio Stream Cache",
-            subtitle = "${formatBytes(stats.audioCacheBytes)} cached (300 MB limit)",
+            value = formatBytes(stats.audioCacheBytes),
+            subtitle = "300 MB automatic cache limit",
             onClick = viewModel::clearAudioCache
         )
-        SettingsGroupDivider()
+        IosSettingsDivider()
         IosSettingsRow(
             icon = GeekifyIcons.Image,
-            tileColor = TileCyan,
+            tileColor = IosPalette.systemCyan,
             title = "Clear Artwork & Image Cache",
-            subtitle = "${formatBytes(stats.imageCacheBytes)} cached album & artist covers",
+            value = formatBytes(stats.imageCacheBytes),
+            subtitle = "Cached album and artist covers",
             onClick = viewModel::clearImageCache
         )
-        SettingsGroupDivider()
+        IosSettingsDivider()
         IosSettingsRow(
             icon = GeekifyIcons.Dataset,
-            tileColor = TileOrange,
+            tileColor = IosPalette.systemOrange,
             title = "Prune Cached Feed & Metadata",
-            subtitle = "${formatBytes(stats.metadataBytes)} local database & catalog",
+            value = formatBytes(stats.metadataBytes),
+            subtitle = "Local database and catalog cache",
             onClick = viewModel::clearMetadataCache
         )
     }
 
-    Spacer(Modifier.height(18.dp))
-    SettingsSectionHeader("LOCAL LIBRARY BACKUP & RESTORE")
-    IosSettingsGroup {
+    Spacer(Modifier.height(24.dp))
+    IosSettingsSection(
+        title = "Library backup & restore",
+        footer = "Backups include your liked songs, custom playlists, saved albums, and listening history in a portable JSON file."
+    ) {
         IosSettingsRow(
             icon = GeekifyIcons.UploadFile,
-            tileColor = TileBlue,
+            tileColor = IosPalette.systemBlue,
             title = "Backup Library to JSON",
-            subtitle = "Export liked songs, playlists, saved albums & history",
+            subtitle = "Export liked songs, playlists, albums & history",
             onClick = onExportBackup
         )
-        SettingsGroupDivider()
+        IosSettingsDivider()
         IosSettingsRow(
             icon = GeekifyIcons.Download,
-            tileColor = TilePurple,
+            tileColor = IosPalette.systemPurple,
             title = "Restore Library from Backup",
-            subtitle = "Import and merge a Geekify .json backup file",
+            subtitle = "Import and merge a .json backup file",
             onClick = onImportBackup
         )
     }
@@ -1212,28 +1658,28 @@ private fun UpdatesSubPage(
     onClearUpdateCache: () -> Unit
 ) {
     val context = LocalContext.current
-    SettingsSectionHeader("INSTALLED VERSION")
-    IosSettingsGroup {
+    IosSettingsSection(title = "Installed version") {
         IosSettingsRow(
             icon = GeekifyIcons.Verified,
-            tileColor = TileGreen,
+            tileColor = IosPalette.systemGreen,
             title = "Geekify v${BuildConfig.VERSION_NAME}",
-            subtitle = "Build ${BuildConfig.VERSION_CODE} • Installed on this device",
+            value = "Build ${BuildConfig.VERSION_CODE}",
+            subtitle = "Installed on this device",
             showChevron = false,
-            onClick = {}
+            onClick = null
         )
-        SettingsGroupDivider()
+        IosSettingsDivider()
         IosSettingsRow(
             icon = GeekifyIcons.SystemUpdate,
-            tileColor = TileTeal,
+            tileColor = IosPalette.systemTeal,
             title = "Check for Updates Now",
-            subtitle = "Query GitHub Releases for a newer Geekify APK",
+            subtitle = "Query GitHub Releases for a newer APK",
             onClick = onCheckUpdatesClick
         )
-        SettingsGroupDivider()
+        IosSettingsDivider()
         IosSettingsRow(
             icon = GeekifyIcons.OpenInNew,
-            tileColor = TileBlue,
+            tileColor = IosPalette.systemBlue,
             title = "View Releases on GitHub",
             subtitle = "Read changelogs and download APKs directly",
             onClick = {
@@ -1245,12 +1691,13 @@ private fun UpdatesSubPage(
             }
         )
         if (updateCacheBytes > 0L) {
-            SettingsGroupDivider()
+            IosSettingsDivider()
             IosSettingsRow(
                 icon = GeekifyIcons.DeleteOutline,
-                tileColor = TileRed,
+                tileColor = IosPalette.systemRed,
                 title = "Clear Downloaded Update APKs",
-                subtitle = "${formatBytes(updateCacheBytes)} in update cache",
+                value = formatBytes(updateCacheBytes),
+                destructive = true,
                 onClick = onClearUpdateCache
             )
         }
@@ -1271,8 +1718,8 @@ private fun AboutSubPage() {
     }
 
     Surface(
-        color = InkPanel,
-        shape = RoundedCornerShape(28.dp),
+        color = IosPalette.secondarySystemGroupedBackground,
+        shape = IosCardShape,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -1284,30 +1731,41 @@ private fun AboutSubPage() {
             Box(
                 modifier = Modifier
                     .size(64.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Lime.copy(alpha = 0.16f))
-                    .border(1.dp, Lime.copy(alpha = 0.4f), RoundedCornerShape(18.dp)),
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(IosPalette.systemCyan.copy(alpha = 0.16f))
+                    .border(0.5.dp, IosPalette.systemCyan.copy(alpha = 0.45f), RoundedCornerShape(16.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(GeekifyIcons.AutoAwesome, contentDescription = null, tint = Lime, modifier = Modifier.size(32.dp))
+                Icon(
+                    imageVector = GeekifyIcons.AutoAwesome,
+                    contentDescription = null,
+                    tint = IosPalette.systemCyan,
+                    modifier = Modifier.size(32.dp)
+                )
             }
             Spacer(Modifier.height(12.dp))
-            Text("Geekify", color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text(
+                text = "Geekify",
+                color = IosPalette.label,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.4).sp
+            )
             Spacer(Modifier.height(4.dp))
             Text(
-                "A midnight music space built around your queue, library, and listening trail.",
-                color = TextSecondary,
+                text = "A midnight music space built around your queue, library, and listening trail.",
+                color = IosPalette.secondaryLabel,
                 fontSize = 13.5.sp,
                 textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(12.dp))
             Surface(
-                color = InkElevated,
-                shape = RoundedCornerShape(50),
+                color = IosPalette.tertiarySystemGroupedBackground,
+                shape = CircleShape
             ) {
                 Text(
-                    text = "v${BuildConfig.VERSION_NAME} • Build ${BuildConfig.VERSION_CODE}",
-                    color = Lime,
+                    text = "v${BuildConfig.VERSION_NAME} · Build ${BuildConfig.VERSION_CODE}",
+                    color = IosPalette.label,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
@@ -1316,30 +1774,29 @@ private fun AboutSubPage() {
         }
     }
 
-    Spacer(Modifier.height(18.dp))
-    SettingsSectionHeader("BUILD & LINKS")
-    IosSettingsGroup {
+    Spacer(Modifier.height(24.dp))
+    IosSettingsSection(title = "Build & links") {
         IosSettingsRow(
             icon = GeekifyIcons.CalendarToday,
-            tileColor = TilePurple,
+            tileColor = IosPalette.systemPurple,
             title = "First Installed",
-            subtitle = installDate,
+            value = installDate,
             showChevron = false,
-            onClick = {}
+            onClick = null
         )
-        SettingsGroupDivider()
+        IosSettingsDivider()
         IosSettingsRow(
             icon = GeekifyIcons.PhoneAndroid,
-            tileColor = TileCyan,
+            tileColor = IosPalette.systemCyan,
             title = "Android Runtime",
-            subtitle = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+            value = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
             showChevron = false,
-            onClick = {}
+            onClick = null
         )
-        SettingsGroupDivider()
+        IosSettingsDivider()
         IosSettingsRow(
             icon = GeekifyIcons.Code,
-            tileColor = TileGray,
+            tileColor = IosPalette.systemGray,
             title = "GitHub Repository",
             subtitle = "github.com/Amal-kphilip/Geekify-App",
             onClick = {
@@ -1354,302 +1811,199 @@ private fun AboutSubPage() {
 }
 
 // ============================================================================
-// SHARED SETTINGS BUILDING BLOCKS
+// DEEP SEARCH REGISTRY
 // ============================================================================
-
-@Composable
-private fun SettingsSearchBar(
-    query: String,
-    onQueryChange: (String) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(46.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(InkPanel)
-            .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(16.dp))
-            .padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = GeekifyIcons.Search,
-            contentDescription = "Search settings",
-            tint = TextMuted,
-            modifier = Modifier.size(20.dp)
-        )
-        Spacer(Modifier.width(10.dp))
-        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-            if (query.isEmpty()) {
-                Text("Search settings...", color = TextMuted, fontSize = 14.5.sp)
-            }
-            BasicTextField(
-                value = query,
-                onValueChange = onQueryChange,
-                singleLine = true,
-                textStyle = TextStyle(color = TextPrimary, fontSize = 14.5.sp),
-                cursorBrush = SolidColor(Lime),
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-        if (query.isNotEmpty()) {
-            IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(28.dp)) {
-                Icon(GeekifyIcons.Clear, contentDescription = "Clear", tint = TextSecondary, modifier = Modifier.size(18.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProfileSettingsCard(
-    user: AccountUser?,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(26.dp))
-            .background(InkPanel)
-            .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(26.dp))
-            .bouncyClickable(pressedScale = 0.98f, onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(54.dp)
-                .clip(CircleShape)
-                .background(InkElevated),
-            contentAlignment = Alignment.Center
-        ) {
-            if (!user?.photoUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = user?.photoUrl,
-                    contentDescription = user?.name,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Icon(
-                    imageVector = GeekifyIcons.Person,
-                    contentDescription = null,
-                    tint = Lime,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-        }
-        Spacer(Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = user?.name?.ifBlank { "Geekify Listener" } ?: "Sign in to Geekify",
-                color = TextPrimary,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = user?.email ?: "Cloud sync, profile & account",
-                color = TextSecondary,
-                fontSize = 13.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        Icon(GeekifyIcons.ChevronRight, contentDescription = null, tint = TextMuted)
-    }
-}
-
-@Composable
-private fun SettingsSectionHeader(title: String) {
-    Text(
-        text = title,
-        color = TextMuted,
-        fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
-        letterSpacing = 0.8.sp,
-        modifier = Modifier.padding(start = 14.dp, bottom = 8.dp)
+private fun buildSearchRegistry(
+    openPage: (SettingsSubPage) -> Unit,
+    onProfileClick: () -> Unit,
+    onListenTogetherClick: () -> Unit,
+    onListeningStatsClick: () -> Unit,
+    onRecentsClick: () -> Unit,
+    onAudioClick: () -> Unit,
+    onAppIconClick: () -> Unit,
+    onHealthClick: () -> Unit
+): List<SearchableSettingEntry> = listOf(
+    SearchableSettingEntry(
+        title = "Account & Cloud Sync",
+        subtitle = "Sign in, profile, and cloud playlist sync",
+        category = "Account",
+        keywords = listOf("profile", "login", "sign in", "google", "sync", "account"),
+        icon = GeekifyIcons.Person,
+        tint = IosPalette.systemBlue,
+        onSelect = onProfileClick
+    ),
+    SearchableSettingEntry(
+        title = "Listen Together",
+        subtitle = "Host or join synchronized listening rooms",
+        category = "Activity & Social",
+        keywords = listOf("room", "party", "friends", "live", "together"),
+        icon = GeekifyIcons.Groups,
+        tint = IosPalette.systemCyan,
+        onSelect = onListenTogetherClick
+    ),
+    SearchableSettingEntry(
+        title = "Listening Statistics",
+        subtitle = "Top songs, artists, and listening streaks",
+        category = "Activity & Social",
+        keywords = listOf("stats", "analytics", "minutes", "top tracks", "wrapped"),
+        icon = GeekifyIcons.Insights,
+        tint = IosPalette.systemPurple,
+        onSelect = onListeningStatsClick
+    ),
+    SearchableSettingEntry(
+        title = "Recents & History",
+        subtitle = "Recently played songs across your sessions",
+        category = "Activity & Social",
+        keywords = listOf("history", "recent", "played", "log"),
+        icon = GeekifyIcons.History,
+        tint = IosPalette.systemOrange,
+        onSelect = onRecentsClick
+    ),
+    SearchableSettingEntry(
+        title = "Liquid Glass",
+        subtitle = "Real-time AGSL lens refraction and backdrop blur",
+        category = "Appearance",
+        keywords = listOf("glass", "blur", "refraction", "lens", "vibrancy", "saturation", "shader"),
+        icon = GeekifyIcons.AutoAwesome,
+        tint = IosPalette.systemCyan,
+        onSelect = { openPage(SettingsSubPage.APPEARANCE) }
+    ),
+    SearchableSettingEntry(
+        title = "Mini Player & Navigation Bar Glass",
+        subtitle = "Toggle liquid glass on the Mini Player or bottom bar",
+        category = "Appearance",
+        keywords = listOf("mini player", "nav bar", "navigation bar", "floating bar", "pill"),
+        icon = GeekifyIcons.Navigation,
+        tint = IosPalette.systemBlue,
+        onSelect = { openPage(SettingsSubPage.APPEARANCE) }
+    ),
+    SearchableSettingEntry(
+        title = "Chromatic Aberration & Depth",
+        subtitle = "Optical RGB dispersion and spherical lens depth",
+        category = "Appearance",
+        keywords = listOf("chromatic", "aberration", "depth", "spherical", "bevel", "tint"),
+        icon = GeekifyIcons.Flare,
+        tint = IosPalette.systemPurple,
+        onSelect = { openPage(SettingsSubPage.APPEARANCE) }
+    ),
+    SearchableSettingEntry(
+        title = "Adaptive Bottom Bar & Default Tab",
+        subtitle = "Scroll collapse behavior and startup tab",
+        category = "Appearance",
+        keywords = listOf("default tab", "home", "search", "library", "collapse", "scroll"),
+        icon = GeekifyIcons.ViewDay,
+        tint = IosPalette.systemTeal,
+        onSelect = { openPage(SettingsSubPage.APPEARANCE) }
+    ),
+    SearchableSettingEntry(
+        title = "App Icon",
+        subtitle = "Choose the home screen launcher icon",
+        category = "Appearance",
+        keywords = listOf("icon", "launcher", "logo", "home screen"),
+        icon = GeekifyIcons.Apps,
+        tint = IosPalette.systemBlue,
+        onSelect = onAppIconClick
+    ),
+    SearchableSettingEntry(
+        title = "Equalizer & Audio Effects",
+        subtitle = "5-band EQ, presets, speed, pitch & volume normalization",
+        category = "Player & Audio",
+        keywords = listOf("eq", "equalizer", "bass", "tempo", "speed", "pitch", "skip silence", "normalize"),
+        icon = GeekifyIcons.GraphicEq,
+        tint = IosPalette.systemGreen,
+        onSelect = onAudioClick
+    ),
+    SearchableSettingEntry(
+        title = "Streaming Audio Quality",
+        subtitle = "High, Normal, or Data Saver audio bitrate",
+        category = "Player & Audio",
+        keywords = listOf("quality", "bitrate", "kbps", "stream", "data saver", "high quality"),
+        icon = GeekifyIcons.HighQuality,
+        tint = IosPalette.systemRed,
+        onSelect = { openPage(SettingsSubPage.PLAYER) }
+    ),
+    SearchableSettingEntry(
+        title = "Persistent Queue & Endless Autoplay",
+        subtitle = "Save queue across restarts and auto-queue related tracks",
+        category = "Player & Audio",
+        keywords = listOf("queue", "autoplay", "shuffle", "repeat", "keep screen on", "skip error"),
+        icon = GeekifyIcons.QueueMusic,
+        tint = IosPalette.systemPurple,
+        onSelect = { openPage(SettingsSubPage.PLAYER) }
+    ),
+    SearchableSettingEntry(
+        title = "Content Country & Language",
+        subtitle = "Regional charts, new releases, and catalog language",
+        category = "Content & Region",
+        keywords = listOf("country", "region", "language", "india", "united states", "hindi", "malayalam", "tamil"),
+        icon = GeekifyIcons.Language,
+        tint = IosPalette.systemBlue,
+        onSelect = { openPage(SettingsSubPage.CONTENT) }
+    ),
+    SearchableSettingEntry(
+        title = "Hide Explicit Content",
+        subtitle = "Filter explicit songs from Home, Search, and Autoplay",
+        category = "Content & Region",
+        keywords = listOf("explicit", "clean", "filter", "restrict"),
+        icon = GeekifyIcons.Explicit,
+        tint = IosPalette.systemRed,
+        onSelect = { openPage(SettingsSubPage.CONTENT) }
+    ),
+    SearchableSettingEntry(
+        title = "Notifications",
+        subtitle = "App updates, feature tips, and listening reminders",
+        category = "Notifications",
+        keywords = listOf("notifications", "alerts", "reminders", "tips"),
+        icon = GeekifyIcons.Notifications,
+        tint = IosPalette.systemYellow,
+        onSelect = { openPage(SettingsSubPage.NOTIFICATIONS) }
+    ),
+    SearchableSettingEntry(
+        title = "Privacy, History & Screenshots",
+        subtitle = "Pause or clear listening history and block screenshots",
+        category = "Privacy & Security",
+        keywords = listOf("privacy", "security", "pause history", "clear history", "screenshots", "incognito"),
+        icon = GeekifyIcons.Shield,
+        tint = IosPalette.systemIndigo,
+        onSelect = { openPage(SettingsSubPage.PRIVACY) }
+    ),
+    SearchableSettingEntry(
+        title = "Storage, Cache & Library Backup",
+        subtitle = "Clear audio/image cache, export or restore JSON backup",
+        category = "Storage & Backup",
+        keywords = listOf("storage", "cache", "clear", "backup", "restore", "export", "import", "json"),
+        icon = GeekifyIcons.Storage,
+        tint = IosPalette.systemGreen,
+        onSelect = { openPage(SettingsSubPage.STORAGE) }
+    ),
+    SearchableSettingEntry(
+        title = "Software Update",
+        subtitle = "Check GitHub Releases for a newer version",
+        category = "Software Update",
+        keywords = listOf("update", "version", "apk", "release", "github"),
+        icon = GeekifyIcons.SystemUpdate,
+        tint = IosPalette.systemTeal,
+        onSelect = { openPage(SettingsSubPage.UPDATES) }
+    ),
+    SearchableSettingEntry(
+        title = "Extractor Health",
+        subtitle = "Stream resolver and catalog diagnostics",
+        category = "Diagnostics",
+        keywords = listOf("health", "extractor", "diagnostics", "stream"),
+        icon = GeekifyIcons.MonitorHeart,
+        tint = IosPalette.systemMint,
+        onSelect = onHealthClick
+    ),
+    SearchableSettingEntry(
+        title = "About Geekify",
+        subtitle = "Version info, runtime details, and repository link",
+        category = "About",
+        keywords = listOf("about", "version", "build", "credits", "github"),
+        icon = GeekifyIcons.Info,
+        tint = IosPalette.systemGray,
+        onSelect = { openPage(SettingsSubPage.ABOUT) }
     )
-}
-
-@Composable
-private fun IosSettingsGroup(
-    content: @Composable ColumnScope.() -> Unit
-) {
-    Surface(
-        color = InkPanel,
-        shape = RoundedCornerShape(24.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(24.dp))
-    ) {
-        Column(modifier = Modifier.fillMaxWidth(), content = content)
-    }
-}
-
-@Composable
-private fun SettingsGroupDivider() {
-    HorizontalDivider(
-        modifier = Modifier.padding(start = 60.dp, end = 16.dp),
-        thickness = 0.6.dp,
-        color = Color.White.copy(alpha = 0.07f)
-    )
-}
-
-@Composable
-private fun IosSettingsRow(
-    icon: ImageVector,
-    tileColor: Color,
-    title: String,
-    subtitle: String? = null,
-    showChevron: Boolean = true,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = showChevron, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(tileColor),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(19.dp)
-            )
-        }
-        Spacer(Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                color = TextPrimary,
-                fontSize = 15.5.sp,
-                fontWeight = FontWeight.Medium
-            )
-            if (!subtitle.isNullOrBlank()) {
-                Text(
-                    text = subtitle,
-                    color = TextSecondary,
-                    fontSize = 12.5.sp,
-                    modifier = Modifier.padding(top = 1.dp)
-                )
-            }
-        }
-        if (showChevron) {
-            Spacer(Modifier.width(8.dp))
-            Icon(
-                imageVector = GeekifyIcons.ChevronRight,
-                contentDescription = null,
-                tint = TextMuted,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun IosSettingsSwitchRow(
-    icon: ImageVector,
-    tileColor: Color,
-    title: String,
-    subtitle: String? = null,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onCheckedChange(!checked) }
-            .padding(horizontal = 16.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(tileColor),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(19.dp)
-            )
-        }
-        Spacer(Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                color = TextPrimary,
-                fontSize = 15.5.sp,
-                fontWeight = FontWeight.Medium
-            )
-            if (!subtitle.isNullOrBlank()) {
-                Text(
-                    text = subtitle,
-                    color = TextSecondary,
-                    fontSize = 12.5.sp,
-                    modifier = Modifier.padding(top = 1.dp)
-                )
-            }
-        }
-        Spacer(Modifier.width(10.dp))
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = OnAccent,
-                checkedTrackColor = Lime,
-                uncheckedThumbColor = TextSecondary,
-                uncheckedTrackColor = InkElevated
-            )
-        )
-    }
-}
-
-@Composable
-private fun IosSettingsSliderRow(
-    title: String,
-    valueLabel: String,
-    value: Float,
-    valueRange: ClosedFloatingPointRange<Float>,
-    onValueChange: (Float) -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(title, color = TextPrimary, fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
-            Text(valueLabel, color = Lime, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-        }
-        Slider(
-            value = value,
-            onValueChange = onValueChange,
-            valueRange = valueRange,
-            colors = SliderDefaults.colors(
-                thumbColor = Lime,
-                activeTrackColor = Lime,
-                inactiveTrackColor = InkElevated
-            )
-        )
-    }
-}
+)
 
 @Composable
 private fun <T> OptionPickerDialog(
@@ -1660,7 +2014,7 @@ private fun <T> OptionPickerDialog(
     onDismiss: () -> Unit
 ) {
     GeekifyDialog(onDismissRequest = onDismiss) {
-        Text(title, color = TextPrimary, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+        Text(title, color = IosPalette.label, fontSize = 19.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
         Column(
             modifier = Modifier
@@ -1674,12 +2028,15 @@ private fun <T> OptionPickerDialog(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(if (isSelected) Lime.copy(alpha = 0.14f) else InkElevated)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(
+                            if (isSelected) IosPalette.systemBlue.copy(alpha = 0.18f)
+                            else IosPalette.tertiarySystemGroupedBackground
+                        )
                         .border(
                             width = 1.dp,
-                            color = if (isSelected) Lime.copy(alpha = 0.55f) else Color.Transparent,
-                            shape = RoundedCornerShape(16.dp)
+                            color = if (isSelected) IosPalette.systemBlue.copy(alpha = 0.65f) else Color.Transparent,
+                            shape = RoundedCornerShape(14.dp)
                         )
                         .clickable { onSelect(value) }
                         .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -1688,25 +2045,30 @@ private fun <T> OptionPickerDialog(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = labels.first,
-                            color = if (isSelected) Lime else TextPrimary,
-                            fontSize = 15.sp,
+                            color = if (isSelected) IosPalette.systemBlue else IosPalette.label,
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
                             text = labels.second,
-                            color = TextSecondary,
-                            fontSize = 12.sp
+                            color = IosPalette.secondaryLabel,
+                            fontSize = 12.5.sp
                         )
                     }
                     if (isSelected) {
-                        Icon(GeekifyIcons.Check, contentDescription = null, tint = Lime, modifier = Modifier.size(20.dp))
+                        Icon(
+                            imageVector = GeekifyIcons.Check,
+                            contentDescription = null,
+                            tint = IosPalette.systemBlue,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
             }
         }
         Spacer(Modifier.height(16.dp))
         DialogPillButton(
-            text = "Close",
+            text = "Cancel",
             onClick = onDismiss,
             style = DialogButtonStyle.Secondary,
             modifier = Modifier.fillMaxWidth()
