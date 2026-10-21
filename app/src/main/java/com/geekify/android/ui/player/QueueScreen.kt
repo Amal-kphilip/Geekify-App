@@ -1,5 +1,7 @@
 package com.geekify.android.ui.player
 
+import com.geekify.android.ui.theme.GeekifyIcons
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -11,11 +13,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.ClearAll
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -180,7 +177,7 @@ fun QueueScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     CircleIconButton(
-                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        icon = GeekifyIcons.ArrowBack,
                         contentDescription = "Back",
                         onClick = onBack,
                         size = 50.dp
@@ -195,7 +192,7 @@ fun QueueScreen(
                     )
                     if (state.queue.isNotEmpty()) {
                         CircleIconButton(
-                            icon = Icons.Default.ClearAll,
+                            icon = GeekifyIcons.ClearAll,
                             contentDescription = "Clear Queue",
                             onClick = { viewModel.clearQueue() },
                             size = 50.dp
@@ -295,7 +292,7 @@ fun QueueScreen(
                                                 }
                                             } else null,
                                             onMoreClick = { viewModel.removeFromQueue(index) },
-                                            moreIcon = Icons.Default.Close,
+                                            moreIcon = GeekifyIcons.Close,
                                             moreContentDescription = "Remove from queue",
                                             marqueeTitle = true
                                         )

@@ -1,4 +1,6 @@
 package com.geekify.android.ui.library
+
+import com.geekify.android.ui.theme.GeekifyIcons
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
@@ -21,9 +23,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -97,7 +96,7 @@ fun ListeningStatsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 CircleIconButton(
-                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    icon = GeekifyIcons.ArrowBack,
                     contentDescription = "Back",
                     onClick = onBack,
                     size = 50.dp
@@ -126,7 +125,7 @@ fun ListeningStatsScreen(
                     shape = RoundedCornerShape(24.dp)
                 ) {
                     Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.GraphicEq, contentDescription = null, tint = Lime, modifier = Modifier.size(34.dp))
+                        Icon(GeekifyIcons.GraphicEq, contentDescription = null, tint = Lime, modifier = Modifier.size(34.dp))
                         Spacer(Modifier.height(10.dp))
                         Text("Your listening story starts here", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                         Spacer(Modifier.height(6.dp))

@@ -19,21 +19,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.QueueMusic
-import androidx.compose.material.icons.filled.Repeat
-import androidx.compose.material.icons.filled.RepeatOne
-import androidx.compose.material.icons.filled.Shuffle
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -236,7 +221,7 @@ fun ExpandedPlayerScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 CircleIconButton(
-                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    icon = GeekifyIcons.ArrowBack,
                     contentDescription = "Collapse",
                     onClick = onDismiss,
                     size = 50.dp,
@@ -251,7 +236,7 @@ fun ExpandedPlayerScreen(
                     textAlign = TextAlign.Center
                 )
                 CircleIconButton(
-                    icon = Icons.Default.Timer,
+                    icon = GeekifyIcons.Timer,
                     contentDescription = if (sleepTimerRemainingMs != null) "Sleep timer active" else "Sleep timer",
                     onClick = { showSleepTimer = true },
                     size = 50.dp,
@@ -260,7 +245,7 @@ fun ExpandedPlayerScreen(
                 )
                 Spacer(Modifier.width(8.dp))
                 CircleIconButton(
-                    icon = if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                    icon = if (isLiked) GeekifyIcons.Favorite else GeekifyIcons.FavoriteBorder,
                     contentDescription = if (isLiked) "Remove from Liked Songs" else "Add to Liked Songs",
                     onClick = { viewModel.toggleLikeCurrent() },
                     size = 50.dp,
@@ -366,7 +351,7 @@ fun ExpandedPlayerScreen(
                 Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
                     IconButton(onClick = { viewModel.cycleRepeat() }, modifier = Modifier.size(34.dp)) {
                         Icon(
-                            imageVector = if (state.repeat == RepeatMode.ONE) Icons.Default.RepeatOne else Icons.Default.Repeat,
+                            imageVector = if (state.repeat == RepeatMode.ONE) GeekifyIcons.RepeatOne else GeekifyIcons.Repeat,
                             contentDescription = "Repeat",
                             tint = if (state.repeat != RepeatMode.OFF) Lime else TextSecondary,
                             modifier = Modifier.size(20.dp)
@@ -392,7 +377,7 @@ fun ExpandedPlayerScreen(
             ) {
                 IconButton(onClick = { viewModel.toggleShuffle() }) {
                     Icon(
-                        Icons.Default.Shuffle,
+                        GeekifyIcons.Shuffle,
                         contentDescription = "Shuffle",
                         tint = if (state.shuffle) Lime else TextPrimary,
                         modifier = Modifier.size(26.dp)
@@ -400,11 +385,11 @@ fun ExpandedPlayerScreen(
                 }
 
                 CircleIconButton(
-                    icon = Icons.Default.SkipPrevious,
+                    icon = GeekifyIcons.SkipPrevious,
                     contentDescription = "Previous",
                     onClick = { viewModel.previous() },
                     size = 54.dp,
-                    iconSize = 28.dp,
+                    iconSize = 24.dp,
                     container = Color(0xFF211F28)
                 )
 
@@ -421,26 +406,26 @@ fun ExpandedPlayerScreen(
                     } else {
                         Crossfade(targetState = state.isPlaying, animationSpec = tween(180), label = "bigPlay") { playing ->
                             Icon(
-                                imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                imageVector = if (playing) GeekifyIcons.Pause else GeekifyIcons.Play,
                                 contentDescription = if (playing) "Pause" else "Play",
                                 tint = OnAccent,
-                                modifier = Modifier.size(36.dp)
+                                modifier = Modifier.size(30.dp)
                             )
                         }
                     }
                 }
 
                 CircleIconButton(
-                    icon = Icons.Default.SkipNext,
+                    icon = GeekifyIcons.SkipNext,
                     contentDescription = "Next",
                     onClick = { viewModel.next() },
                     size = 54.dp,
-                    iconSize = 28.dp,
+                    iconSize = 24.dp,
                     container = Color(0xFF211F28)
                 )
 
                 IconButton(onClick = onQueueClick) {
-                    Icon(Icons.Default.QueueMusic, contentDescription = "Queue", tint = TextPrimary, modifier = Modifier.size(26.dp))
+                    Icon(GeekifyIcons.QueueMusic, contentDescription = "Queue", tint = TextPrimary, modifier = Modifier.size(26.dp))
                 }
             }
 
@@ -481,7 +466,7 @@ private fun SleepTimerDialog(
                     .background(InkElevated),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.Timer, contentDescription = null, tint = Lime, modifier = Modifier.size(24.dp))
+                Icon(GeekifyIcons.Timer, contentDescription = null, tint = Lime, modifier = Modifier.size(24.dp))
             }
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {

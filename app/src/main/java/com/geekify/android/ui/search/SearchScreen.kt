@@ -10,10 +10,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -69,11 +65,11 @@ fun SearchScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = if (searching) 8.dp else 0.dp),
                 placeholder = { Text("What do you want to listen to?", color = TextSecondary, fontWeight = FontWeight.Normal) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextSecondary) },
+                leadingIcon = { Icon(GeekifyIcons.Search, contentDescription = null, tint = TextSecondary) },
                 trailingIcon = {
                     if (state.query.isNotEmpty()) {
                         IconButton(onClick = { viewModel.onQueryChange("") }) {
-                            Icon(Icons.Default.Clear, contentDescription = "Clear", tint = TextSecondary)
+                            Icon(GeekifyIcons.Clear, contentDescription = "Clear", tint = TextSecondary)
                         }
                     }
                 },
@@ -214,7 +210,7 @@ private fun CategoryTile(title: String, color: Color, onClick: () -> Unit) {
                 .background(OnPastel.copy(alpha = 0.14f)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Default.MusicNote, contentDescription = null, tint = OnPastel.copy(alpha = 0.7f), modifier = Modifier.size(32.dp))
+            Icon(GeekifyIcons.MusicNote, contentDescription = null, tint = OnPastel.copy(alpha = 0.7f), modifier = Modifier.size(32.dp))
         }
     }
 }

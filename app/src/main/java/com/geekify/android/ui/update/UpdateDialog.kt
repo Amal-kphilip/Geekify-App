@@ -19,9 +19,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -141,7 +138,7 @@ fun UpdateDialog(
                         Text("Geekify $newVersion", color = TextSecondary, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
                     }
                     Icon(
-                        Icons.Outlined.FileDownload,
+                        GeekifyIcons.FileDownload,
                         contentDescription = null,
                         tint = Lime,
                         modifier = Modifier.size(24.dp)
@@ -232,7 +229,7 @@ fun UpdateDialog(
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
-                                        Icons.Filled.CheckCircle,
+                                        GeekifyIcons.CheckCircle,
                                         contentDescription = null,
                                         tint = Lime,
                                         modifier = Modifier.size(20.dp)
@@ -314,7 +311,7 @@ private fun parseReleaseNotes(markdown: String): List<ReleaseNoteSection> {
     return sections
 }
 
-/** Scrollable release-notes section inspired by Morphe's update-dialog changelog. */
+/** Scrollable release-notes changelog section. */
 @Composable
 private fun ReleaseNotesPanel(markdown: String) {
     val sections = androidx.compose.runtime.remember(markdown) { parseReleaseNotes(markdown) }

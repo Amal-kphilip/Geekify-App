@@ -8,10 +8,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -77,7 +73,7 @@ fun ArtistScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             CircleIconButton(
-                                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                                icon = GeekifyIcons.ArrowBack,
                                 contentDescription = "Back",
                                 onClick = onBack,
                                 size = 50.dp,
@@ -99,7 +95,7 @@ fun ArtistScreen(
                                     contentScale = ContentScale.Crop
                                 )
                             } else {
-                                Icon(Icons.Default.Person, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(80.dp))
+                                Icon(GeekifyIcons.Person, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(80.dp))
                             }
                         }
                         Spacer(Modifier.height(16.dp))
@@ -119,7 +115,7 @@ fun ArtistScreen(
                                     .bouncyClickable(pressedScale = 0.92f) { onTrackClick(artist.songs.first(), artist.songs) },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = "Play top songs", tint = OnAccent, modifier = Modifier.size(34.dp))
+                                Icon(GeekifyIcons.Play, contentDescription = "Play top songs", tint = OnAccent, modifier = Modifier.size(24.dp))
                             }
                         }
                         Spacer(Modifier.height(12.dp))

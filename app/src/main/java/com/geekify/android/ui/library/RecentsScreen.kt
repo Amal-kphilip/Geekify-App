@@ -3,9 +3,6 @@ package com.geekify.android.ui.library
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.lifecycle.ViewModel
@@ -32,14 +29,14 @@ fun RecentsScreen(viewModel: RecentsViewModel, onBack: () -> Unit, onPlay: (Trac
     AuroraBackground {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                CircleIconButton(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", onClick = onBack, size = 50.dp)
+                CircleIconButton(icon = GeekifyIcons.ArrowBack, contentDescription = "Back", onClick = onBack, size = 50.dp)
                 Text("Recents", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
                 Spacer(Modifier.size(50.dp))
             }
             if (tracks.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.History, null, tint = Lime, modifier = Modifier.size(40.dp))
+                        Icon(GeekifyIcons.History, null, tint = Lime, modifier = Modifier.size(40.dp))
                         Spacer(Modifier.height(12.dp))
                         Text("Your listening trail starts here", color = TextSecondary)
                     }

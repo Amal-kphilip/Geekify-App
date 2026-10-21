@@ -18,17 +18,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.LibraryMusic
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.LibraryMusic
-import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import com.geekify.android.ui.theme.GeekifyIcons
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -366,8 +358,8 @@ private fun MainTabCapsule(
             ) {
                 TabItem(
                     selected = selectedIndex == 0,
-                    selectedIcon = Icons.Filled.Home,
-                    icon = Icons.Outlined.Home,
+                    selectedIcon = GeekifyIcons.Home,
+                    icon = GeekifyIcons.Home,
                     label = "Home",
                     modifier = Modifier
                         .weight(1f)
@@ -376,8 +368,8 @@ private fun MainTabCapsule(
                 )
                 TabItem(
                     selected = selectedIndex == 1,
-                    selectedIcon = Icons.Filled.LibraryMusic,
-                    icon = Icons.Outlined.LibraryMusic,
+                    selectedIcon = GeekifyIcons.Library,
+                    icon = GeekifyIcons.Library,
                     label = "Library",
                     modifier = Modifier
                         .weight(1f)
@@ -386,8 +378,8 @@ private fun MainTabCapsule(
                 )
                 TabItem(
                     selected = false,
-                    selectedIcon = Icons.Filled.Add,
-                    icon = Icons.Outlined.Add,
+                    selectedIcon = GeekifyIcons.Add,
+                    icon = GeekifyIcons.Add,
                     label = "Create",
                     modifier = Modifier
                         .weight(1f)
@@ -468,7 +460,7 @@ private fun SearchCircleButton(
             )
         }
         Icon(
-            imageVector = if (isSelected) Icons.Filled.Search else Icons.Outlined.Search,
+            imageVector = GeekifyIcons.Search,
             contentDescription = "Search",
             tint = if (isSelected) Lime else Color.White.copy(alpha = 0.90f),
             modifier = Modifier.size(if (size >= 60.dp) 24.dp else 22.dp)
@@ -488,9 +480,9 @@ private fun ActiveTabCircleButton(
     val pressAnim by animateFloatAsState(if (pressed.value) 1f else 0f, label = "activePress")
 
     val (icon, desc) = when {
-        currentRoute == Screen.Library.route || libraryDetailActive -> Icons.Filled.LibraryMusic to "Library"
-        currentRoute == Screen.Search.route -> Icons.Filled.Search to "Search"
-        else -> Icons.Filled.Home to "Home"
+        currentRoute == Screen.Library.route || libraryDetailActive -> GeekifyIcons.Library to "Library"
+        currentRoute == Screen.Search.route -> GeekifyIcons.Search to "Search"
+        else -> GeekifyIcons.Home to "Home"
     }
 
     Box(

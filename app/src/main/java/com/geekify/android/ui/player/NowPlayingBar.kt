@@ -11,14 +11,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Shuffle
-import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -129,7 +121,7 @@ fun NowPlayingBar(
                             contentScale = ContentScale.Crop
                         )
                     } else {
-                        Icon(Icons.Default.MusicNote, contentDescription = null, tint = TextSecondary)
+                        Icon(GeekifyIcons.MusicNote, contentDescription = null, tint = TextSecondary)
                     }
                 }
             }
@@ -174,7 +166,7 @@ fun NowPlayingBar(
             }
 
             val playSize = if (isInline) 38.dp else 44.dp
-            val playIconSize = if (isInline) 22.dp else 26.dp
+            val playIconSize = if (isInline) 18.dp else 21.dp
             Box(
                 modifier = Modifier
                     .size(playSize)
@@ -192,7 +184,7 @@ fun NowPlayingBar(
                 } else {
                     Crossfade(targetState = state.isPlaying, animationSpec = tween(150), label = "miniPlay") { playing ->
                         Icon(
-                            imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            imageVector = if (playing) GeekifyIcons.Pause else GeekifyIcons.Play,
                             contentDescription = if (playing) "Pause" else "Play",
                             tint = OnAccent,
                             modifier = Modifier.size(playIconSize)
@@ -205,7 +197,7 @@ fun NowPlayingBar(
                 Spacer(Modifier.width(2.dp))
 
                 IconButton(onClick = { viewModel.next() }, modifier = Modifier.size(40.dp)) {
-                    Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(26.dp))
+                    Icon(GeekifyIcons.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(22.dp))
                 }
 
                 Box(
@@ -218,10 +210,10 @@ fun NowPlayingBar(
 
                 IconButton(onClick = { viewModel.toggleShuffle() }, modifier = Modifier.size(40.dp)) {
                     Icon(
-                        Icons.Default.Shuffle,
+                        GeekifyIcons.Shuffle,
                         contentDescription = "Shuffle",
                         tint = if (state.shuffle) Lime else Color.White,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
@@ -270,7 +262,7 @@ fun LikeButton(
     IconButton(onClick = onClick, modifier = modifier) {
         Crossfade(targetState = liked, animationSpec = tween(150), label = "likeIcon") { isLiked ->
             Icon(
-                imageVector = if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                imageVector = if (isLiked) GeekifyIcons.Favorite else GeekifyIcons.FavoriteBorder,
                 contentDescription = "Like",
                 tint = if (isLiked) Lime else Color.White.copy(alpha = 0.85f),
                 modifier = Modifier

@@ -24,9 +24,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -203,7 +200,7 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         CircleIconButton(
-                            icon = Icons.AutoMirrored.Filled.ArrowBack,
+                            icon = GeekifyIcons.ArrowBack,
                             contentDescription = "Back",
                             onClick = {
                                 if (page == SettingsSubPage.ROOT) onBack()
@@ -238,10 +235,10 @@ fun SettingsScreen(
                                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Lime, modifier = Modifier.size(18.dp))
+                                    Icon(GeekifyIcons.CheckCircle, contentDescription = null, tint = Lime, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(10.dp))
                                     Text(msg, color = TextPrimary, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
-                                    Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = TextSecondary, modifier = Modifier.size(16.dp))
+                                    Icon(GeekifyIcons.Close, contentDescription = "Dismiss", tint = TextSecondary, modifier = Modifier.size(16.dp))
                                 }
                             }
                         }
@@ -369,7 +366,7 @@ private fun RootSettingsContent(
                 if (showListenTogether) {
                     add {
                         IosSettingsRow(
-                            icon = Icons.Default.Groups,
+                            icon = GeekifyIcons.Groups,
                             tileColor = TilePink,
                             title = "Listen Together",
                             subtitle = "Host or join live synchronized listening rooms",
@@ -380,7 +377,7 @@ private fun RootSettingsContent(
                 if (showStats) {
                     add {
                         IosSettingsRow(
-                            icon = Icons.Default.Insights,
+                            icon = GeekifyIcons.Insights,
                             tileColor = TilePurple,
                             title = "Listening Statistics",
                             subtitle = "Your top tracks, artists, and listening streaks",
@@ -391,7 +388,7 @@ private fun RootSettingsContent(
                 if (showHistory) {
                     add {
                         IosSettingsRow(
-                            icon = Icons.Default.History,
+                            icon = GeekifyIcons.History,
                             tileColor = TileOrange,
                             title = "Recents & History",
                             subtitle = "Recently played songs across your sessions",
@@ -423,7 +420,7 @@ private fun RootSettingsContent(
                 if (showAppearance) {
                     add {
                         IosSettingsRow(
-                            icon = Icons.Default.AutoAwesome,
+                            icon = GeekifyIcons.AutoAwesome,
                             tileColor = TileCyan,
                             title = "Appearance & Liquid Glass",
                             subtitle = if (state.glass.enabled) "Liquid Glass On • ${state.glass.blurDp.roundToInt()}dp blur" else "Liquid Glass Off",
@@ -434,7 +431,7 @@ private fun RootSettingsContent(
                 if (showAppIcon) {
                     add {
                         IosSettingsRow(
-                            icon = Icons.Default.Apps,
+                            icon = GeekifyIcons.Apps,
                             tileColor = TileIndigo,
                             title = "App Icon",
                             subtitle = "Choose the Geekify launcher icon",
@@ -445,7 +442,7 @@ private fun RootSettingsContent(
                 if (showPlayer) {
                     add {
                         IosSettingsRow(
-                            icon = Icons.Default.PlayCircleFilled,
+                            icon = GeekifyIcons.PlayCircleFilled,
                             tileColor = TileRed,
                             title = "Player & Playback",
                             subtitle = "${state.audioQuality.label} quality • Queue & autoplay",
@@ -456,7 +453,7 @@ private fun RootSettingsContent(
                 if (showEq) {
                     add {
                         IosSettingsRow(
-                            icon = Icons.Default.GraphicEq,
+                            icon = GeekifyIcons.GraphicEq,
                             tileColor = TileOrange,
                             title = "Equalizer & Audio Effects",
                             subtitle = "5-band EQ, presets, speed, pitch, normalization",
@@ -468,7 +465,7 @@ private fun RootSettingsContent(
                     val countryName = COUNTRIES.firstOrNull { it.first == state.contentCountry }?.second ?: state.contentCountry
                     add {
                         IosSettingsRow(
-                            icon = Icons.Default.Language,
+                            icon = GeekifyIcons.Language,
                             tileColor = TileBlue,
                             title = "Content & Region",
                             subtitle = "$countryName • ${if (state.hideExplicit) "Explicit hidden" else "All content"}",
@@ -479,7 +476,7 @@ private fun RootSettingsContent(
                 if (showNotif) {
                     add {
                         IosSettingsRow(
-                            icon = Icons.Default.Notifications,
+                            icon = GeekifyIcons.Notifications,
                             tileColor = TileAmber,
                             title = "Notifications",
                             subtitle = "Updates, feature tips & listening reminders",
@@ -510,7 +507,7 @@ private fun RootSettingsContent(
                 if (showPrivacy) {
                     add {
                         IosSettingsRow(
-                            icon = Icons.Default.Shield,
+                            icon = GeekifyIcons.Shield,
                             tileColor = TileIndigo,
                             title = "Privacy & Security",
                             subtitle = if (state.pauseListenHistory) "History paused" else "History & screenshot controls",
@@ -521,7 +518,7 @@ private fun RootSettingsContent(
                 if (showStorage) {
                     add {
                         IosSettingsRow(
-                            icon = Icons.Default.Storage,
+                            icon = GeekifyIcons.Storage,
                             tileColor = TileGreen,
                             title = "Storage, Cache & Backup",
                             subtitle = "${formatBytes(storageTotalBytes)} used • Library backup & restore",
@@ -532,7 +529,7 @@ private fun RootSettingsContent(
                 if (showUpdates) {
                     add {
                         IosSettingsRow(
-                            icon = Icons.Default.SystemUpdate,
+                            icon = GeekifyIcons.SystemUpdate,
                             tileColor = TileTeal,
                             title = "Software Update",
                             subtitle = "v${BuildConfig.VERSION_NAME} installed • Check for updates",
@@ -543,7 +540,7 @@ private fun RootSettingsContent(
                 if (showHealth) {
                     add {
                         IosSettingsRow(
-                            icon = Icons.Default.MonitorHeart,
+                            icon = GeekifyIcons.MonitorHeart,
                             tileColor = TileMint,
                             title = "Extractor Health",
                             subtitle = "Stream resolver & YouTube client diagnostics",
@@ -554,7 +551,7 @@ private fun RootSettingsContent(
                 if (showAbout) {
                     add {
                         IosSettingsRow(
-                            icon = Icons.Default.Info,
+                            icon = GeekifyIcons.Info,
                             tileColor = TileGray,
                             title = "About Geekify",
                             subtitle = "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
@@ -652,7 +649,7 @@ private fun AppearanceGlassSubPage(
                         .background(Lime),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = OnAccent, modifier = Modifier.size(20.dp))
+                    Icon(GeekifyIcons.AutoAwesome, contentDescription = null, tint = OnAccent, modifier = Modifier.size(20.dp))
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
@@ -671,7 +668,7 @@ private fun AppearanceGlassSubPage(
     SettingsSectionHeader("LIQUID GLASS ENGINE")
     IosSettingsGroup {
         IosSettingsSwitchRow(
-            icon = Icons.Default.BlurOn,
+            icon = GeekifyIcons.BlurOn,
             tileColor = TileCyan,
             title = "Enable Liquid Glass",
             subtitle = "Real-time AGSL lens refraction and backdrop blur",
@@ -681,7 +678,7 @@ private fun AppearanceGlassSubPage(
         if (glass.enabled) {
             SettingsGroupDivider()
             IosSettingsSwitchRow(
-                icon = Icons.Default.MusicNote,
+                icon = GeekifyIcons.MusicNote,
                 tileColor = TilePink,
                 title = "Mini Player Glass",
                 subtitle = "Use clear liquid glass on the floating Now Playing bar",
@@ -690,7 +687,7 @@ private fun AppearanceGlassSubPage(
             )
             SettingsGroupDivider()
             IosSettingsSwitchRow(
-                icon = Icons.Default.Navigation,
+                icon = GeekifyIcons.Navigation,
                 tileColor = TileBlue,
                 title = "Navigation Bar Glass",
                 subtitle = "Use clear liquid glass on the adaptive bottom bar",
@@ -700,7 +697,7 @@ private fun AppearanceGlassSubPage(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 SettingsGroupDivider()
                 IosSettingsSwitchRow(
-                    icon = Icons.Default.Flare,
+                    icon = GeekifyIcons.Flare,
                     tileColor = TilePurple,
                     title = "Chromatic Aberration",
                     subtitle = "Optical RGB color dispersion along curved glass edges",
@@ -709,7 +706,7 @@ private fun AppearanceGlassSubPage(
                 )
                 SettingsGroupDivider()
                 IosSettingsSwitchRow(
-                    icon = Icons.Default.Layers,
+                    icon = GeekifyIcons.Layers,
                     tileColor = TileIndigo,
                     title = "Spherical Depth Effect",
                     subtitle = "3D perspective magnification across the surface",
@@ -767,7 +764,7 @@ private fun AppearanceGlassSubPage(
             )
             SettingsGroupDivider()
             IosSettingsRow(
-                icon = Icons.Default.RestartAlt,
+                icon = GeekifyIcons.RestartAlt,
                 tileColor = TileGray,
                 title = "Reset Liquid Glass Defaults",
                 subtitle = "Restore crystal-clear 3dp optical preset",
@@ -789,7 +786,7 @@ private fun AppearanceGlassSubPage(
             FloatingTabBarInlineBehavior.OnScrollUp -> "Collapse on scroll up"
         }
         IosSettingsRow(
-            icon = Icons.Default.ViewDay,
+            icon = GeekifyIcons.ViewDay,
             tileColor = TileTeal,
             title = "Adaptive Bottom Bar",
             subtitle = behaviorLabel,
@@ -802,7 +799,7 @@ private fun AppearanceGlassSubPage(
             else -> "Home"
         }
         IosSettingsRow(
-            icon = Icons.Default.Home,
+            icon = GeekifyIcons.Home,
             tileColor = TileGreen,
             title = "Default Launch Tab",
             subtitle = tabLabel,
@@ -810,7 +807,7 @@ private fun AppearanceGlassSubPage(
         )
         SettingsGroupDivider()
         IosSettingsRow(
-            icon = Icons.Default.Apps,
+            icon = GeekifyIcons.Apps,
             tileColor = TileIndigo,
             title = "App Launcher Icon",
             subtitle = "Customize Geekify's home screen icon",
@@ -867,7 +864,7 @@ private fun PlayerAudioSubPage(
     SettingsSectionHeader("AUDIO & STREAMING")
     IosSettingsGroup {
         IosSettingsRow(
-            icon = Icons.Default.GraphicEq,
+            icon = GeekifyIcons.GraphicEq,
             tileColor = TileOrange,
             title = "Equalizer & Audio Effects",
             subtitle = "5-band equalizer, presets, tempo, pitch & loudness",
@@ -875,7 +872,7 @@ private fun PlayerAudioSubPage(
         )
         SettingsGroupDivider()
         IosSettingsRow(
-            icon = Icons.Default.HighQuality,
+            icon = GeekifyIcons.HighQuality,
             tileColor = TileRed,
             title = "Streaming Audio Quality",
             subtitle = "${state.audioQuality.label} — ${state.audioQuality.subtitle}",
@@ -887,7 +884,7 @@ private fun PlayerAudioSubPage(
     SettingsSectionHeader("QUEUE & PLAYBACK BEHAVIOR")
     IosSettingsGroup {
         IosSettingsSwitchRow(
-            icon = Icons.Default.QueueMusic,
+            icon = GeekifyIcons.QueueMusic,
             tileColor = TileBlue,
             title = "Persistent Queue",
             subtitle = "Save and restore your queue and playback position across restarts",
@@ -896,7 +893,7 @@ private fun PlayerAudioSubPage(
         )
         SettingsGroupDivider()
         IosSettingsSwitchRow(
-            icon = Icons.Default.AutoMode,
+            icon = GeekifyIcons.AutoMode,
             tileColor = TilePurple,
             title = "Endless Autoplay",
             subtitle = "Automatically queue related songs when your queue runs out",
@@ -905,7 +902,7 @@ private fun PlayerAudioSubPage(
         )
         SettingsGroupDivider()
         IosSettingsSwitchRow(
-            icon = Icons.Default.Shuffle,
+            icon = GeekifyIcons.Shuffle,
             tileColor = TileGreen,
             title = "Remember Shuffle & Repeat",
             subtitle = "Keep shuffle and repeat modes when reopening the app",
@@ -914,7 +911,7 @@ private fun PlayerAudioSubPage(
         )
         SettingsGroupDivider()
         IosSettingsSwitchRow(
-            icon = Icons.Default.FastForward,
+            icon = GeekifyIcons.FastForward,
             tileColor = TilePink,
             title = "Auto-skip on Stream Error",
             subtitle = "Automatically advance to the next song if a track cannot be played",
@@ -923,7 +920,7 @@ private fun PlayerAudioSubPage(
         )
         SettingsGroupDivider()
         IosSettingsSwitchRow(
-            icon = Icons.Default.LightMode,
+            icon = GeekifyIcons.LightMode,
             tileColor = TileAmber,
             title = "Keep Screen On in Player",
             subtitle = "Prevent the display from sleeping while Expanded Player is open",
@@ -963,7 +960,7 @@ private fun ContentRegionSubPage(
     SettingsSectionHeader("CATALOG REGION & LANGUAGE")
     IosSettingsGroup {
         IosSettingsRow(
-            icon = Icons.Default.Public,
+            icon = GeekifyIcons.Public,
             tileColor = TileBlue,
             title = "Content Country",
             subtitle = "$countryName (${state.contentCountry}) — Charts & new releases region",
@@ -971,7 +968,7 @@ private fun ContentRegionSubPage(
         )
         SettingsGroupDivider()
         IosSettingsRow(
-            icon = Icons.Default.Translate,
+            icon = GeekifyIcons.Translate,
             tileColor = TileTeal,
             title = "Content Language",
             subtitle = "$languageName — YouTube Music catalog language",
@@ -983,7 +980,7 @@ private fun ContentRegionSubPage(
     SettingsSectionHeader("CONTENT RESTRICTIONS")
     IosSettingsGroup {
         IosSettingsSwitchRow(
-            icon = Icons.Default.Explicit,
+            icon = GeekifyIcons.Explicit,
             tileColor = TileRed,
             title = "Hide Explicit Content",
             subtitle = "Filter out explicit tracks from Home, Search, and Autoplay",
@@ -1034,7 +1031,7 @@ private fun NotificationsSubPage(
     SettingsSectionHeader("IN-APP & PUSH NOTIFICATIONS")
     IosSettingsGroup {
         IosSettingsSwitchRow(
-            icon = Icons.Default.SystemUpdate,
+            icon = GeekifyIcons.SystemUpdate,
             tileColor = TileGreen,
             title = "App Updates",
             subtitle = "Notify me when a new Geekify release is available",
@@ -1043,7 +1040,7 @@ private fun NotificationsSubPage(
         )
         SettingsGroupDivider()
         IosSettingsSwitchRow(
-            icon = Icons.Default.Lightbulb,
+            icon = GeekifyIcons.Lightbulb,
             tileColor = TileAmber,
             title = "Tips & New Features",
             subtitle = "Occasional highlights after an app update",
@@ -1052,7 +1049,7 @@ private fun NotificationsSubPage(
         )
         SettingsGroupDivider()
         IosSettingsSwitchRow(
-            icon = Icons.Default.LibraryMusic,
+            icon = GeekifyIcons.LibraryMusic,
             tileColor = TilePurple,
             title = "Personalized Listening Reminders",
             subtitle = "Based on recent and frequently played songs on this device",
@@ -1082,7 +1079,7 @@ private fun PrivacySubPage(
     SettingsSectionHeader("LISTENING HISTORY")
     IosSettingsGroup {
         IosSettingsSwitchRow(
-            icon = Icons.Default.PauseCircleFilled,
+            icon = GeekifyIcons.PauseCircleFilled,
             tileColor = TileOrange,
             title = "Pause Listening History",
             subtitle = "Do not record played songs, play counts, or listening stats",
@@ -1091,7 +1088,7 @@ private fun PrivacySubPage(
         )
         SettingsGroupDivider()
         IosSettingsRow(
-            icon = Icons.Default.DeleteSweep,
+            icon = GeekifyIcons.DeleteSweep,
             tileColor = TileRed,
             title = "Clear Listening History & Stats",
             subtitle = "Permanently delete local recent tracks, play counts, and sessions",
@@ -1103,7 +1100,7 @@ private fun PrivacySubPage(
     SettingsSectionHeader("SCREEN SECURITY")
     IosSettingsGroup {
         IosSettingsSwitchRow(
-            icon = Icons.Default.Security,
+            icon = GeekifyIcons.Security,
             tileColor = TileIndigo,
             title = "Disable Screenshots",
             subtitle = "Block screenshots and hide app preview in the recents switcher",
@@ -1160,7 +1157,7 @@ private fun StorageBackupSubPage(
     SettingsSectionHeader("STORAGE USAGE (${formatBytes(stats.totalBytes)})")
     IosSettingsGroup {
         IosSettingsRow(
-            icon = Icons.Default.Audiotrack,
+            icon = GeekifyIcons.Audiotrack,
             tileColor = TileGreen,
             title = "Clear Audio Stream Cache",
             subtitle = "${formatBytes(stats.audioCacheBytes)} cached (300 MB limit)",
@@ -1168,7 +1165,7 @@ private fun StorageBackupSubPage(
         )
         SettingsGroupDivider()
         IosSettingsRow(
-            icon = Icons.Default.Image,
+            icon = GeekifyIcons.Image,
             tileColor = TileCyan,
             title = "Clear Artwork & Image Cache",
             subtitle = "${formatBytes(stats.imageCacheBytes)} cached album & artist covers",
@@ -1176,7 +1173,7 @@ private fun StorageBackupSubPage(
         )
         SettingsGroupDivider()
         IosSettingsRow(
-            icon = Icons.Default.Dataset,
+            icon = GeekifyIcons.Dataset,
             tileColor = TileOrange,
             title = "Prune Cached Feed & Metadata",
             subtitle = "${formatBytes(stats.metadataBytes)} local database & catalog",
@@ -1188,7 +1185,7 @@ private fun StorageBackupSubPage(
     SettingsSectionHeader("LOCAL LIBRARY BACKUP & RESTORE")
     IosSettingsGroup {
         IosSettingsRow(
-            icon = Icons.Default.UploadFile,
+            icon = GeekifyIcons.UploadFile,
             tileColor = TileBlue,
             title = "Backup Library to JSON",
             subtitle = "Export liked songs, playlists, saved albums & history",
@@ -1196,7 +1193,7 @@ private fun StorageBackupSubPage(
         )
         SettingsGroupDivider()
         IosSettingsRow(
-            icon = Icons.Default.Download,
+            icon = GeekifyIcons.Download,
             tileColor = TilePurple,
             title = "Restore Library from Backup",
             subtitle = "Import and merge a Geekify .json backup file",
@@ -1218,7 +1215,7 @@ private fun UpdatesSubPage(
     SettingsSectionHeader("INSTALLED VERSION")
     IosSettingsGroup {
         IosSettingsRow(
-            icon = Icons.Default.Verified,
+            icon = GeekifyIcons.Verified,
             tileColor = TileGreen,
             title = "Geekify v${BuildConfig.VERSION_NAME}",
             subtitle = "Build ${BuildConfig.VERSION_CODE} • Installed on this device",
@@ -1227,7 +1224,7 @@ private fun UpdatesSubPage(
         )
         SettingsGroupDivider()
         IosSettingsRow(
-            icon = Icons.Default.SystemUpdate,
+            icon = GeekifyIcons.SystemUpdate,
             tileColor = TileTeal,
             title = "Check for Updates Now",
             subtitle = "Query GitHub Releases for a newer Geekify APK",
@@ -1235,7 +1232,7 @@ private fun UpdatesSubPage(
         )
         SettingsGroupDivider()
         IosSettingsRow(
-            icon = Icons.Default.OpenInNew,
+            icon = GeekifyIcons.OpenInNew,
             tileColor = TileBlue,
             title = "View Releases on GitHub",
             subtitle = "Read changelogs and download APKs directly",
@@ -1250,7 +1247,7 @@ private fun UpdatesSubPage(
         if (updateCacheBytes > 0L) {
             SettingsGroupDivider()
             IosSettingsRow(
-                icon = Icons.Default.DeleteOutline,
+                icon = GeekifyIcons.DeleteOutline,
                 tileColor = TileRed,
                 title = "Clear Downloaded Update APKs",
                 subtitle = "${formatBytes(updateCacheBytes)} in update cache",
@@ -1292,7 +1289,7 @@ private fun AboutSubPage() {
                     .border(1.dp, Lime.copy(alpha = 0.4f), RoundedCornerShape(18.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Lime, modifier = Modifier.size(32.dp))
+                Icon(GeekifyIcons.AutoAwesome, contentDescription = null, tint = Lime, modifier = Modifier.size(32.dp))
             }
             Spacer(Modifier.height(12.dp))
             Text("Geekify", color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -1323,7 +1320,7 @@ private fun AboutSubPage() {
     SettingsSectionHeader("BUILD & LINKS")
     IosSettingsGroup {
         IosSettingsRow(
-            icon = Icons.Default.CalendarToday,
+            icon = GeekifyIcons.CalendarToday,
             tileColor = TilePurple,
             title = "First Installed",
             subtitle = installDate,
@@ -1332,7 +1329,7 @@ private fun AboutSubPage() {
         )
         SettingsGroupDivider()
         IosSettingsRow(
-            icon = Icons.Default.PhoneAndroid,
+            icon = GeekifyIcons.PhoneAndroid,
             tileColor = TileCyan,
             title = "Android Runtime",
             subtitle = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
@@ -1341,7 +1338,7 @@ private fun AboutSubPage() {
         )
         SettingsGroupDivider()
         IosSettingsRow(
-            icon = Icons.Default.Code,
+            icon = GeekifyIcons.Code,
             tileColor = TileGray,
             title = "GitHub Repository",
             subtitle = "github.com/Amal-kphilip/Geekify-App",
@@ -1376,7 +1373,7 @@ private fun SettingsSearchBar(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
-            imageVector = Icons.Default.Search,
+            imageVector = GeekifyIcons.Search,
             contentDescription = "Search settings",
             tint = TextMuted,
             modifier = Modifier.size(20.dp)
@@ -1397,7 +1394,7 @@ private fun SettingsSearchBar(
         }
         if (query.isNotEmpty()) {
             IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Default.Clear, contentDescription = "Clear", tint = TextSecondary, modifier = Modifier.size(18.dp))
+                Icon(GeekifyIcons.Clear, contentDescription = "Clear", tint = TextSecondary, modifier = Modifier.size(18.dp))
             }
         }
     }
@@ -1434,7 +1431,7 @@ private fun ProfileSettingsCard(
                 )
             } else {
                 Icon(
-                    imageVector = Icons.Default.Person,
+                    imageVector = GeekifyIcons.Person,
                     contentDescription = null,
                     tint = Lime,
                     modifier = Modifier.size(28.dp)
@@ -1460,7 +1457,7 @@ private fun ProfileSettingsCard(
                 overflow = TextOverflow.Ellipsis
             )
         }
-        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = TextMuted)
+        Icon(GeekifyIcons.ChevronRight, contentDescription = null, tint = TextMuted)
     }
 }
 
@@ -1550,7 +1547,7 @@ private fun IosSettingsRow(
         if (showChevron) {
             Spacer(Modifier.width(8.dp))
             Icon(
-                imageVector = Icons.Default.ChevronRight,
+                imageVector = GeekifyIcons.ChevronRight,
                 contentDescription = null,
                 tint = TextMuted,
                 modifier = Modifier.size(20.dp)
@@ -1702,7 +1699,7 @@ private fun <T> OptionPickerDialog(
                         )
                     }
                     if (isSelected) {
-                        Icon(Icons.Default.Check, contentDescription = null, tint = Lime, modifier = Modifier.size(20.dp))
+                        Icon(GeekifyIcons.Check, contentDescription = null, tint = Lime, modifier = Modifier.size(20.dp))
                     }
                 }
             }

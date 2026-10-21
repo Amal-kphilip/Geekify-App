@@ -13,20 +13,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.AddCircleOutline
-import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Explicit
-import androidx.compose.material.icons.filled.MoreHoriz
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.PlaylistAdd
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -169,7 +158,7 @@ fun Avatar(
         } else if (!name.isNullOrBlank()) {
             Text(name.first().uppercase(), color = OnAccent, fontWeight = FontWeight.Bold, fontSize = (size.value * 0.42f).sp)
         } else {
-            Icon(Icons.Default.Person, contentDescription = "Account", tint = OnAccent, modifier = Modifier.size(size * 0.55f))
+            Icon(GeekifyIcons.Person, contentDescription = "Account", tint = OnAccent, modifier = Modifier.size(size * 0.55f))
         }
     }
 }
@@ -217,7 +206,7 @@ fun TrackRow(
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
     onMoreClick: (() -> Unit)? = null,
-    moreIcon: ImageVector = Icons.Default.MoreHoriz,
+    moreIcon: ImageVector = GeekifyIcons.MoreHoriz,
     moreContentDescription: String = "More",
     marqueeTitle: Boolean = false
 ) {
@@ -250,7 +239,7 @@ fun TrackRow(
                     contentScale = ContentScale.Crop
                 )
             } else {
-                Icon(Icons.Default.MusicNote, contentDescription = null, tint = TextSecondary)
+                Icon(GeekifyIcons.MusicNote, contentDescription = null, tint = TextSecondary)
             }
         }
 
@@ -285,7 +274,7 @@ fun TrackRow(
                 }
                 if (track.explicit) {
                     Icon(
-                        imageVector = Icons.Default.Explicit,
+                        imageVector = GeekifyIcons.Explicit,
                         contentDescription = "Explicit",
                         tint = TextSecondary,
                         modifier = Modifier.padding(end = 4.dp).size(16.dp)
@@ -346,7 +335,7 @@ fun TrackActionsDialog(
                         contentScale = ContentScale.Crop
                     )
                 } else {
-                    Icon(Icons.Default.MusicNote, contentDescription = null, tint = TextSecondary)
+                    Icon(GeekifyIcons.MusicNote, contentDescription = null, tint = TextSecondary)
                 }
             }
             Spacer(Modifier.width(14.dp))
@@ -360,13 +349,13 @@ fun TrackActionsDialog(
         Spacer(Modifier.height(16.dp))
 
         ActionRow(
-            icon = if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+            icon = if (liked) GeekifyIcons.Favorite else GeekifyIcons.FavoriteBorder,
             label = if (liked) "Remove from Liked Songs" else "Add to Liked Songs",
             iconTint = if (liked) Lime else TextPrimary
         ) { onToggleLike(); onDismiss() }
 
         ActionRow(
-            icon = Icons.Default.AddCircleOutline,
+            icon = GeekifyIcons.AddCircleOutline,
             label = "Add to Queue"
         ) { onAddToQueue(); onDismiss() }
 
@@ -382,12 +371,12 @@ fun TrackActionsDialog(
                 Text("Create a playlist to save this song.", color = TextMuted, fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp, top = 6.dp, bottom = 6.dp))
             }
             playlists.forEach { playlist ->
-                ActionRow(icon = Icons.Default.QueueMusic, label = playlist.name) {
+                ActionRow(icon = GeekifyIcons.QueueMusic, label = playlist.name) {
                     onAddToPlaylist(playlist.id); onDismiss()
                 }
             }
         }
-        ActionRow(icon = Icons.Default.PlaylistAdd, label = "New playlist", iconTint = Lime, labelColor = Lime) {
+        ActionRow(icon = GeekifyIcons.PlaylistAdd, label = "New playlist", iconTint = Lime, labelColor = Lime) {
             showCreateDialog = true
         }
     }
@@ -470,7 +459,7 @@ fun CardItem(
                     contentScale = ContentScale.Crop
                 )
             } else {
-                Icon(Icons.Default.MusicNote, contentDescription = null, tint = TextSecondary)
+                Icon(GeekifyIcons.MusicNote, contentDescription = null, tint = TextSecondary)
             }
         }
 
@@ -517,7 +506,7 @@ fun CreatePlaylistDialog(
                     .background(InkElevated),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.PlaylistAdd, contentDescription = null, tint = Lime, modifier = Modifier.size(24.dp))
+                Icon(GeekifyIcons.PlaylistAdd, contentDescription = null, tint = Lime, modifier = Modifier.size(24.dp))
             }
             Spacer(Modifier.width(14.dp))
             Column {

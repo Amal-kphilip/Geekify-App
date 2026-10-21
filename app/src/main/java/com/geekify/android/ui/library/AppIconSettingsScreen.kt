@@ -1,5 +1,7 @@
 package com.geekify.android.ui.library
 
+import com.geekify.android.ui.theme.GeekifyIcons
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,9 +21,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -72,7 +71,7 @@ fun AppIconSettingsScreen(onBack: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 CircleIconButton(
-                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    icon = GeekifyIcons.ArrowBack,
                     contentDescription = "Back",
                     onClick = onBack,
                     size = 50.dp
@@ -150,7 +149,7 @@ fun AppIconSettingsScreen(onBack: () -> Unit) {
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
-                                            Icons.Default.Check,
+                                            GeekifyIcons.Check,
                                             contentDescription = "Selected",
                                             tint = InkPanel,
                                             modifier = Modifier.size(19.dp)

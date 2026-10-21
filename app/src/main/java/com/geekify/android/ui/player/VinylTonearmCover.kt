@@ -1,5 +1,7 @@
 package com.geekify.android.ui.player
 
+import com.geekify.android.ui.theme.GeekifyIcons
+
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
@@ -8,8 +10,6 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.material3.Icon
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -243,7 +243,7 @@ fun VinylTonearmCover(
                     )
                 } else {
                     Icon(
-                        imageVector = Icons.Default.MusicNote,
+                        imageVector = GeekifyIcons.MusicNote,
                         contentDescription = null,
                         tint = Color(0xFF8B8B95),
                         modifier = Modifier.fillMaxSize(0.42f)

@@ -11,8 +11,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -58,7 +56,7 @@ fun AudioSettingsScreen(
                 .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 24.dp + LocalBottomInset.current)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                CircleIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onBack, size = 50.dp)
+                CircleIconButton(GeekifyIcons.ArrowBack, "Back", onBack, size = 50.dp)
                 Text(
                     "Audio & equalizer",
                     color = TextPrimary,

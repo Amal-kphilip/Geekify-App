@@ -6,11 +6,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Error
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -55,7 +50,7 @@ fun HealthScreen(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircleIconButton(
-                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    icon = GeekifyIcons.ArrowBack,
                     contentDescription = "Back",
                     onClick = onBack,
                     size = 50.dp
@@ -147,7 +142,7 @@ fun HealthScreen(
                 if (state.isRunning) {
                     CircularProgressIndicator(color = Lime, modifier = Modifier.size(22.dp), strokeWidth = 2.5.dp)
                 } else {
-                    Icon(Icons.Default.Refresh, contentDescription = null, tint = OnAccent, modifier = Modifier.size(22.dp))
+                    Icon(GeekifyIcons.Refresh, contentDescription = null, tint = OnAccent, modifier = Modifier.size(22.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("Run again", color = OnAccent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 }
@@ -192,8 +187,8 @@ private fun CheckCard(
                 contentAlignment = Alignment.Center
             ) {
                 when (ok) {
-                    true -> Icon(Icons.Default.CheckCircle, contentDescription = "Working", tint = Lime, modifier = Modifier.size(24.dp))
-                    false -> Icon(Icons.Default.Error, contentDescription = "Failed", tint = ErrorRed, modifier = Modifier.size(24.dp))
+                    true -> Icon(GeekifyIcons.CheckCircle, contentDescription = "Working", tint = Lime, modifier = Modifier.size(24.dp))
+                    false -> Icon(GeekifyIcons.Error, contentDescription = "Failed", tint = ErrorRed, modifier = Modifier.size(24.dp))
                     null -> if (running) {
                         CircularProgressIndicator(color = Lime, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                     }

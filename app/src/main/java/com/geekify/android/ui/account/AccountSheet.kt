@@ -15,9 +15,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -135,7 +132,7 @@ private fun ProfileHub(
                         modifier = Modifier.fillMaxSize()
                     )
                     user != null -> Text(user.name.take(1).uppercase(), color = OnAccent, fontSize = 32.sp, fontWeight = FontWeight.SemiBold)
-                    else -> Icon(Icons.Default.Person, null, tint = OnAccent, modifier = Modifier.size(40.dp))
+                    else -> Icon(GeekifyIcons.Person, null, tint = OnAccent, modifier = Modifier.size(40.dp))
                 }
             }
             Spacer(Modifier.height(18.dp))
@@ -178,16 +175,16 @@ private fun ProfileHub(
                 .verticalScroll(rememberScrollState())
                 .padding(vertical = 8.dp)
         ) {
-            if (user != null) DrawerRow(Icons.Default.Edit, "Edit profile", onProfileClick)
-            DrawerRow(Icons.Default.PersonAdd, if (user == null) "Sign in or sign up" else "Add account", onAccountClick)
-            DrawerRow(Icons.Default.Groups, "Listen together", onListenTogetherClick)
-            DrawerRow(Icons.Default.History, "Recents", onRecentsClick)
-            DrawerRow(Icons.Default.BarChart, "Listening statistics", onListeningStatsClick)
-            DrawerRow(Icons.Default.HealthAndSafety, "Extractor health", onHealthClick)
-            DrawerRow(Icons.Default.Settings, "Settings and privacy", onSettingsClick)
+            if (user != null) DrawerRow(GeekifyIcons.Edit, "Edit profile", onProfileClick)
+            DrawerRow(GeekifyIcons.PersonAdd, if (user == null) "Sign in or sign up" else "Add account", onAccountClick)
+            DrawerRow(GeekifyIcons.Groups, "Listen together", onListenTogetherClick)
+            DrawerRow(GeekifyIcons.History, "Recents", onRecentsClick)
+            DrawerRow(GeekifyIcons.BarChart, "Listening statistics", onListeningStatsClick)
+            DrawerRow(GeekifyIcons.HealthAndSafety, "Extractor health", onHealthClick)
+            DrawerRow(GeekifyIcons.Settings, "Settings and privacy", onSettingsClick)
             if (user != null) {
                 Spacer(Modifier.height(8.dp))
-                DrawerRow(Icons.AutoMirrored.Filled.Logout, "Sign out", onSignOut, destructive = true)
+                DrawerRow(GeekifyIcons.Logout, "Sign out", onSignOut, destructive = true)
             }
         }
 
@@ -212,7 +209,7 @@ private fun ProfileHub(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                if (state.syncState == SyncState.ERROR) Icons.Default.ErrorOutline else Icons.Default.CloudDone,
+                if (state.syncState == SyncState.ERROR) GeekifyIcons.ErrorOutline else GeekifyIcons.CloudDone,
                 null,
                 tint = syncTint,
                 modifier = Modifier.size(18.dp)
@@ -267,7 +264,7 @@ private fun DrawerRow(icon: ImageVector, title: String, onClick: () -> Unit, des
         Spacer(Modifier.width(16.dp))
         Text(title, color = tint, fontSize = 17.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
         if (!destructive) {
-            Icon(Icons.Default.ChevronRight, null, tint = TextMuted, modifier = Modifier.size(22.dp))
+            Icon(GeekifyIcons.ChevronRight, null, tint = TextMuted, modifier = Modifier.size(22.dp))
         }
     }
 }

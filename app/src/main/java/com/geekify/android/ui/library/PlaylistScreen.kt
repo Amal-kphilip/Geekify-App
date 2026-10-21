@@ -5,9 +5,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -57,7 +54,7 @@ fun PlaylistScreen(
                             viewModel.deletePlaylist(playlistId)
                             onBack()
                         }) {
-                            Icon(Icons.Default.Delete, contentDescription = "Delete Playlist", tint = ErrorRed)
+                            Icon(GeekifyIcons.Delete, contentDescription = "Delete Playlist", tint = ErrorRed)
                         }
                     },
                     art = {
@@ -69,7 +66,7 @@ fun PlaylistScreen(
                                 contentScale = ContentScale.Crop
                             )
                         } else {
-                            Icon(Icons.Default.QueueMusic, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(80.dp))
+                            Icon(GeekifyIcons.QueueMusic, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(80.dp))
                         }
                     }
                 )

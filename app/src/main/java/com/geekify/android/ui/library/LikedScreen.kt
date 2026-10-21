@@ -5,8 +5,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,7 +46,7 @@ fun LikedScreen(
                             modifier = Modifier.fillMaxSize().background(LikedGradient),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Favorite, contentDescription = null, tint = Color.White, modifier = Modifier.size(80.dp))
+                            Icon(GeekifyIcons.Favorite, contentDescription = null, tint = Color.White, modifier = Modifier.size(80.dp))
                         }
                     }
                 )

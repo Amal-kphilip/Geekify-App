@@ -9,14 +9,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddCircleOutline
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.MoreHoriz
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
@@ -171,7 +163,7 @@ fun HomeScreen(
                             Avatar(photoUrl = photoUrl, name = userName, size = 58.dp, onClick = onAccountClick)
                             Spacer(Modifier.weight(1f))
                             CircleIconButton(
-                                icon = Icons.Default.Search,
+                                icon = GeekifyIcons.Search,
                                 contentDescription = "Search",
                                 onClick = onSearchClick,
                                 size = 50.dp,
@@ -179,7 +171,7 @@ fun HomeScreen(
                             )
                             Spacer(Modifier.width(12.dp))
                             CircleIconButton(
-                                icon = Icons.Default.FavoriteBorder,
+                                icon = GeekifyIcons.FavoriteBorder,
                                 contentDescription = "Liked songs",
                                 onClick = onLikedClick,
                                 size = 50.dp,
@@ -435,7 +427,7 @@ private fun DiscoverCard(
                 )
             } else {
                 Icon(
-                    Icons.Default.MusicNote,
+                    GeekifyIcons.MusicNote,
                     contentDescription = null,
                     tint = OnPastel.copy(alpha = 0.35f),
                     modifier = Modifier.align(Alignment.Center).size(56.dp)
@@ -483,17 +475,17 @@ private fun DiscoverCard(
                     .bouncyClickable(pressedScale = 0.92f, onClick = item.onPlay),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color.White, modifier = Modifier.size(28.dp))
+                Icon(GeekifyIcons.Play, contentDescription = "Play", tint = Color.White, modifier = Modifier.size(22.dp))
             }
             if (item.lead != null) {
                 Spacer(Modifier.width(10.dp))
                 CardAction(
-                    icon = if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                    icon = if (liked) GeekifyIcons.Favorite else GeekifyIcons.FavoriteBorder,
                     description = if (liked) "Remove from Liked Songs" else "Add to Liked Songs",
                     onClick = onToggleLike
                 )
-                CardAction(Icons.Default.AddCircleOutline, "Add to queue", onAddToQueue)
-                CardAction(Icons.Default.MoreHoriz, "More", onMore)
+                CardAction(GeekifyIcons.AddCircleOutline, "Add to queue", onAddToQueue)
+                CardAction(GeekifyIcons.MoreHoriz, "More", onMore)
             }
         }
     }
@@ -550,7 +542,7 @@ private fun PlaylistRow(item: ListRowItem) {
                     contentScale = ContentScale.Crop
                 )
             } else {
-                Icon(Icons.Default.MusicNote, contentDescription = null, tint = TextSecondary)
+                Icon(GeekifyIcons.MusicNote, contentDescription = null, tint = TextSecondary)
             }
         }
         Spacer(Modifier.width(16.dp))
@@ -574,11 +566,11 @@ private fun PlaylistRow(item: ListRowItem) {
         }
         Spacer(Modifier.width(12.dp))
         CircleIconButton(
-            icon = Icons.Default.PlayArrow,
+            icon = GeekifyIcons.Play,
             contentDescription = "Play",
             onClick = item.onClick,
             size = 42.dp,
-            iconSize = 22.dp
+            iconSize = 18.dp
         )
     }
 }

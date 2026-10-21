@@ -6,10 +6,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -58,7 +54,7 @@ internal fun ProfileEditor(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CircleIconButton(
-                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                icon = GeekifyIcons.ArrowBack,
                 contentDescription = "Back",
                 onClick = onBack,
                 size = 46.dp
@@ -111,7 +107,7 @@ internal fun ProfileEditor(
                     .bouncyClickable(pressedScale = 0.92f, onClick = onPickPhoto),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.CameraAlt, contentDescription = "Change profile picture", tint = Lime, modifier = Modifier.size(20.dp))
+                Icon(GeekifyIcons.CameraAlt, contentDescription = "Change profile picture", tint = Lime, modifier = Modifier.size(20.dp))
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -206,7 +202,7 @@ internal fun ProfileEditor(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Default.DeleteForever, contentDescription = null, tint = ErrorRed, modifier = Modifier.size(22.dp))
+            Icon(GeekifyIcons.DeleteForever, contentDescription = null, tint = ErrorRed, modifier = Modifier.size(22.dp))
             Spacer(Modifier.width(8.dp))
             Text("Delete account", color = ErrorRed, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         }
@@ -228,7 +224,7 @@ internal fun ProfileEditor(
                     modifier = Modifier.size(46.dp).clip(CircleShape).background(ErrorRed.copy(alpha = 0.14f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.DeleteForever, contentDescription = null, tint = ErrorRed, modifier = Modifier.size(24.dp))
+                    Icon(GeekifyIcons.DeleteForever, contentDescription = null, tint = ErrorRed, modifier = Modifier.size(24.dp))
                 }
                 Spacer(Modifier.width(14.dp))
                 Text("Delete account?", color = TextPrimary, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)

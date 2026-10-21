@@ -7,14 +7,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.MoreHoriz
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.QueueMusic
 import com.geekify.android.ui.glass.GlassMenu
 import com.geekify.android.ui.glass.GlassMenuItem
 import androidx.compose.material3.Icon
@@ -85,7 +77,7 @@ fun LibraryScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 CircleIconButton(
-                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    icon = GeekifyIcons.ArrowBack,
                     contentDescription = "Back",
                     onClick = onBack,
                     size = 50.dp
@@ -100,7 +92,7 @@ fun LibraryScreen(
                 )
                 Box {
                     CircleIconButton(
-                        icon = Icons.Default.MoreHoriz,
+                        icon = GeekifyIcons.MoreHoriz,
                         contentDescription = "More",
                         onClick = { menuOpen = true },
                         size = 50.dp
@@ -147,7 +139,7 @@ fun LibraryScreen(
                             trailing = if (liked.isNotEmpty()) TrailingAction.Play { onPlayTracks(liked) } else TrailingAction.Chevron,
                             art = {
                                 Box(Modifier.fillMaxSize().background(LikedGradient), contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.Favorite, contentDescription = null, tint = Color.White, modifier = Modifier.size(30.dp))
+                                    Icon(GeekifyIcons.Favorite, contentDescription = null, tint = Color.White, modifier = Modifier.size(30.dp))
                                 }
                             }
                         )
@@ -175,7 +167,7 @@ fun LibraryScreen(
                                 )
                             } else {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.QueueMusic, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(32.dp))
+                                    Icon(GeekifyIcons.QueueMusic, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(32.dp))
                                 }
                             }
                         }
@@ -204,7 +196,7 @@ fun LibraryScreen(
                                 )
                             } else {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.QueueMusic, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(32.dp))
+                                    Icon(GeekifyIcons.QueueMusic, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(32.dp))
                                 }
                             }
                         }
@@ -237,7 +229,7 @@ fun LibraryScreen(
                         (if (target.item.kind == "ALBUM") "albums" else "playlists") +
                         ". You can add it again any time.",
                     confirmLabel = "Remove",
-                    icon = Icons.Default.Delete,
+                    icon = GeekifyIcons.Delete,
                     destructive = true,
                     onConfirm = {
                         viewModel.toggleSavedCollection(target.item)
@@ -249,7 +241,7 @@ fun LibraryScreen(
                     title = "Delete playlist?",
                     message = "\"${target.name}\" and its song list will be deleted from your library.",
                     confirmLabel = "Delete",
-                    icon = Icons.Default.Delete,
+                    icon = GeekifyIcons.Delete,
                     destructive = true,
                     onConfirm = {
                         viewModel.deletePlaylist(target.id)
@@ -317,14 +309,14 @@ private fun LibraryRow(
         Spacer(Modifier.width(12.dp))
         when (trailing) {
             is TrailingAction.Play -> CircleIconButton(
-                icon = Icons.Default.PlayArrow,
+                icon = GeekifyIcons.Play,
                 contentDescription = "Play",
                 onClick = trailing.onPlay,
                 size = 44.dp,
-                iconSize = 22.dp
+                iconSize = 18.dp
             )
             TrailingAction.Chevron -> CircleIconButton(
-                icon = Icons.Default.KeyboardArrowDown,
+                icon = GeekifyIcons.KeyboardArrowDown,
                 contentDescription = "Open",
                 onClick = onClick,
                 size = 44.dp,

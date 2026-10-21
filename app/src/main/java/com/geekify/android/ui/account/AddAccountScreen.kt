@@ -7,12 +7,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Mail
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -57,7 +51,7 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircleIconButton(
-                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    icon = GeekifyIcons.ArrowBack,
                     contentDescription = "Back",
                     onClick = onBack,
                     size = 50.dp
@@ -99,12 +93,12 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
                 )
 
                 if (isSignUp) {
-                    AuthField(name, { name = it }, "Display name", Icons.Default.Person)
+                    AuthField(name, { name = it }, "Display name", GeekifyIcons.Person)
                     Spacer(Modifier.height(12.dp))
                 }
-                AuthField(email, { email = it }, "Email", Icons.Default.Mail, keyboardType = KeyboardType.Email)
+                AuthField(email, { email = it }, "Email", GeekifyIcons.Mail, keyboardType = KeyboardType.Email)
                 Spacer(Modifier.height(12.dp))
-                AuthField(password, { password = it }, "Password", Icons.Default.Lock, password = true)
+                AuthField(password, { password = it }, "Password", GeekifyIcons.Lock, password = true)
 
                 state.error?.let { Text(it, color = ErrorRed, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp)) }
                 state.message?.let { Text(it, color = Lime, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp)) }
@@ -154,7 +148,7 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
                     border = BorderStroke(1.dp, InkGlassBorder)
                 ) {
-                    Icon(Icons.Default.AccountCircle, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(22.dp))
+                    Icon(GeekifyIcons.AccountCircle, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(22.dp))
                     Spacer(Modifier.width(10.dp))
                     Text("Continue with Google", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                 }

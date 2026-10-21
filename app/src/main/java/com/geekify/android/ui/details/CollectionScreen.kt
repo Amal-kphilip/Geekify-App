@@ -5,8 +5,6 @@ import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Album
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -99,7 +97,7 @@ fun CollectionScreen(
                                     contentScale = ContentScale.Crop
                                 )
                             } else {
-                                Icon(Icons.Default.Album, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(80.dp))
+                                Icon(GeekifyIcons.Album, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(80.dp))
                             }
                         }
                     )
