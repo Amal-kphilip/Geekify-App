@@ -1,6 +1,9 @@
 package com.geekify.android.ui.home
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -32,6 +35,7 @@ import coil3.compose.AsyncImage
 import com.geekify.android.data.model.*
 import com.geekify.android.ui.components.*
 import com.geekify.android.ui.theme.*
+import kotlinx.coroutines.delay
 
 /** One card in the "Curated & trending" carousel. [lead] is the song the heart / queue / more buttons act on. */
 private data class DiscoverItem(
@@ -105,9 +109,28 @@ fun HomeScreen(
     }).take(10)
 
     val discoverListState = rememberLazyListState()
+    val discoverSnapFling = rememberSnapFlingBehavior(lazyListState = discoverListState)
     LaunchedEffect(discover.isNotEmpty()) {
         if (discover.isNotEmpty()) {
             discoverListState.scrollToItem(0)
+        }
+    }
+    LaunchedEffect(discover.size, discoverListState.isScrollInProgress) {
+        if (discover.size > 1 && !discoverListState.isScrollInProgress) {
+            while (true) {
+                delay(4_200L)
+                if (!discoverListState.isScrollInProgress && discover.size > 1) {
+                    val current = discoverListState.firstVisibleItemIndex
+                    val next = if (!discoverListState.canScrollForward || current + 1 >= discover.size) {
+                        0
+                    } else {
+                        current + 1
+                    }
+                    runCatching {
+                        discoverListState.animateScrollToItem(next)
+                    }
+                }
+            }
         }
     }
 
@@ -282,11 +305,21 @@ fun HomeScreen(
                 // ---- Curated & trending ----
                 if (discover.isNotEmpty()) {
                     item {
+                        val activeDiscoverIndex by remember(discover.size) {
+                            derivedStateOf {
+                                if (!discoverListState.canScrollForward && discover.isNotEmpty()) {
+                                    discover.lastIndex
+                                } else {
+                                    discoverListState.firstVisibleItemIndex.coerceIn(0, (discover.size - 1).coerceAtLeast(0))
+                                }
+                            }
+                        }
                         Column(modifier = Modifier.padding(top = 32.dp)) {
                             SectionTitle("Curated & trending")
                             Spacer(Modifier.height(6.dp))
                             LazyRow(
                                 state = discoverListState,
+                                flingBehavior = discoverSnapFling,
                                 contentPadding = PaddingValues(horizontal = 20.dp),
                                 horizontalArrangement = Arrangement.spacedBy(14.dp)
                             ) {
@@ -302,6 +335,34 @@ fun HomeScreen(
                                         onMore = { lead?.let(onTrackActions) },
                                         modifier = Modifier.width((LocalConfiguration.current.screenWidthDp.dp * 0.86f).coerceAtMost(350.dp))
                                     )
+                                }
+                            }
+                            if (discover.size > 1) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 12.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    discover.indices.forEach { idx ->
+                                        val isSelected = idx == activeDiscoverIndex
+                                        val dotWidth by animateDpAsState(
+                                            targetValue = if (isSelected) 18.dp else 6.dp,
+                                            animationSpec = tween(240),
+                                            label = "discoverDotWidth"
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .padding(horizontal = 3.dp)
+                                                .height(6.dp)
+                                                .width(dotWidth)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    if (isSelected) Lime else Color.White.copy(alpha = 0.22f)
+                                                )
+                                        )
+                                    }
                                 }
                             }
                         }

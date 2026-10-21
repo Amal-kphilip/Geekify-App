@@ -1,13 +1,14 @@
 package com.geekify.android.ui.health
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -16,15 +17,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.geekify.android.ui.components.CircleIconButton
-import com.geekify.android.ui.components.LocalBottomInset
-import com.geekify.android.ui.components.bouncyClickable
-import com.geekify.android.ui.theme.*
+import com.geekify.android.ui.components.*
+import com.geekify.android.ui.theme.GeekifyIcons
 
 /** Extractor health: runs two live checks (search, audio stream) and reports each one clearly. */
 @Composable
@@ -33,6 +34,8 @@ fun HealthScreen(
     onBack: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
+    val scrollState = rememberScrollState()
+    val bottomInset = LocalBottomInset.current
 
     LaunchedEffect(Unit) {
         if (state.innertubeSearchOk == null && !state.isRunning) {
@@ -40,164 +43,345 @@ fun HealthScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(InkBackground)) {
-        Column(
+    val allHealthy = state.innertubeSearchOk == true && state.streamResolveOk == true
+    val anyFailed = state.innertubeSearchOk == false || state.streamResolveOk == false
+
+    val heroTint = when {
+        state.isRunning -> IosPalette.systemCyan
+        allHealthy -> IosPalette.systemGreen
+        anyFailed -> IosPalette.systemRed
+        else -> IosPalette.systemBlue
+    }
+    val heroHeadline = when {
+        state.isRunning -> "Running Live Diagnostics…"
+        allHealthy -> "All Systems Operational"
+        anyFailed -> "Service Attention Needed"
+        else -> "Ready to Check"
+    }
+    val heroSubtitle = when {
+        state.isRunning -> "Verifying catalog search and audio stream extraction."
+        allHealthy -> "Catalog search and audio stream extraction are responding normally."
+        anyFailed -> "One or more upstream extractors reported an issue during testing."
+        else -> "Run live probes against the catalog and stream resolver."
+    }
+
+    IosSettingsPageScaffold(
+        title = "Extractor Health",
+        scrollState = scrollState,
+        onBack = onBack,
+        bottomPadding = bottomInset + 36.dp
+    ) {
+        // Hero Status Card
+        Surface(
+            color = IosPalette.secondarySystemGroupedBackground,
+            shape = IosCardShape,
             modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 24.dp + LocalBottomInset.current)
+                .fillMaxWidth()
+                .border(0.5.dp, heroTint.copy(alpha = 0.35f), IosCardShape)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CircleIconButton(
-                    icon = GeekifyIcons.ArrowBack,
-                    contentDescription = "Back",
-                    onClick = onBack,
-                    size = 50.dp
-                )
-                Text(
-                    "Extractor health",
-                    color = TextPrimary,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Medium,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.weight(1f)
-                )
-                Spacer(Modifier.size(50.dp))
-            }
-
-            Spacer(Modifier.height(24.dp))
-
-            Text(
-                text = when {
-                    state.isRunning -> "Checking…"
-                    state.innertubeSearchOk == true && state.streamResolveOk == true -> "Everything is working"
-                    state.innertubeSearchOk == null && state.streamResolveOk == null -> "Ready to check"
-                    else -> "Something needs attention"
-                },
-                color = TextPrimary,
-                fontSize = 28.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                "Live tests of the services Geekify uses to find and play music.",
-                color = TextSecondary,
-                fontSize = 14.sp,
-                modifier = Modifier.padding(top = 6.dp, bottom = 24.dp)
-            )
-
-            CheckCard(
-                title = "Search",
-                subtitle = "Finds songs, albums and artists",
-                ok = state.innertubeSearchOk,
-                running = state.isRunning
-            )
-            Spacer(Modifier.height(14.dp))
-            CheckCard(
-                title = "Audio stream",
-                subtitle = "Resolves a playable audio URL",
-                ok = state.streamResolveOk,
-                running = state.isRunning
-            ) {
-                state.mimeType?.let { Text("Format  $it", color = Lime, fontSize = 12.sp) }
-                state.resolvedUrl?.let {
-                    Text(
-                        "Stream  $it",
-                        color = TextMuted,
-                        fontSize = 11.sp,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
-            }
-
-            state.error?.let { message ->
-                Spacer(Modifier.height(14.dp))
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(ErrorRed.copy(alpha = 0.12f))
-                        .padding(18.dp)
-                ) {
-                    Text("What went wrong", color = ErrorRed, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    Text(message, color = TextSecondary, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 6.dp))
-                }
-            }
-
-            Spacer(Modifier.height(28.dp))
-
-            val canRun = !state.isRunning
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(54.dp)
-                    .clip(CircleShape)
-                    .background(if (canRun) Lime else InkElevated)
-                    .then(if (canRun) Modifier.bouncyClickable(pressedScale = 0.97f) { viewModel.runDiagnostics() } else Modifier),
+                    .padding(horizontal = 18.dp, vertical = 18.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(15.dp))
+                        .background(heroTint.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    when {
+                        state.isRunning -> CircularProgressIndicator(
+                            color = heroTint,
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.5.dp
+                        )
+                        allHealthy -> Icon(
+                            imageVector = GeekifyIcons.CheckCircle,
+                            contentDescription = null,
+                            tint = heroTint,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        anyFailed -> Icon(
+                            imageVector = GeekifyIcons.Error,
+                            contentDescription = null,
+                            tint = heroTint,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        else -> Icon(
+                            imageVector = GeekifyIcons.MonitorHeart,
+                            contentDescription = null,
+                            tint = heroTint,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = heroHeadline,
+                        color = IosPalette.label,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.3).sp
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = heroSubtitle,
+                        color = IosPalette.secondaryLabel,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        // Live Service Checks
+        IosSettingsSection(
+            title = "Live service probes",
+            footer = "Probes execute a real catalog query and resolve a fresh playable stream URL bypassing local cache."
+        ) {
+            DiagnosticProbeRow(
+                icon = GeekifyIcons.Search,
+                tileColor = IosPalette.systemBlue,
+                title = "Catalog & Search Engine",
+                subtitle = "Queries songs, albums, artists, and playlists",
+                ok = state.innertubeSearchOk,
+                running = state.isRunning && state.innertubeSearchOk == null
+            )
+            IosSettingsDivider()
+            DiagnosticProbeRow(
+                icon = GeekifyIcons.Audiotrack,
+                tileColor = IosPalette.systemGreen,
+                title = "Audio Stream Resolver",
+                subtitle = "Extracts a signed, playable audio stream URL",
+                ok = state.streamResolveOk,
+                running = state.isRunning && state.streamResolveOk == null
+            )
+        }
+
+        // Stream Telemetry Section
+        if (state.mimeType != null || state.resolvedUrl != null) {
+            Spacer(Modifier.height(24.dp))
+            IosSettingsSection(title = "Stream telemetry") {
+                state.mimeType?.let { mime ->
+                    IosSettingsRow(
+                        icon = GeekifyIcons.GraphicEq,
+                        tileColor = IosPalette.systemPurple,
+                        title = "Container Format",
+                        value = mime,
+                        showChevron = false,
+                        onClick = null
+                    )
+                }
+                if (state.mimeType != null && state.resolvedUrl != null) {
+                    IosSettingsDivider()
+                }
+                state.resolvedUrl?.let { url ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IosIconBadge(
+                                icon = GeekifyIcons.Public,
+                                tint = IosPalette.systemTeal
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                text = "Resolved Stream Endpoint",
+                                color = IosPalette.label,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Normal
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(IosPalette.tertiarySystemGroupedBackground)
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                        ) {
+                            Text(
+                                text = url,
+                                color = IosPalette.secondaryLabel,
+                                fontSize = 11.5.sp,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Error Details
+        state.error?.let { message ->
+            Spacer(Modifier.height(24.dp))
+            IosSettingsSection(title = "Diagnostic report") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    IosIconBadge(
+                        icon = GeekifyIcons.Error,
+                        tint = IosPalette.systemRed
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Error Details",
+                            color = IosPalette.systemRed,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = message,
+                            color = IosPalette.secondaryLabel,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(28.dp))
+
+        val canRun = !state.isRunning
+        Surface(
+            color = if (canRun) IosPalette.systemBlue else IosPalette.secondarySystemGroupedBackground,
+            shape = CircleShape,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .then(
+                    if (canRun) Modifier.bouncyClickable(pressedScale = 0.97f, onClick = viewModel::runDiagnostics)
+                    else Modifier
+                )
+        ) {
+            Row(
+                modifier = Modifier.fillMaxSize(),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (state.isRunning) {
-                    CircularProgressIndicator(color = Lime, modifier = Modifier.size(22.dp), strokeWidth = 2.5.dp)
+                    CircularProgressIndicator(
+                        color = IosPalette.systemBlue,
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.2.dp
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = "Running Diagnostics…",
+                        color = IosPalette.secondaryLabel,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 } else {
-                    Icon(GeekifyIcons.Refresh, contentDescription = null, tint = OnAccent, modifier = Modifier.size(22.dp))
+                    Icon(
+                        imageVector = GeekifyIcons.Refresh,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
                     Spacer(Modifier.width(8.dp))
-                    Text("Run again", color = OnAccent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = "Run Diagnostics Again",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
         }
     }
 }
 
-/** One diagnostic: title, a status badge (checking / working / failed) and optional details underneath. */
 @Composable
-private fun CheckCard(
+private fun DiagnosticProbeRow(
+    icon: ImageVector,
+    tileColor: Color,
     title: String,
     subtitle: String,
     ok: Boolean?,
-    running: Boolean,
-    details: @Composable ColumnScope.() -> Unit = {}
+    running: Boolean
 ) {
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(InkPanel)
-            .padding(18.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
-                Text(subtitle, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
-            }
-            Spacer(Modifier.width(12.dp))
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(
-                        when (ok) {
-                            true -> Lime.copy(alpha = 0.16f)
-                            false -> ErrorRed.copy(alpha = 0.16f)
-                            null -> InkElevated
-                        }
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                when (ok) {
-                    true -> Icon(GeekifyIcons.CheckCircle, contentDescription = "Working", tint = Lime, modifier = Modifier.size(24.dp))
-                    false -> Icon(GeekifyIcons.Error, contentDescription = "Failed", tint = ErrorRed, modifier = Modifier.size(24.dp))
-                    null -> if (running) {
-                        CircularProgressIndicator(color = Lime, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    }
-                }
-            }
+        IosIconBadge(icon = icon, tint = tileColor)
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = IosPalette.label,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Normal,
+                letterSpacing = (-0.35).sp
+            )
+            Text(
+                text = subtitle,
+                color = IosPalette.secondaryLabel,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(top = 1.dp)
+            )
         }
-        if (ok != null) {
-            Spacer(Modifier.height(10.dp))
-            details()
+        Spacer(Modifier.width(10.dp))
+
+        when {
+            running -> CircularProgressIndicator(
+                color = IosPalette.systemBlue,
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp
+            )
+            ok == true -> StatusPill(
+                text = "Healthy",
+                color = IosPalette.systemGreen
+            )
+            ok == false -> StatusPill(
+                text = "Failed",
+                color = IosPalette.systemRed
+            )
+            else -> StatusPill(
+                text = "Pending",
+                color = IosPalette.systemGray
+            )
         }
+    }
+}
+
+@Composable
+private fun StatusPill(
+    text: String,
+    color: Color
+) {
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(color.copy(alpha = 0.16f))
+            .border(0.5.dp, color.copy(alpha = 0.45f), CircleShape)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = color,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
