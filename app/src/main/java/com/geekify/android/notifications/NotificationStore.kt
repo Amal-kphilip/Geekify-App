@@ -23,7 +23,7 @@ import javax.inject.Singleton
 data class NotificationPrefs(
     val updates: Boolean = true,
     val tips: Boolean = true,
-    val engagement: Boolean = false
+    val engagement: Boolean = true
 )
 
 /** Persistent bookkeeping that makes notifications idempotent and rate-limited across restarts. */
@@ -106,7 +106,7 @@ class NotificationStore @Inject constructor(
     private fun decodePrefs(p: Preferences) = NotificationPrefs(
         updates = p[K.updates] ?: true,
         tips = p[K.tips] ?: true,
-        engagement = p[K.engagement] ?: false
+        engagement = p[K.engagement] ?: true
     )
 
     private fun decodeState(p: Preferences) = NotificationState(

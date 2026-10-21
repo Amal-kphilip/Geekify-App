@@ -3,6 +3,7 @@ package com.geekify.android.data.source.innertube
 import com.geekify.android.innertube.YouTube
 import com.geekify.android.innertube.models.YouTubeClient
 import com.geekify.android.innertube.models.YouTubeLocale
+import com.geekify.android.settings.AppSettingsRepository
 import com.metrolist.innertubex.InnerTube as InnerTubeXClient
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
@@ -23,12 +24,20 @@ import javax.inject.Singleton
  * handling, HTTP status checks and transient-request behavior for discovery endpoints.
  */
 @Singleton
-class GeekifyInnerTubeBackend @Inject constructor() {
+class GeekifyInnerTubeBackend @Inject constructor(
+    private val appSettings: AppSettingsRepository
+) {
     private val json = Json { ignoreUnknownKeys = true }
+    @Volatile private var lastLocale: YouTubeLocale? = null
 
     init {
-        // Preserve Geekify's existing English/India region context when using the upstream backend.
-        YouTube.locale = YouTubeLocale(hl = "en", gl = "IN")
+        val initial = appSettings.state.value
+        val locale = YouTubeLocale(hl = initial.contentLanguage, gl = initial.contentCountry)
+        YouTube.locale = locale
+        lastLocale = locale
+        runCatching {
+            YouTube.extractionTransport().innerTube.regionOverrideActive = true
+        }
     }
 
     suspend fun search(query: String, type: String?): JsonObject = execute("search") { innerTube ->
@@ -56,11 +65,30 @@ class GeekifyInnerTubeBackend @Inject constructor() {
 
     suspend fun warmUp() {
         try {
-            YouTube.extractionTransport().innerTube.fetchFreshVisitorData()
+            val innerTube = YouTube.extractionTransport().innerTube
+            innerTube.regionOverrideActive = true
+            innerTube.fetchFreshVisitorData()
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {
             // Visitor data is opportunistic; requests can still use the library's anonymous fallback.
+        }
+    }
+
+    private suspend fun syncLocale(innerTube: InnerTubeXClient) {
+        val s = appSettings.state.value
+        val targetLocale = YouTubeLocale(hl = s.contentLanguage, gl = s.contentCountry)
+        innerTube.regionOverrideActive = true
+        if (lastLocale != targetLocale || YouTube.locale != targetLocale) {
+            lastLocale = targetLocale
+            YouTube.locale = targetLocale
+            YouTube.visitorData = null
+            try {
+                innerTube.fetchFreshVisitorData()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -69,9 +97,11 @@ class GeekifyInnerTubeBackend @Inject constructor() {
         request: suspend (InnerTubeXClient) -> HttpResponse
     ): JsonObject {
         var lastError: Throwable? = null
+        val innerTube = YouTube.extractionTransport().innerTube
+        syncLocale(innerTube)
         repeat(MAX_ATTEMPTS) { attempt ->
             try {
-                val response = request(YouTube.extractionTransport().innerTube)
+                val response = request(innerTube)
                 val status = response.status.value
                 val body = withContext(Dispatchers.IO) { response.bodyAsText() }
                 if (status !in 200..299) {

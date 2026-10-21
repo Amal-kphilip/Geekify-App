@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -87,7 +88,7 @@ fun HomeScreen(
     val mixCards = state.mixes.map { mix ->
         val lead = mix.tracks.firstOrNull()
         DiscoverItem(
-            key = "mix:" + mix.id,
+            key = "mix:${mix.id}:${mix.title}",
             title = mix.title,
             description = mix.subtitle,
             art = lead?.thumbnails?.bestArtworkUrl(720),
@@ -109,7 +110,7 @@ fun HomeScreen(
             lead = null,
             onPlay = { onCardClick(item.value) }
         )
-    }).take(6)
+    }).take(10)
 
     val discoverListState = rememberLazyListState()
     LaunchedEffect(discover.isNotEmpty()) {
@@ -307,7 +308,7 @@ fun HomeScreen(
                                         onToggleLike = { lead?.let(onToggleLike) },
                                         onAddToQueue = { lead?.let(onAddToQueue) },
                                         onMore = { lead?.let(onTrackActions) },
-                                        modifier = Modifier.fillParentMaxWidth(0.86f)
+                                        modifier = Modifier.width((LocalConfiguration.current.screenWidthDp.dp * 0.86f).coerceAtMost(350.dp))
                                     )
                                 }
                             }

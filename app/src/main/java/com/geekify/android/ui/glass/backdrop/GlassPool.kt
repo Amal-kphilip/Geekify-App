@@ -1,5 +1,5 @@
-﻿/**
- * Convx Project (C) 2026
+/**
+ * Geekify Project (C) 2026
  * Licensed under GPL-3.0 | See git history for contributors
  */
 package com.geekify.android.ui.glass.backdrop

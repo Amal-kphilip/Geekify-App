@@ -158,7 +158,7 @@ class FloatingTabBarScrollConnection(
 }
 
 /**
- * Adaptive Liquid Glass Bottom Navigation Bar adapted from Convx:
+ * Adaptive Liquid Glass Bottom Navigation Bar:
  *
  * - EXPANDED (at top of page / initial):
  *   - Mini player capsule on top (height 64dp, if song active)
@@ -188,11 +188,16 @@ fun AdaptiveBottomBar(
     val isInline = scrollConnection.isInline
 
     Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .consumeTaps()
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.BottomCenter
     ) {
-        AnimatedContent(
+        Box(
+            modifier = Modifier
+                .widthIn(max = 420.dp)
+                .fillMaxWidth()
+                .consumeTaps()
+        ) {
+            AnimatedContent(
             targetState = isInline to hasPlayer,
             transitionSpec = {
                 (fadeIn(spring(stiffness = Spring.StiffnessMediumLow)) +
@@ -293,6 +298,7 @@ fun AdaptiveBottomBar(
                     }
                 }
             }
+        }
         }
     }
 }

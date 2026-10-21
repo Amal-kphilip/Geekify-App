@@ -23,6 +23,7 @@ class GeekifyNotifier @Inject constructor(@ApplicationContext private val contex
     companion object {
         const val UPDATE_NOTIFICATION_ID = 2001
         const val TIP_NOTIFICATION_ID = 2002
+        const val ENGAGEMENT_NOTIFICATION_ID = 2003
         const val ACTION_DISMISS_UPDATE = "com.geekify.android.action.DISMISS_UPDATE"
         const val EXTRA_VERSION_CODE = "version_code"
         const val EXTRA_ROUTE = "geekify_route"
@@ -70,19 +71,21 @@ class GeekifyNotifier @Inject constructor(@ApplicationContext private val contex
         return notifySafely(UPDATE_NOTIFICATION_ID, n)
     }
 
-    fun postTip(title: String, text: String, route: String?): Boolean {
+    fun postTip(title: String, text: String, route: String?, notificationId: Int = TIP_NOTIFICATION_ID): Boolean {
         if (!canPost(NotificationChannels.TIPS)) return false
         val n = NotificationCompat.Builder(context, NotificationChannels.TIPS)
             .setSmallIcon(R.drawable.ic_stat_geekify)
             .setContentTitle(title)
             .setContentText(text)
-            .setContentIntent(openApp(route, requestCode = 13))
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setContentIntent(openApp(route, requestCode = if (notificationId == ENGAGEMENT_NOTIFICATION_ID) 14 else 13))
             .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setOnlyAlertOnce(true)
             .setAutoCancel(true)
             .build()
-        return notifySafely(TIP_NOTIFICATION_ID, n)
+        return notifySafely(notificationId, n)
     }
 
     fun cancelUpdate() = nm.cancel(UPDATE_NOTIFICATION_ID)

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -36,6 +37,7 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var syncRepository: SyncRepository
     @Inject lateinit var notificationStore: NotificationStore
     @Inject lateinit var notificationCoordinator: NotificationCoordinator
+    @Inject lateinit var appSettings: com.geekify.android.settings.AppSettingsRepository
 
     /** Screen requested by a notification tap (e.g. "recents"); consumed once by MainScreen. */
     private var requestedRoute by mutableStateOf<String?>(null)
@@ -53,6 +55,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        lifecycleScope.launch {
+            appSettings.state.collect { state ->
+                if (state.disableScreenshots) {
+                    window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                }
+            }
+        }
         requestedRoute = intent?.getStringExtra(GeekifyNotifier.EXTRA_ROUTE)
         triggerUpdateCheck = intent?.getBooleanExtra(GeekifyNotifier.EXTRA_TRIGGER_UPDATE_CHECK, false) == true
 

@@ -17,7 +17,8 @@ object NotificationChannels {
     /** New ID required for HIGH importance because Android locks a channel's importance after creation. */
     const val UPDATES = "geekify_app_updates"
     private const val LEGACY_UPDATES = "updates"
-    const val TIPS = "tips"
+    const val TIPS = "geekify_tips_and_reminders"
+    private const val LEGACY_TIPS = "tips"
 
     fun ensureAll(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -45,7 +46,15 @@ object NotificationChannels {
             }
         )
         nm.createNotificationChannel(
-            NotificationChannel(TIPS, context.getString(R.string.channel_tips_name), NotificationManager.IMPORTANCE_LOW).apply {
+            NotificationChannel(
+                TIPS,
+                context.getString(R.string.channel_tips_name),
+                when (nm.getNotificationChannel(LEGACY_TIPS)?.importance) {
+                    NotificationManager.IMPORTANCE_NONE -> NotificationManager.IMPORTANCE_NONE
+                    NotificationManager.IMPORTANCE_MIN -> NotificationManager.IMPORTANCE_MIN
+                    else -> NotificationManager.IMPORTANCE_DEFAULT
+                }
+            ).apply {
                 description = "Occasional, useful feature and library reminders"
                 setShowBadge(false)
             }

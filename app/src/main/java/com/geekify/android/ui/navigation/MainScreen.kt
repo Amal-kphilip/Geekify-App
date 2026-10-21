@@ -102,6 +102,9 @@ import com.geekify.android.ui.library.RecentsViewModel
 import com.geekify.android.ui.library.ListeningStatsScreen
 import com.geekify.android.ui.library.SettingsScreen
 import com.geekify.android.ui.library.AppIconSettingsScreen
+import com.geekify.android.settings.LocalAppSettings
+import com.geekify.android.settings.LocalGlassConfig
+import com.geekify.android.settings.SettingsViewModel
 import com.geekify.android.ui.player.ExpandedPlayerScreen
 import com.geekify.android.ui.player.NowPlayingBar
 import com.geekify.android.ui.player.PlayerViewModel
@@ -130,6 +133,7 @@ fun MainScreen(
     playerViewModel: PlayerViewModel = hiltViewModel(),
     accountViewModel: AccountViewModel = hiltViewModel(),
     libraryViewModel: LibraryViewModel = hiltViewModel(),
+    settingsViewModel: SettingsViewModel = hiltViewModel(),
     startRoute: String? = null,
     onStartRouteConsumed: () -> Unit = {},
     triggerUpdateCheck: Boolean = false,
@@ -146,6 +150,7 @@ fun MainScreen(
     var actionTrack by remember { mutableStateOf<Track?>(null) }
 
     val accountState by accountViewModel.uiState.collectAsState()
+    val appSettingsState by settingsViewModel.settings.collectAsState()
     val playerState by playerViewModel.state.collectAsState()
     val likedTracks by libraryViewModel.liked.collectAsState()
     val playlists by libraryViewModel.playlists.collectAsState()
@@ -180,10 +185,23 @@ fun MainScreen(
 
     // Deep link from a Geekify notification (e.g. "recents"). Only known routes are accepted.
     LaunchedEffect(startRoute) {
-        if (startRoute == Screen.Recents.route) {
-            navController.navigate(Screen.Recents.route) { launchSingleTop = true }
+        when (startRoute) {
+            Screen.Recents.route -> navController.navigate(Screen.Recents.route) { launchSingleTop = true }
+            Screen.Library.route -> navController.navigate(Screen.Library.route) { launchSingleTop = true }
+            Screen.Search.route -> navController.navigate(Screen.Search.route) { launchSingleTop = true }
+            Screen.Home.route -> navController.navigate(Screen.Home.route) { launchSingleTop = true }
+            Screen.ListeningStats.route -> navController.navigate(Screen.ListeningStats.route) { launchSingleTop = true }
+            Screen.ListenTogether.route -> navController.navigate(Screen.ListenTogether.route) { launchSingleTop = true }
+            Screen.AudioSettings.route -> navController.navigate(Screen.AudioSettings.route) { launchSingleTop = true }
+            Screen.Settings.route -> navController.navigate(Screen.Settings.route) { launchSingleTop = true }
+            else -> Unit
         }
         if (startRoute != null) onStartRouteConsumed()
+        run {
+
+        }
+        run {
+        }
     }
 
     // Back handling lives inside each overlay (ExpandedPlayerScreen, QueueScreen) so the topmost
@@ -228,7 +246,20 @@ fun MainScreen(
     // Height of the floating mini player + navigation pill, so scrolling lists can leave room for them.
     var floatingBarsHeightPx by remember { mutableIntStateOf(0) }
     val floatingBarsHeight = with(LocalDensity.current) { floatingBarsHeightPx.toDp() }
-    val scrollConnection = rememberFloatingTabBarScrollConnection()
+    val scrollConnection = rememberFloatingTabBarScrollConnection(inlineBehavior = appSettingsState.navInlineBehavior)
+
+    var appliedDefaultTab by remember { mutableStateOf(false) }
+    LaunchedEffect(appSettingsState.defaultTab) {
+        if (!appliedDefaultTab) {
+            appliedDefaultTab = true
+            if (startRoute == null) {
+                when (appSettingsState.defaultTab) {
+                    "search" -> navController.navigate(Screen.Search.route) { launchSingleTop = true }
+                    "library" -> navController.navigate(Screen.Library.route) { launchSingleTop = true }
+                }
+            }
+        }
+    }
 
     val navigateToTab: (String) -> Unit = { route ->
         scrollConnection.expand()
@@ -305,7 +336,9 @@ fun MainScreen(
         LocalNowPlayingId provides playerState.current?.videoId,
         LocalBottomInset provides animatedFloatingBarsHeight,
         LocalGlassOverlayHost provides overlayHost,
-        LocalGlassBackdrop provides contentBackdrop
+        LocalGlassBackdrop provides contentBackdrop,
+        LocalAppSettings provides appSettingsState,
+        LocalGlassConfig provides appSettingsState.glass
     ) {
     Box(modifier = Modifier.fillMaxSize().background(InkBackground)) {
       // ---- SCENE: everything that sits underneath popups / dialogs / panels ----
@@ -458,7 +491,27 @@ fun MainScreen(
                         SettingsScreen(
                             onBack = { navController.popBackStack() },
                             onAudioClick = { navController.navigate(Screen.AudioSettings.route) },
-                            onAppIconClick = { navController.navigate(Screen.AppIconSettings.route) }
+                            onAppIconClick = { navController.navigate(Screen.AppIconSettings.route) },
+                            onProfileClick = { showAccountSheet = true },
+                            onListenTogetherClick = { navController.navigate(Screen.ListenTogether.route) },
+                            onListeningStatsClick = { navController.navigate(Screen.ListeningStats.route) },
+                            onRecentsClick = { navController.navigate(Screen.Recents.route) },
+                            onHealthClick = { navController.navigate(Screen.Health.route) },
+                            onCheckUpdatesClick = {
+                                updateScope.launch {
+                                    val found = updateManager.findAvailableUpdate()
+                                    if (found != null) {
+                                        availableUpdate = found
+                                        updateStage = UpdateStage.Available
+                                        downloadedApk = null
+                                        updateProgress = null
+                                        updateError = null
+                                    } else {
+                                        android.widget.Toast.makeText(context, "Geekify is up to date (v${BuildConfig.VERSION_NAME})", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            currentUser = accountState.user
                         )
                     }
 

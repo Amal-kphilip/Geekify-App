@@ -14,7 +14,6 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.LinkedHashMap
 import javax.inject.Inject
@@ -110,6 +109,18 @@ class StreamResolver @Inject constructor(
         synchronized(lock) {
             cache.remove(videoId)?.let { byUrl.remove(it.url) }
             generations[videoId] = (generations[videoId] ?: 0L) + 1L
+        }
+    }
+
+    override fun clearCache() {
+        synchronized(lock) {
+            cache.clear()
+            byUrl.clear()
+            inFlight.values.forEach { it.cancel() }
+            inFlight.clear()
+            generations.keys.toList().forEach { id ->
+                generations[id] = (generations[id] ?: 0L) + 1L
+            }
         }
     }
 

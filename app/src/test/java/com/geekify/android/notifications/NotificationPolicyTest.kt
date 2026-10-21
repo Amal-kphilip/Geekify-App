@@ -43,7 +43,7 @@ class NotificationPolicyTest {
         assertTrue(decide(Kind.FEATURE, updateState) is Decision.Deny)
     }
     @Test fun recentlyOpenedSuppressesEngagement() {
-        val s = NotificationState(lastOpenedAt = now - DAY_MS)
+        val s = NotificationState(lastOpenedAt = now - 2 * NotificationPolicy.HOUR_MS)
         assertTrue(decide(Kind.ENGAGEMENT, s) is Decision.Deny)
     }
     @Test fun nothingWhileUserIsInTheApp() = assertTrue(decide(Kind.UPDATE, updateState, fg = true) is Decision.Deny)

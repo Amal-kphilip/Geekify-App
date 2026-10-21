@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -37,7 +38,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.geekify.android.settings.LocalGlassConfig
 import com.geekify.android.ui.glass.backdrop.Backdrop
+import com.geekify.android.ui.glass.backdrop.BackdropEffectScope
 import com.geekify.android.ui.glass.backdrop.backdrops.LayerBackdrop
 import com.geekify.android.ui.glass.backdrop.backdrops.layerBackdrop
 import com.geekify.android.ui.glass.backdrop.backdrops.rememberLayerBackdrop
@@ -54,7 +57,7 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 
 /*
- * Geekify Liquid Glass - Ultra-premium physical glass material adapted from Convx
+ * Geekify Liquid Glass - Ultra-premium physical glass material
  *
  * Full multi-layer pipeline:
  *  1. BACKDROP CAPTURE: Hardware-accelerated GraphicsLayer recording of the scene behind the surface.
@@ -104,6 +107,14 @@ val LocalGlassBackdrop = staticCompositionLocalOf<GlassBackdrop?> { null }
 /** How much a scrim dims the scene behind the glass. */
 val LocalGlassDim = compositionLocalOf { 0f }
 
+enum class GlassRole {
+    Navigation,
+    Floating,
+    Preview,
+    Overlay,
+    Panel
+}
+
 @Stable
 data class GlassStyle(
     val blur: Dp,
@@ -126,12 +137,14 @@ data class GlassStyle(
     /** Spherical depth distortion. */
     val depthEffect: Boolean = false,
     /** Dark rim opacity for high-contrast edge separation. */
-    val darkRimAlpha: Float = 0.32f
+    val darkRimAlpha: Float = 0.32f,
+    /** Logical component role so identical optical presets remain distinguishable for per-surface toggles. */
+    val role: GlassRole = GlassRole.Overlay
 ) {
     companion object {
         private val BaseGlassColor = Color(0xFF171717)
 
-        /** Bottom navigation: Convx crystal-clear liquid glass. */
+        /** Bottom navigation: crystal-clear liquid glass. */
         val Navigation = GlassStyle(
             blur = 3.dp,
             tint = BaseGlassColor,
@@ -144,7 +157,8 @@ data class GlassStyle(
             saturation = 1.8f,
             lensHeight = 14.dp,
             lensAmount = 12.dp,
-            darkRimAlpha = 0.0f
+            darkRimAlpha = 0.0f,
+            role = GlassRole.Navigation
         )
 
         /** Mini player and small floating controls: crystal-clear glass. */
@@ -160,7 +174,25 @@ data class GlassStyle(
             saturation = 1.8f,
             lensHeight = 14.dp,
             lensAmount = 12.dp,
-            darkRimAlpha = 0.0f
+            darkRimAlpha = 0.0f,
+            role = GlassRole.Floating
+        )
+
+        /** Settings live optical preview capsule. */
+        val Preview = GlassStyle(
+            blur = 3.dp,
+            tint = BaseGlassColor,
+            tintAlpha = 0.12f,
+            rimAlpha = 0.38f,
+            specularAlpha = 0.0f,
+            shadowRadius = 8.dp,
+            shadowAlpha = 0.15f,
+            frost = 0.0f,
+            saturation = 1.8f,
+            lensHeight = 14.dp,
+            lensAmount = 12.dp,
+            darkRimAlpha = 0.0f,
+            role = GlassRole.Preview
         )
 
         /** Popups and dialogs: strong glass but readable. */
@@ -176,7 +208,8 @@ data class GlassStyle(
             saturation = 1.6f,
             lensHeight = 16.dp,
             lensAmount = 20.dp,
-            darkRimAlpha = 0.25f
+            darkRimAlpha = 0.25f,
+            role = GlassRole.Overlay
         )
 
         /** Large surfaces with lots of text (profile panel, queue). */
@@ -192,13 +225,14 @@ data class GlassStyle(
             saturation = 1.5f,
             lensHeight = 14.dp,
             lensAmount = 18.dp,
-            darkRimAlpha = 0.22f
+            darkRimAlpha = 0.22f,
+            role = GlassRole.Panel
         )
     }
 }
 
 /**
- * Turns this surface into Liquid Glass using Convx's full AGSL lens refraction & backdrop pipeline.
+ * Turns this surface into Liquid Glass using the full AGSL lens refraction & backdrop pipeline.
  *
  * @param shape Shape of the surface (CornerBasedShape enables AGSL SDF lens refraction).
  * @param style Visual tuning preset for blur, refraction, specular, shadow and tint.
@@ -216,17 +250,44 @@ fun Modifier.liquidGlass(
 ): Modifier {
     val density = LocalDensity.current
     val dim = LocalGlassDim.current
+    val glassConfig = LocalGlassConfig.current
+
+    val isFloatingOrNav = style.role == GlassRole.Navigation ||
+        style.role == GlassRole.Floating ||
+        style.role == GlassRole.Preview
+    val componentGlassEnabled = when (style.role) {
+        GlassRole.Navigation -> glassConfig.enabled && glassConfig.navBarGlass
+        GlassRole.Floating -> glassConfig.enabled && glassConfig.miniPlayerGlass
+        GlassRole.Preview, GlassRole.Overlay, GlassRole.Panel -> glassConfig.enabled
+    }
+
+    val effectiveStyle = if (isFloatingOrNav) {
+        style.copy(
+            blur = glassConfig.blurDp.dp,
+            saturation = glassConfig.saturation,
+            lensAmount = glassConfig.lensAmountDp.dp,
+            lensHeight = glassConfig.lensHeightDp.dp,
+            chromaticAberration = glassConfig.chromaticAberration,
+            depthEffect = glassConfig.depthEffect,
+            tintAlpha = glassConfig.tintAlpha
+        )
+    } else {
+        style.copy(
+            chromaticAberration = glassConfig.chromaticAberration,
+            depthEffect = glassConfig.depthEffect
+        )
+    }
 
     // Check device capability (Android 12+ for RenderEffect)
-    val hasRenderEffect = isRenderEffectSupported() && !isLowRamDevice()
+    val hasRenderEffect = isRenderEffectSupported() && !isLowRamDevice() && componentGlassEnabled
 
     if (!hasRenderEffect || backdrop == null) {
         // Fallback for unsupported devices or missing backdrop: soft outside shadow + tinted frosted surface
-        val shadowPaint = remember(style, density.density) {
+        val shadowPaint = remember(effectiveStyle, density.density) {
             Paint().apply {
-                color = Color.Black.copy(alpha = style.shadowAlpha)
+                color = Color.Black.copy(alpha = effectiveStyle.shadowAlpha)
                 asFrameworkPaint().maskFilter =
-                    BlurMaskFilter(with(density) { style.shadowRadius.toPx() }, BlurMaskFilter.Blur.NORMAL)
+                    BlurMaskFilter(with(density) { effectiveStyle.shadowRadius.toPx() }, BlurMaskFilter.Blur.NORMAL)
             }
         }
 
@@ -243,17 +304,17 @@ fun Modifier.liquidGlass(
                 drawIntoCanvas { canvas ->
                     canvas.save()
                     canvas.clipPath(path, ClipOp.Difference)
-                    canvas.translate(0f, style.shadowRadius.toPx() * 0.35f)
+                    canvas.translate(0f, effectiveStyle.shadowRadius.toPx() * 0.35f)
                     canvas.drawOutline(outline, shadowPaint)
                     canvas.restore()
                 }
             }
             .clip(shape)
-            .background(style.tint.copy(alpha = if (backdrop == null) 0.35f else (style.tintAlpha + 0.20f).coerceIn(0.15f, 0.40f)))
+            .background(effectiveStyle.tint.copy(alpha = if (!componentGlassEnabled) 0.88f else if (backdrop == null) 0.35f else (effectiveStyle.tintAlpha + 0.20f).coerceIn(0.15f, 0.40f)))
             .drawWithContent {
                 val press = pressProgress().coerceIn(0f, 1f)
                 if (dim > 0f) drawRect(Color.Black.copy(alpha = dim))
-                if (style.frost > 0f) drawRect(Color.White.copy(alpha = style.frost))
+                if (effectiveStyle.frost > 0f) drawRect(Color.White.copy(alpha = effectiveStyle.frost))
                 drawRect(
                     Brush.verticalGradient(
                         0f to Color.White.copy(alpha = 0.10f),
@@ -267,10 +328,10 @@ fun Modifier.liquidGlass(
                 // Rim light
                 val outline = shape.createOutline(size, layoutDirection, this)
                 val rim = Brush.linearGradient(
-                    0f to Color.White.copy(alpha = style.rimAlpha + 0.18f * press),
+                    0f to Color.White.copy(alpha = effectiveStyle.rimAlpha + 0.18f * press),
                     0.35f to Color.White.copy(alpha = 0.07f),
                     0.70f to Color.White.copy(alpha = 0.05f),
-                    1f to Color.White.copy(alpha = style.rimAlpha * 0.55f),
+                    1f to Color.White.copy(alpha = effectiveStyle.rimAlpha * 0.55f),
                     start = Offset.Zero,
                     end = Offset(size.width, size.height)
                 )
@@ -278,94 +339,120 @@ fun Modifier.liquidGlass(
             }
     }
 
-    // Supported path: Hardware-accelerated Convx Liquid Glass with AGSL refraction & backdrop sampling
-    val blurRadiusPx = with(density) { style.blur.toPx() }
-    val lensHeightPx = with(density) { style.lensHeight.toPx() }
-    val lensAmountPx = with(density) { style.lensAmount.toPx() }
+    // Supported path: Hardware-accelerated Liquid Glass with AGSL refraction & backdrop sampling
+    val blurRadiusPx = with(density) { effectiveStyle.blur.toPx() }
+    val lensHeightPx = with(density) { effectiveStyle.lensHeight.toPx() }
+    val lensAmountPx = with(density) { effectiveStyle.lensAmount.toPx() }
     val cornerShape = shape as? CornerBasedShape ?: RoundedCornerShape(24.dp)
 
-    val resolutionScale = glassResolutionScale(style.blur.value)
+    val resolutionScale = glassResolutionScale(effectiveStyle.blur.value)
+
+    val effectsBlock: BackdropEffectScope.() -> Unit = remember(
+        effectiveStyle,
+        blurRadiusPx,
+        lensHeightPx,
+        lensAmountPx,
+        resolutionScale
+    ) {
+        {
+            if (effectiveStyle.saturation != 1f) {
+                colorControls(saturation = effectiveStyle.saturation)
+            }
+            if (blurRadiusPx > 0f) {
+                blur(blurRadiusPx * resolutionScale)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                (lensHeightPx > 0f || lensAmountPx > 0f)
+            ) {
+                lens(
+                    refractionHeight = lensHeightPx * resolutionScale,
+                    refractionAmount = lensAmountPx * resolutionScale,
+                    depthEffect = effectiveStyle.depthEffect,
+                    chromaticAberration = effectiveStyle.chromaticAberration,
+                )
+            }
+        }
+    }
+
+    val highlightBlock: () -> Highlight? = remember(effectiveStyle.rimAlpha, pressProgress) {
+        {
+            val press = pressProgress().coerceIn(0f, 1f)
+            Highlight(
+                width = EdgeHighlightWidth,
+                style = HighlightStyle.Default(
+                    color = Color.White.copy(alpha = (effectiveStyle.rimAlpha * 0.6f + 0.18f * press).coerceIn(0f, 1f)),
+                    angle = HighlightAngleFrozen
+                )
+            )
+        }
+    }
+
+    val shadowBlock: () -> Shadow? = remember(effectiveStyle.shadowRadius, effectiveStyle.shadowAlpha) {
+        {
+            Shadow(
+                radius = effectiveStyle.shadowRadius,
+                color = Color.Black.copy(alpha = effectiveStyle.shadowAlpha)
+            )
+        }
+    }
+
+    val surfaceBlock: DrawScope.() -> Unit = remember(effectiveStyle, dim, pressProgress) {
+        {
+            val press = pressProgress().coerceIn(0f, 1f)
+            if (dim > 0f) drawRect(Color.Black.copy(alpha = dim))
+            if (effectiveStyle.frost > 0f) drawRect(Color.White.copy(alpha = effectiveStyle.frost))
+            if (effectiveStyle.tintAlpha > 0f) {
+                drawRect(effectiveStyle.tint.copy(alpha = effectiveStyle.tintAlpha))
+            }
+            if (press > 0f) drawRect(Color.White.copy(alpha = 0.05f * press))
+        }
+    }
+
+    val frontBlock: DrawScope.() -> Unit = remember(effectiveStyle.specularAlpha, highlightEnd, pressProgress) {
+        {
+            if (effectiveStyle.specularAlpha > 0f) {
+                val press = pressProgress().coerceIn(0f, 1f)
+                drawRect(
+                    Brush.radialGradient(
+                        colors = listOf(Color.White.copy(alpha = effectiveStyle.specularAlpha + 0.12f * press), Color.Transparent),
+                        center = Offset(size.width * 0.20f, size.height * 0.02f),
+                        radius = size.maxDimension * 0.55f
+                    )
+                )
+            }
+
+            if (highlightEnd) {
+                val x = size.width - 1.dp.toPx()
+                drawLine(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.25f to Color.White.copy(alpha = 0.30f),
+                        0.75f to Color.White.copy(alpha = 0.12f),
+                        1f to Color.Transparent
+                    ),
+                    start = Offset(x, 0f), end = Offset(x, size.height), strokeWidth = 1.6.dp.toPx()
+                )
+            }
+        }
+    }
 
     return this
         .drawBackdrop(
             backdrop = backdrop.layerBackdrop,
             shape = { cornerShape },
-            effects = {
-                if (style.saturation != 1f) {
-                    colorControls(saturation = style.saturation)
-                }
-                if (blurRadiusPx > 0f) {
-                    blur(blurRadiusPx * resolutionScale)
-                }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                    (lensHeightPx > 0f || lensAmountPx > 0f)
-                ) {
-                    lens(
-                        refractionHeight = lensHeightPx * resolutionScale,
-                        refractionAmount = lensAmountPx * resolutionScale,
-                        depthEffect = style.depthEffect,
-                        chromaticAberration = style.chromaticAberration,
-                    )
-                }
-            },
-            highlight = {
-                val press = pressProgress().coerceIn(0f, 1f)
-                Highlight(
-                    width = EdgeHighlightWidth,
-                    style = HighlightStyle.Default(
-                        color = Color.White.copy(alpha = (style.rimAlpha * 0.6f + 0.18f * press).coerceIn(0f, 1f)),
-                        angle = HighlightAngleFrozen
-                    )
-                )
-            },
-            shadow = {
-                Shadow(
-                    radius = style.shadowRadius,
-                    color = Color.Black.copy(alpha = style.shadowAlpha)
-                )
-            },
+            effects = effectsBlock,
+            highlight = highlightBlock,
+            shadow = shadowBlock,
             backdropScale = resolutionScale,
-            onDrawSurface = {
-                val press = pressProgress().coerceIn(0f, 1f)
-                if (dim > 0f) drawRect(Color.Black.copy(alpha = dim))
-                if (style.frost > 0f) drawRect(Color.White.copy(alpha = style.frost))
-                if (style.tintAlpha > 0f) {
-                    drawRect(style.tint.copy(alpha = style.tintAlpha))
-                }
-                if (press > 0f) drawRect(Color.White.copy(alpha = 0.05f * press))
-            },
-            onDrawFront = {
-                if (style.specularAlpha > 0f) {
-                    val press = pressProgress().coerceIn(0f, 1f)
-                    drawRect(
-                        Brush.radialGradient(
-                            colors = listOf(Color.White.copy(alpha = style.specularAlpha + 0.12f * press), Color.Transparent),
-                            center = Offset(size.width * 0.20f, size.height * 0.02f),
-                            radius = size.maxDimension * 0.55f
-                        )
-                    )
-                }
-
-                if (highlightEnd) {
-                    val x = size.width - 1.dp.toPx()
-                    drawLine(
-                        Brush.verticalGradient(
-                            0f to Color.Transparent,
-                            0.25f to Color.White.copy(alpha = 0.30f),
-                            0.75f to Color.White.copy(alpha = 0.12f),
-                            1f to Color.Transparent
-                        ),
-                        start = Offset(x, 0f), end = Offset(x, size.height), strokeWidth = 1.6.dp.toPx()
-                    )
-                }
-            }
+            onDrawSurface = surfaceBlock,
+            onDrawFront = frontBlock
         )
         .then(
-            if (style.darkRimAlpha > 0f) {
+            if (effectiveStyle.darkRimAlpha > 0f) {
                 Modifier.outerDarkRim(
                     shape = shape,
                     width = 1.6.dp,
-                    alpha = style.darkRimAlpha,
+                    alpha = effectiveStyle.darkRimAlpha,
                     angle = HighlightAngleFrozen
                 )
             } else {

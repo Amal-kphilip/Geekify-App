@@ -14,7 +14,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
 /**
- * User-configurable parameters of the liquid glass effect, matching Convx's GlassEffectConfig.
+ * User-configurable parameters of the liquid glass effect.
  */
 @Stable
 data class GlassEffectConfig(
@@ -63,7 +63,7 @@ data class GlassEffectConfig(
         get() = globalEnabled
 }
 
-/** Rendering modes for glass surfaces, matching Convx. */
+/** Rendering modes for glass surfaces. */
 enum class GlassRenderStyle {
     /** Blur + saturation + lens refraction + specular rim. The default. */
     LIQUID,

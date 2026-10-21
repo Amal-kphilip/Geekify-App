@@ -30,6 +30,10 @@ class ShelfCacheRepository @Inject constructor(
         }
     }
 
+    suspend fun clear(): MusicResult<Unit> = safeDbCall(io) {
+        dao.clear()
+    }
+
     companion object {
         const val HOME = "home"
         private const val MAX_SHELVES = 18
