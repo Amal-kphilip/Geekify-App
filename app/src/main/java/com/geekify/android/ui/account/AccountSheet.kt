@@ -9,7 +9,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -31,21 +30,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
 import com.geekify.android.data.auth.SyncState
+import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.glass.GlassOverlayPortal
 import com.geekify.android.ui.glass.GlassStyle
 import com.geekify.android.ui.glass.OverlayEnter
 import com.geekify.android.ui.glass.consumeTaps
 import com.geekify.android.ui.glass.liquidGlass
-import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.theme.*
 
 /**
- * The profile menu that slides in from the start edge. It is only a menu: Edit profile and Add account
- * open full screens (like Settings, Recents and Extractor health) so they share the app's page layout.
+ * The profile menu that slides in from the start edge.
  */
 @Composable
 fun AccountSheet(
@@ -53,7 +49,7 @@ fun AccountSheet(
     onDismiss: () -> Unit,
     onRecentsClick: () -> Unit,
     onSettingsClick: () -> Unit,
-    onHealthClick: () -> Unit,
+    @Suppress("UNUSED_PARAMETER") onHealthClick: () -> Unit = {},
     onEditProfileClick: () -> Unit,
     onAddAccountClick: () -> Unit,
     onListenTogetherClick: () -> Unit,
@@ -61,7 +57,6 @@ fun AccountSheet(
 ) {
     val state by viewModel.uiState.collectAsState()
 
-    // Floating Liquid Glass panel (portal into the root overlay host so it can sample the screen behind it).
     GlassOverlayPortal(onDismiss = onDismiss, scrim = 0.45f, alignment = Alignment.TopStart, enter = OverlayEnter.None) {
         var panelVisible by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) { panelVisible = true }
@@ -76,24 +71,23 @@ fun AccountSheet(
                     .liquidGlass(
                         RoundedCornerShape(topEnd = 36.dp, bottomEnd = 36.dp),
                         GlassStyle.Panel,
-                        highlightEnd = true // light catching the panel's leading edge
+                        highlightEnd = true
                     )
                     .consumeTaps()
             ) {
                 ProfileHub(
-                        state, onDismiss,
-                        onAccountClick = { onAddAccountClick(); onDismiss() },
-                        onProfileClick = {
-                            if (state.user != null) onEditProfileClick() else onAddAccountClick()
-                            onDismiss()
-                        },
-                        onListenTogetherClick = { onListenTogetherClick(); onDismiss() },
-                        onListeningStatsClick = { onListeningStatsClick(); onDismiss() },
-                        onRecentsClick = { onRecentsClick(); onDismiss() },
-                        onSettingsClick = { onSettingsClick(); onDismiss() },
-                        onHealthClick = { onHealthClick(); onDismiss() },
-                        onSignOut = { viewModel.signOut(); onDismiss() }
-                    )
+                    state = state,
+                    onAccountClick = { onAddAccountClick(); onDismiss() },
+                    onProfileClick = {
+                        if (state.user != null) onEditProfileClick() else onAddAccountClick()
+                        onDismiss()
+                    },
+                    onListenTogetherClick = { onListenTogetherClick(); onDismiss() },
+                    onListeningStatsClick = { onListeningStatsClick(); onDismiss() },
+                    onRecentsClick = { onRecentsClick(); onDismiss() },
+                    onSettingsClick = { onSettingsClick(); onDismiss() },
+                    onSignOut = { viewModel.signOut(); onDismiss() }
+                )
             }
         }
     }
@@ -101,10 +95,14 @@ fun AccountSheet(
 
 @Composable
 private fun ProfileHub(
-    state: AccountUiState, onDismiss: () -> Unit, onAccountClick: () -> Unit, onProfileClick: () -> Unit,
+    state: AccountUiState,
+    onAccountClick: () -> Unit,
+    onProfileClick: () -> Unit,
     onListenTogetherClick: () -> Unit,
     onListeningStatsClick: () -> Unit,
-    onRecentsClick: () -> Unit, onSettingsClick: () -> Unit, onHealthClick: () -> Unit, onSignOut: () -> Unit
+    onRecentsClick: () -> Unit,
+    onSettingsClick: () -> Unit,
+    onSignOut: () -> Unit
 ) {
     val user = state.user
     Column(modifier = Modifier.fillMaxSize()) {
@@ -175,12 +173,12 @@ private fun ProfileHub(
                 .verticalScroll(rememberScrollState())
                 .padding(vertical = 8.dp)
         ) {
-            if (user != null) DrawerRow(GeekifyIcons.Edit, "Edit profile", onProfileClick)
-            DrawerRow(GeekifyIcons.PersonAdd, if (user == null) "Sign in or sign up" else "Add account", onAccountClick)
+            if (user != null) {
+                DrawerRow(GeekifyIcons.PersonAdd, "Add or switch account", onAccountClick)
+            }
             DrawerRow(GeekifyIcons.Groups, "Listen together", onListenTogetherClick)
             DrawerRow(GeekifyIcons.History, "Recents", onRecentsClick)
             DrawerRow(GeekifyIcons.BarChart, "Listening statistics", onListeningStatsClick)
-            DrawerRow(GeekifyIcons.HealthAndSafety, "Extractor health", onHealthClick)
             DrawerRow(GeekifyIcons.Settings, "Settings and privacy", onSettingsClick)
             if (user != null) {
                 Spacer(Modifier.height(8.dp))
@@ -268,7 +266,6 @@ private fun DrawerRow(icon: ImageVector, title: String, onClick: () -> Unit, des
         }
     }
 }
-
 
 /** Credential Manager needs a real Activity to show Google's account sheet. */
 internal tailrec fun Context.findActivity(): Context = when (this) {
