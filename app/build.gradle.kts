@@ -81,6 +81,13 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
         resources.excludes += "META-INF/DEPENDENCIES"
+        jniLibs {
+            keepDebugSymbols += setOf(
+                "**/libandroidx.graphics.path.so",
+                "**/libdatastore_shared_counter.so",
+                "**/libquickjs.so"
+            )
+        }
     }
     buildTypes {
         release {
