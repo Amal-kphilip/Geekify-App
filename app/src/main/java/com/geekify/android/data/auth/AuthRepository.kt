@@ -51,7 +51,7 @@ data class AccountUser(
     val emailVerified: Boolean = true
 )
 
-enum class SyncState { IDLE, SYNCING, SAVED, ERROR }
+enum class SyncState { IDLE, SYNCING, SAVED, OFFLINE, ERROR }
 
 /** Mirrors useAuthStore.ts + friendlyAuthError. */
 @Singleton

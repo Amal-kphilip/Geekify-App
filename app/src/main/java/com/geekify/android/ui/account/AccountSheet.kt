@@ -77,6 +77,7 @@ fun AccountSheet(
             ) {
                 ProfileHub(
                     state = state,
+                    onRetrySync = viewModel::retrySync,
                     onAccountClick = { onAddAccountClick(); onDismiss() },
                     onProfileClick = {
                         if (state.user != null) onEditProfileClick() else onAddAccountClick()
@@ -96,6 +97,7 @@ fun AccountSheet(
 @Composable
 private fun ProfileHub(
     state: AccountUiState,
+    onRetrySync: () -> Unit,
     onAccountClick: () -> Unit,
     onProfileClick: () -> Unit,
     onListenTogetherClick: () -> Unit,
@@ -186,15 +188,21 @@ private fun ProfileHub(
             }
         }
 
-        val syncText = when (state.syncState) {
-            SyncState.SYNCING -> "Syncing your library…"
-            SyncState.SAVED -> "Your library is backed up"
-            SyncState.ERROR -> "Cloud sync needs attention"
-            SyncState.IDLE -> if (user == null) "Local library only" else "Library ready to sync"
+        val isError = user != null && state.syncState == SyncState.ERROR
+        val isOffline = user != null && state.syncState == SyncState.OFFLINE
+        val syncText = when {
+            user == null -> "Local library only"
+            state.syncState == SyncState.SYNCING -> "Syncing your library…"
+            state.syncState == SyncState.SAVED -> "Your library is backed up"
+            isOffline -> "Offline • Saved on this device"
+            isError -> "Sync paused • Tap to retry"
+            else -> "Library ready to sync"
         }
-        val syncTint = when (state.syncState) {
-            SyncState.ERROR -> ErrorRed
-            SyncState.SAVED -> Lime
+        val syncTint = when {
+            user == null -> TextMuted
+            isError -> ErrorRed
+            state.syncState == SyncState.SAVED || state.syncState == SyncState.SYNCING -> Lime
+            isOffline -> TextSecondary
             else -> TextMuted
         }
         Row(
@@ -203,11 +211,16 @@ private fun ProfileHub(
                 .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 20.dp)
                 .clip(CircleShape)
                 .background(InkElevated)
+                .then(
+                    if (isError || isOffline) {
+                        Modifier.bouncyClickable(pressedScale = 0.96f, onClick = onRetrySync)
+                    } else Modifier
+                )
                 .padding(horizontal = 16.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                if (state.syncState == SyncState.ERROR) GeekifyIcons.ErrorOutline else GeekifyIcons.CloudDone,
+                if (isError) GeekifyIcons.ErrorOutline else GeekifyIcons.CloudDone,
                 null,
                 tint = syncTint,
                 modifier = Modifier.size(18.dp)

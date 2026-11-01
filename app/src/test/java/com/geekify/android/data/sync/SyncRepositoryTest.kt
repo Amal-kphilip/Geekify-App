@@ -84,4 +84,37 @@ class SyncRepositoryTest {
         // History is always merged newest-first so recent local plays never disappear
         assertEquals(listOf("vid_b", "vid_a"), applied.history.map { it.first.videoId })
     }
+
+    @Test
+    fun nullCloudDataPushesLocalLibrarySafely() {
+        val local = SyncRepository.CloudData(
+            liked = listOf(trackA),
+            playlists = emptyList(),
+            history = emptyList(),
+            saved = emptyList(),
+            updatedAt = 1000L
+        )
+
+        val resolution = SyncRepository.resolveSyncData(
+            local = local,
+            cloud = null,
+            firstTime = true,
+            localDirty = false,
+            localModifiedAt = 0L,
+            lastSyncedAt = 0L
+        )
+
+        assertTrue(resolution.shouldPushToCloud)
+        assertEquals(null, resolution.dataToApply)
+    }
+
+    @Test
+    fun syncStateIncludesOfflineStatus() {
+        val states = com.geekify.android.data.auth.SyncState.values().map { it.name }
+        assertTrue(states.contains("IDLE"))
+        assertTrue(states.contains("SYNCING"))
+        assertTrue(states.contains("SAVED"))
+        assertTrue(states.contains("OFFLINE"))
+        assertTrue(states.contains("ERROR"))
+    }
 }

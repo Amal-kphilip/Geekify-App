@@ -33,16 +33,32 @@ class AccountViewModel @Inject constructor(
     val uiState: StateFlow<AccountUiState> = _uiState.asStateFlow()
 
     init {
-        auth.user.onEach { u -> _uiState.update { it.copy(user = u) } }.launchIn(viewModelScope)
+        auth.user.onEach { u ->
+            _uiState.update { it.copy(user = u) }
+            if (u == null) {
+                sync.stopSync()
+            }
+        }.launchIn(viewModelScope)
 
         // Start syncing only when the signed-in account changes, not on every name / photo edit.
         auth.user.map { it?.uid }.distinctUntilChanged().onEach { uid ->
-            if (uid != null) sync.startSync(uid)
+            if (uid != null) {
+                sync.startSync(uid)
+            } else {
+                sync.stopSync()
+            }
         }.launchIn(viewModelScope)
 
         sync.syncState.onEach { s ->
             _uiState.update { it.copy(syncState = s) }
         }.launchIn(viewModelScope)
+    }
+
+    fun retrySync() {
+        val uid = auth.user.value?.uid ?: return
+        viewModelScope.launch {
+            sync.startSync(uid)
+        }
     }
 
     fun signInEmail(email: String, pass: String) {

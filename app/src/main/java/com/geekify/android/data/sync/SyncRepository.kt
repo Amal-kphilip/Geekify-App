@@ -1,6 +1,9 @@
 package com.geekify.android.data.sync
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -34,6 +37,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
+import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -171,6 +175,7 @@ class SyncRepository @Inject constructor(
     private val db by lazy { Firebase.firestore }
     private val syncMutex = Mutex()
     private val jobLock = Any()
+    private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
 
     private val _syncState = MutableStateFlow(SyncState.IDLE)
     val syncState: StateFlow<SyncState> = _syncState.asStateFlow()
@@ -179,6 +184,39 @@ class SyncRepository @Inject constructor(
     @Volatile private var pushJob: Job? = null
     @Volatile private var lastPull = 0L
     @Volatile private var applying = false
+
+    init {
+        runCatching {
+            connectivityManager?.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    onConnectivityRestored()
+                }
+
+                override fun onLost(network: Network) {
+                    val uid = activeUid ?: auth.user.value?.uid
+                    if (uid != null && _syncState.value != SyncState.SYNCING && _syncState.value != SyncState.SAVED) {
+                        _syncState.value = SyncState.OFFLINE
+                    }
+                }
+            })
+        }
+    }
+
+    private fun isNetworkConnected(): Boolean {
+        val cm = connectivityManager ?: return true
+        val active = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(active) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    private fun onConnectivityRestored() {
+        val uid = activeUid ?: auth.user.value?.uid ?: return
+        if (_syncState.value == SyncState.OFFLINE || _syncState.value == SyncState.ERROR) {
+            scope.launch {
+                flushPendingSync()
+            }
+        }
+    }
 
     // ---- Cloud document helpers ----
 
@@ -269,6 +307,13 @@ class SyncRepository @Inject constructor(
 
     suspend fun startSync(uid: String) {
         stopSync()
+        activeUid = uid
+        if (!isNetworkConnected()) {
+            _syncState.value = SyncState.OFFLINE
+            markLocalDirty()
+            SyncWorker.enqueue(context)
+            return
+        }
         _syncState.value = SyncState.SYNCING
         syncMutex.withLock {
             try {
@@ -301,9 +346,15 @@ class SyncRepository @Inject constructor(
                 }
             } catch (e: CancellationException) {
                 throw e
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Timber.w(e, "SyncRepository: startSync failed for uid: $uid")
                 activeUid = uid
-                _syncState.value = SyncState.ERROR
+                if (!isNetworkConnected()) {
+                    _syncState.value = SyncState.OFFLINE
+                } else {
+                    _syncState.value = SyncState.ERROR
+                }
+                markLocalDirty()
                 SyncWorker.enqueue(context)
             }
         }
@@ -359,15 +410,27 @@ class SyncRepository @Inject constructor(
         }
     }
 
-    /** Called by [SyncWorker] when network connectivity returns. */
+    /** Called by [SyncWorker] or connectivity callback when network connectivity returns. */
     suspend fun flushPendingSync(): Boolean = syncMutex.withLock {
-        val uid = activeUid ?: auth.user.value?.uid ?: dataStore.data.first()[KEY_LAST_UID] ?: return@withLock true
+        // Only attempt cloud sync when an authenticated user session is active
+        val uid = activeUid ?: auth.user.value?.uid ?: return@withLock true
         activeUid = uid
         val prefs = dataStore.data.first()
         val isDirty = prefs[KEY_SYNC_DIRTY] == true
         val localModifiedAt = prefs[KEY_LOCAL_MODIFIED_AT] ?: 0L
         val lastSyncedAt = prefs[KEY_LAST_SYNCED_AT] ?: 0L
-        if (!isDirty && localModifiedAt <= lastSyncedAt) return@withLock true
+
+        if (!isNetworkConnected()) {
+            _syncState.value = SyncState.OFFLINE
+            return@withLock false
+        }
+
+        if (!isDirty && localModifiedAt <= lastSyncedAt) {
+            if (_syncState.value == SyncState.ERROR || _syncState.value == SyncState.OFFLINE) {
+                _syncState.value = SyncState.SAVED
+            }
+            return@withLock true
+        }
 
         return@withLock try {
             val cloud = pull(uid)
@@ -381,11 +444,20 @@ class SyncRepository @Inject constructor(
                 lastSyncedAt = lastSyncedAt
             )
             resolution.dataToApply?.let { applyCloud(it) }
-            writeNowLocked(uid)
+            val writeSuccess = writeNowLocked(uid)
+            if (writeSuccess) {
+                _syncState.value = SyncState.SAVED
+            }
+            writeSuccess
         } catch (e: CancellationException) {
             throw e
-        } catch (_: Exception) {
-            _syncState.value = SyncState.ERROR
+        } catch (e: Exception) {
+            Timber.w(e, "SyncRepository: flushPendingSync failed for uid: $uid")
+            if (!isNetworkConnected()) {
+                _syncState.value = SyncState.OFFLINE
+            } else {
+                _syncState.value = SyncState.ERROR
+            }
             false
         }
     }
@@ -394,6 +466,12 @@ class SyncRepository @Inject constructor(
     fun onForeground() {
         val uid = activeUid ?: auth.user.value?.uid ?: return
         activeUid = uid
+        if (!isNetworkConnected()) {
+            if (_syncState.value != SyncState.SAVED) {
+                _syncState.value = SyncState.OFFLINE
+            }
+            return
+        }
         if (pushJob?.isActive == true) return
         if (System.currentTimeMillis() - lastPull < STALE_PULL_MS) return
         scope.launch {
@@ -419,11 +497,18 @@ class SyncRepository @Inject constructor(
                     } else if (cloud != null) {
                         applyCloud(cloud)
                         markSyncClean(uid, maxOf(System.currentTimeMillis(), cloud.updatedAt))
+                        _syncState.value = SyncState.SAVED
+                    } else {
+                        _syncState.value = SyncState.SAVED
                     }
                     lastPull = System.currentTimeMillis()
                 } catch (e: CancellationException) {
                     throw e
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    Timber.w(e, "SyncRepository: onForeground sync failed for uid: $uid")
+                    if (!isNetworkConnected()) {
+                        _syncState.value = SyncState.OFFLINE
+                    }
                 }
             }
         }
@@ -482,7 +567,21 @@ class SyncRepository @Inject constructor(
         }
     }
 
+    /** Manually triggers synchronization for the currently active user session. */
+    fun retrySync() {
+        val uid = activeUid ?: auth.user.value?.uid ?: return
+        scope.launch {
+            startSync(uid)
+        }
+    }
+
     private suspend fun writeNowLocked(uid: String): Boolean {
+        if (!isNetworkConnected()) {
+            markLocalDirty()
+            _syncState.value = SyncState.OFFLINE
+            SyncWorker.enqueue(context)
+            return false
+        }
         _syncState.value = SyncState.SYNCING
         return try {
             val now = System.currentTimeMillis()
@@ -564,9 +663,14 @@ class SyncRepository @Inject constructor(
             true
         } catch (e: CancellationException) {
             throw e
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Timber.w(e, "SyncRepository: writeNowLocked failed for uid: $uid")
             markLocalDirty()
-            _syncState.value = SyncState.ERROR
+            if (!isNetworkConnected()) {
+                _syncState.value = SyncState.OFFLINE
+            } else {
+                _syncState.value = SyncState.ERROR
+            }
             SyncWorker.enqueue(context)
             false
         }

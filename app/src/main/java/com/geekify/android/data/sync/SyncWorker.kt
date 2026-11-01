@@ -14,6 +14,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CancellationException
+import timber.log.Timber
 import java.util.concurrent.TimeUnit
 
 @EntryPoint
@@ -45,7 +46,8 @@ class SyncWorker(
             }
         } catch (e: CancellationException) {
             throw e
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Timber.w(e, "SyncWorker: doWork failed on attempt $runAttemptCount")
             if (runAttemptCount < MAX_ATTEMPTS) Result.retry() else Result.failure()
         }
     }
