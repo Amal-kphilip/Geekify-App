@@ -365,7 +365,7 @@ object ListeningStatsCalculator {
         var runLength = 0
         var previous: LocalDate? = null
         sortedDays.forEach { date ->
-            runLength = if (previous != null && previous!!.plusDays(1) == date) runLength + 1 else 1
+            runLength = if (previous != null && previous.plusDays(1) == date) runLength + 1 else 1
             longestStreak = maxOf(longestStreak, runLength)
             previous = date
         }

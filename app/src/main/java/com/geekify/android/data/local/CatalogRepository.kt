@@ -28,10 +28,21 @@ class CatalogRepository @Inject constructor(
     suspend fun cachedTrack(videoId: String): Track? =
         (safeDbCall(io) { dao.trackOnce(videoId)?.toTrack() } as? MusicResult.Success)?.value
 
+    private var lastPruneTime = 0L
+
+    suspend fun autoPruneIfStale(maxAgeMs: Long = 30L * 24 * 3600 * 1000) {
+        val now = System.currentTimeMillis()
+        if (now - lastPruneTime > 24L * 3600 * 1000) {
+            lastPruneTime = now
+            prune(maxAgeMs)
+        }
+    }
+
     suspend fun cacheTracks(tracks: List<Track>): MusicResult<Unit> = safeDbCall(io) {
         if (tracks.isNotEmpty()) {
             val now = System.currentTimeMillis()
             dao.upsertTracks(tracks.filter { it.videoId.isNotEmpty() }.map { it.toEntity(now) })
+            autoPruneIfStale()
         }
     }
 

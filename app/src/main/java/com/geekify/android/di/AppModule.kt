@@ -19,6 +19,7 @@ import com.geekify.android.data.local.MIGRATION_1_2
 import com.geekify.android.data.local.MIGRATION_2_3
 import com.geekify.android.data.local.MIGRATION_3_4
 import com.geekify.android.data.local.MIGRATION_4_5
+import com.geekify.android.data.local.MIGRATION_5_6
 import com.geekify.android.data.local.PlayStatDao
 import com.geekify.android.data.local.PlaylistDao
 import com.geekify.android.data.local.ShelfCacheDao
@@ -71,7 +72,7 @@ abstract class AppModule {
         @Provides @Singleton
         fun provideDatabase(@ApplicationContext ctx: Context): GeekifyDatabase =
             Room.databaseBuilder(ctx, GeekifyDatabase::class.java, "geekify.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build()
 
         @Provides fun provideLikedDao(db: GeekifyDatabase): LikedDao = db.likedDao()

@@ -11,7 +11,20 @@ class ListeningStatsRepository @Inject constructor(
 ) {
     fun observeSessions(): Flow<List<ListeningSessionEntity>> = dao.observeAll()
 
-    suspend fun save(session: ListeningSessionEntity) = dao.upsert(session)
+    private var lastPruneTime = 0L
+
+    suspend fun autoPruneIfStale(maxAgeMs: Long = 180L * 24 * 3600 * 1000) {
+        val now = System.currentTimeMillis()
+        if (now - lastPruneTime > 24L * 3600 * 1000) {
+            lastPruneTime = now
+            pruneOlderThan(now - maxAgeMs)
+        }
+    }
+
+    suspend fun save(session: ListeningSessionEntity) {
+        dao.upsert(session)
+        autoPruneIfStale()
+    }
 
     suspend fun latest(limit: Int = 2_000): List<ListeningSessionEntity> =
         dao.latest(limit.coerceIn(1, 20_000))

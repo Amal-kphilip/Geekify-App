@@ -27,6 +27,16 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface UpdateClientEntryPoint {
+    fun okHttpClient(): OkHttpClient
+}
 
 data class AvailableUpdate(
     val version: String,
@@ -46,16 +56,26 @@ data class AvailableUpdate(
  * - Verifies the downloaded APK's package name and signing certificate against the installed application
  *   before finalizing the `.apk` file and before launching the system package installer.
  */
-class AppUpdateManager(private val context: Context) {
-    private val client = OkHttpClient.Builder()
-        .callTimeout(30, TimeUnit.SECONDS)
-        .build()
+class AppUpdateManager(
+    private val context: Context,
+    customClient: OkHttpClient? = null
+) {
+    private val client: OkHttpClient = customClient ?: runCatching {
+        EntryPointAccessors.fromApplication(context.applicationContext, UpdateClientEntryPoint::class.java).okHttpClient()
+    }.getOrElse {
+        sharedFallbackClient
+    }
     private val json = Json { ignoreUnknownKeys = true }
     private val prefs by lazy {
         context.getSharedPreferences("geekify_update_cache", Context.MODE_PRIVATE)
     }
 
     companion object {
+        private val sharedFallbackClient by lazy {
+            OkHttpClient.Builder()
+                .callTimeout(30, TimeUnit.SECONDS)
+                .build()
+        }
         private const val LATEST_RELEASE_URL = "https://api.github.com/repos/Amal-kphilip/Geekify-App/releases/latest"
         private const val KEY_ETAG = "latest_etag"
         private const val KEY_CACHED_BODY = "latest_body"

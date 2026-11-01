@@ -53,7 +53,7 @@ class HealthViewModel @Inject constructor(
 
             // 2. Test Stream Resolution
             try {
-                val resolved = streamResolver.resolve(testVideoId ?: "dQw4w9WgXcQ", forceRefresh = true)
+                val resolved = streamResolver.resolve(testVideoId, forceRefresh = true)
                 _uiState.update {
                     it.copy(
                         streamResolveOk = true,

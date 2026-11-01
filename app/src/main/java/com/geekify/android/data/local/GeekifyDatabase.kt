@@ -23,7 +23,10 @@ class Converters {
 
 // ---- Entities ----
 
-@Entity(tableName = "liked_tracks")
+@Entity(
+    tableName = "liked_tracks",
+    indices = [Index(value = ["addedAt"])]
+)
 data class LikedTrackEntity(
     @PrimaryKey val videoId: String,
     val title: String,
@@ -39,7 +42,10 @@ data class LikedTrackEntity(
     val addedAt: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "history_tracks")
+@Entity(
+    tableName = "history_tracks",
+    indices = [Index(value = ["playedAt"])]
+)
 data class HistoryTrackEntity(
     @PrimaryKey val videoId: String,
     val title: String,
@@ -56,7 +62,10 @@ data class HistoryTrackEntity(
 )
 
 /** Song metadata remembered from anything the app has loaded (search, albums, artists), usable offline. */
-@Entity(tableName = "tracks")
+@Entity(
+    tableName = "tracks",
+    indices = [Index(value = ["cachedAt"])]
+)
 data class TrackEntity(
     @PrimaryKey val videoId: String,
     val title: String,
@@ -72,7 +81,10 @@ data class TrackEntity(
     val cachedAt: Long
 )
 
-@Entity(tableName = "albums")
+@Entity(
+    tableName = "albums",
+    indices = [Index(value = ["cachedAt"])]
+)
 data class AlbumEntity(
     @PrimaryKey val id: String,
     val title: String,
@@ -82,7 +94,10 @@ data class AlbumEntity(
     val cachedAt: Long
 )
 
-@Entity(tableName = "artists")
+@Entity(
+    tableName = "artists",
+    indices = [Index(value = ["cachedAt"])]
+)
 data class ArtistEntity(
     @PrimaryKey val id: String,
     val name: String,
@@ -91,7 +106,10 @@ data class ArtistEntity(
 )
 
 /** The last home-feed shelves as JSON, so a cold start renders instantly (and offline). */
-@Entity(tableName = "cached_shelves")
+@Entity(
+    tableName = "cached_shelves",
+    indices = [Index(value = ["cachedAt"])]
+)
 data class CachedShelfEntity(
     @PrimaryKey val cacheKey: String,
     val json: String,
@@ -103,7 +121,10 @@ fun Track.toEntity(now: Long = System.currentTimeMillis()) =
 fun TrackEntity.toTrack() = Track(videoId, title, artist, artists, album, albumId, thumbnails, duration, durationSeconds, explicit, type)
 
 /** How often (and when last) a song was properly listened to. Drives the "frequently played" signal for recommendations. */
-@Entity(tableName = "play_stats")
+@Entity(
+    tableName = "play_stats",
+    indices = [Index(value = ["playCount", "lastPlayedAt"])]
+)
 data class PlayStatEntity(
     @PrimaryKey val videoId: String,
     val title: String,
@@ -252,11 +273,14 @@ interface ListeningSessionDao {
         }
     }
 
-    @Query("SELECT * FROM listening_sessions ORDER BY startedAt DESC")
-    fun observeAll(): Flow<List<ListeningSessionEntity>>
+    @Query("SELECT * FROM listening_sessions ORDER BY startedAt DESC LIMIT :limit")
+    fun observeAll(limit: Int = 5000): Flow<List<ListeningSessionEntity>>
 
     @Query("SELECT * FROM listening_sessions ORDER BY startedAt DESC LIMIT :limit")
     suspend fun latest(limit: Int): List<ListeningSessionEntity>
+
+    @Query("SELECT COALESCE(SUM(listenedMs), 0) FROM listening_sessions WHERE startedAt >= :since AND listenedMs >= :minMs")
+    suspend fun totalListenedMsSince(since: Long, minMs: Long = 30_000L): Long
 
     @Query("DELETE FROM listening_sessions WHERE startedAt < :before")
     suspend fun pruneBefore(before: Long)
@@ -337,7 +361,7 @@ interface PlaylistDao {
     entities = [LikedTrackEntity::class, HistoryTrackEntity::class, PlaylistEntity::class, PlaylistTrackEntity::class, PlayStatEntity::class,
         TrackEntity::class, AlbumEntity::class, ArtistEntity::class, CachedShelfEntity::class, ListeningSessionEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -429,5 +453,19 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
             "CREATE INDEX IF NOT EXISTS `index_playlist_tracks_playlistId_position` " +
                 "ON `playlist_tracks` (`playlistId`, `position`)"
         )
+    }
+}
+
+/** v5 -> v6: adds indexes for addedAt, playCount, cachedAt, and playedAt to eliminate unindexed table scans. */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_liked_tracks_addedAt` ON `liked_tracks` (`addedAt`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_history_tracks_playedAt` ON `history_tracks` (`playedAt`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_play_stats_playCount_lastPlayedAt` ON `play_stats` (`playCount`, `lastPlayedAt`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_tracks_cachedAt` ON `tracks` (`cachedAt`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_albums_cachedAt` ON `albums` (`cachedAt`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_artists_cachedAt` ON `artists` (`cachedAt`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_cached_shelves_cachedAt` ON `cached_shelves` (`cachedAt`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_playlist_tracks_playlistId_position` ON `playlist_tracks` (`playlistId`, `position`)")
     }
 }
