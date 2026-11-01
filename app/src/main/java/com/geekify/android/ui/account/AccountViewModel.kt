@@ -55,6 +55,7 @@ class AccountViewModel @Inject constructor(
     }
 
     fun retrySync() {
+        if (_uiState.value.syncState == SyncState.SYNCING) return
         val uid = auth.user.value?.uid ?: return
         viewModelScope.launch {
             sync.startSync(uid)

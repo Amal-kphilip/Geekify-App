@@ -185,14 +185,20 @@ class SyncRepository @Inject constructor(
     @Volatile private var lastPull = 0L
     @Volatile private var applying = false
 
+    @Volatile private var wasOffline = false
+
     init {
         runCatching {
             connectivityManager?.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
-                    onConnectivityRestored()
+                    if (wasOffline) {
+                        wasOffline = false
+                        onConnectivityRestored()
+                    }
                 }
 
                 override fun onLost(network: Network) {
+                    wasOffline = true
                     val uid = activeUid ?: auth.user.value?.uid
                     if (uid != null && _syncState.value != SyncState.SYNCING && _syncState.value != SyncState.SAVED) {
                         _syncState.value = SyncState.OFFLINE
@@ -211,9 +217,9 @@ class SyncRepository @Inject constructor(
 
     private fun onConnectivityRestored() {
         val uid = activeUid ?: auth.user.value?.uid ?: return
-        if (_syncState.value == SyncState.OFFLINE || _syncState.value == SyncState.ERROR) {
+        if (_syncState.value == SyncState.OFFLINE) {
             scope.launch {
-                flushPendingSync()
+                flushPendingSync(isBackgroundWorker = true)
             }
         }
     }
@@ -377,6 +383,12 @@ class SyncRepository @Inject constructor(
             pushJob?.cancel()
             pushJob = scope.launch {
                 markLocalDirty()
+                // If sync is already paused in ERROR or OFFLINE, keep changes locally and rely on background WorkManager.
+                // Do not flap between SYNCING and ERROR while user is playing music or browsing.
+                if (_syncState.value == SyncState.ERROR || _syncState.value == SyncState.OFFLINE) {
+                    SyncWorker.enqueue(context)
+                    return@launch
+                }
                 delay(PUSH_DELAY_MS)
                 syncMutex.withLock {
                     writeNowLocked(uid)
@@ -397,6 +409,10 @@ class SyncRepository @Inject constructor(
             pushJob?.cancel()
             pushJob = scope.launch {
                 markLocalDirty()
+                if (_syncState.value == SyncState.ERROR || _syncState.value == SyncState.OFFLINE) {
+                    SyncWorker.enqueue(context)
+                    return@launch
+                }
                 try {
                     syncMutex.withLock {
                         writeNowLocked(uid)
@@ -411,7 +427,7 @@ class SyncRepository @Inject constructor(
     }
 
     /** Called by [SyncWorker] or connectivity callback when network connectivity returns. */
-    suspend fun flushPendingSync(): Boolean = syncMutex.withLock {
+    suspend fun flushPendingSync(isBackgroundWorker: Boolean = false): Boolean = syncMutex.withLock {
         // Only attempt cloud sync when an authenticated user session is active
         val uid = activeUid ?: auth.user.value?.uid ?: return@withLock true
         activeUid = uid
@@ -421,7 +437,9 @@ class SyncRepository @Inject constructor(
         val lastSyncedAt = prefs[KEY_LAST_SYNCED_AT] ?: 0L
 
         if (!isNetworkConnected()) {
-            _syncState.value = SyncState.OFFLINE
+            if (!isBackgroundWorker) {
+                _syncState.value = SyncState.OFFLINE
+            }
             return@withLock false
         }
 
@@ -444,7 +462,7 @@ class SyncRepository @Inject constructor(
                 lastSyncedAt = lastSyncedAt
             )
             resolution.dataToApply?.let { applyCloud(it) }
-            val writeSuccess = writeNowLocked(uid)
+            val writeSuccess = writeNowLocked(uid, showSyncingState = !isBackgroundWorker && _syncState.value != SyncState.ERROR)
             if (writeSuccess) {
                 _syncState.value = SyncState.SAVED
             }
@@ -455,7 +473,7 @@ class SyncRepository @Inject constructor(
             Timber.w(e, "SyncRepository: flushPendingSync failed for uid: $uid")
             if (!isNetworkConnected()) {
                 _syncState.value = SyncState.OFFLINE
-            } else {
+            } else if (!isBackgroundWorker) {
                 _syncState.value = SyncState.ERROR
             }
             false
@@ -472,6 +490,8 @@ class SyncRepository @Inject constructor(
             }
             return
         }
+        // If sync has paused due to an error, do not flap on every foreground event; wait for manual retry or background sync
+        if (_syncState.value == SyncState.ERROR) return
         if (pushJob?.isActive == true) return
         if (System.currentTimeMillis() - lastPull < STALE_PULL_MS) return
         scope.launch {
@@ -570,19 +590,22 @@ class SyncRepository @Inject constructor(
     /** Manually triggers synchronization for the currently active user session. */
     fun retrySync() {
         val uid = activeUid ?: auth.user.value?.uid ?: return
+        if (_syncState.value == SyncState.SYNCING) return
         scope.launch {
             startSync(uid)
         }
     }
 
-    private suspend fun writeNowLocked(uid: String): Boolean {
+    private suspend fun writeNowLocked(uid: String, showSyncingState: Boolean = true): Boolean {
         if (!isNetworkConnected()) {
             markLocalDirty()
             _syncState.value = SyncState.OFFLINE
             SyncWorker.enqueue(context)
             return false
         }
-        _syncState.value = SyncState.SYNCING
+        if (showSyncingState) {
+            _syncState.value = SyncState.SYNCING
+        }
         return try {
             val now = System.currentTimeMillis()
             val likedTracks = library.likedOnce()
@@ -671,7 +694,9 @@ class SyncRepository @Inject constructor(
             } else {
                 _syncState.value = SyncState.ERROR
             }
-            SyncWorker.enqueue(context)
+            if (showSyncingState) {
+                SyncWorker.enqueue(context)
+            }
             false
         }
     }

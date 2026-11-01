@@ -36,7 +36,7 @@ class SyncWorker(
     override suspend fun doWork(): Result {
         val entry = EntryPointAccessors.fromApplication(applicationContext, SyncEntryPoint::class.java)
         return try {
-            val succeeded = entry.syncRepository().flushPendingSync()
+            val succeeded = entry.syncRepository().flushPendingSync(isBackgroundWorker = true)
             if (succeeded) {
                 Result.success()
             } else if (runAttemptCount < MAX_ATTEMPTS) {
@@ -62,12 +62,13 @@ class SyncWorker(
                 .build()
             val request = OneTimeWorkRequestBuilder<SyncWorker>()
                 .setConstraints(constraints)
-                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.SECONDS)
+                .setInitialDelay(15, TimeUnit.MINUTES)
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 5, TimeUnit.MINUTES)
                 .build()
             runCatching {
                 WorkManager.getInstance(context).enqueueUniqueWork(
                     UNIQUE_WORK_NAME,
-                    ExistingWorkPolicy.REPLACE,
+                    ExistingWorkPolicy.KEEP,
                     request
                 )
             }
