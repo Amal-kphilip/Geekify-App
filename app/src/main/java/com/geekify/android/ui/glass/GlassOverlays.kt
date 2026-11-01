@@ -61,6 +61,7 @@ internal class OverlayEntry(
     val dismissible: Boolean,
     val scrim: Float,
     val enter: OverlayEnter,
+    val backdrop: GlassBackdrop?,
     val onDismiss: () -> Unit,
     val content: @Composable BoxScope.() -> Unit
 )
@@ -80,13 +81,14 @@ fun GlassOverlayPortal(
     scrim: Float = 0.38f,
     alignment: Alignment = Alignment.Center,
     enter: OverlayEnter = OverlayEnter.Scale,
+    backdrop: GlassBackdrop? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
     val host = LocalGlassOverlayHost.current ?: return
     val latestContent by rememberUpdatedState(content)
     val latestDismiss by rememberUpdatedState(onDismiss)
-    val entry = remember(host, dismissible, scrim, alignment, enter) {
-        OverlayEntry(alignment, dismissible, scrim, enter, { latestDismiss() }, { latestContent() })
+    val entry = remember(host, dismissible, scrim, alignment, enter, backdrop) {
+        OverlayEntry(alignment, dismissible, scrim, enter, backdrop, { latestDismiss() }, { latestContent() })
     }
     DisposableEffect(entry) {
         host.entries.add(entry)
@@ -134,7 +136,16 @@ private fun OverlayLayer(entry: OverlayEntry) {
                             scaleY = s
                         }
                     }
-            ) { entry.content(this) }
+            ) {
+                val overlayBackdrop = entry.backdrop
+                if (overlayBackdrop != null) {
+                    CompositionLocalProvider(LocalGlassBackdrop provides overlayBackdrop) {
+                        entry.content(this)
+                    }
+                } else {
+                    entry.content(this)
+                }
+            }
         }
     }
 }

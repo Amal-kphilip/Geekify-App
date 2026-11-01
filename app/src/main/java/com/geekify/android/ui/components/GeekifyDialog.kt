@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import com.geekify.android.ui.glass.GlassBackdrop
 import com.geekify.android.ui.glass.GlassOverlayPortal
 import com.geekify.android.ui.glass.GlassStyle
 import com.geekify.android.ui.glass.LocalGlassOverlayHost
@@ -59,13 +60,19 @@ fun GeekifyDialog(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
     dismissible: Boolean = true,
+    backdrop: GlassBackdrop? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     // Preferred path: a real Liquid Glass panel rendered in the app's own composition (it samples the scene behind it,
     // the scrim stays subtle, and nothing underneath can be tapped). The window-based Dialog below is only a fallback
     // for screens hosted outside MainScreen.
     if (LocalGlassOverlayHost.current != null) {
-        GlassOverlayPortal(onDismiss = onDismissRequest, dismissible = dismissible, scrim = 0.38f) {
+        GlassOverlayPortal(
+            onDismiss = onDismissRequest,
+            dismissible = dismissible,
+            scrim = 0.38f,
+            backdrop = backdrop
+        ) {
             Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
                 Column(
                     modifier = modifier

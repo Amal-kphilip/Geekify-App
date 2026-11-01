@@ -178,6 +178,12 @@ fun AdaptiveBottomBar(
     val playerState by playerViewModel.state.collectAsState()
     val hasPlayer = playerState.current != null && !miniPlayerDismissed
     val isInline = scrollConnection.isInline
+    val activeTabAction = when {
+        currentRoute == Screen.Search.route -> onSearch
+        currentRoute == Screen.Library.route || libraryDetailActive -> onLibrary
+        else -> onHome
+    }
+    val showSeparateSearchAction = currentRoute != Screen.Search.route
 
     Box(
         modifier = modifier.fillMaxWidth(),
@@ -214,7 +220,10 @@ fun AdaptiveBottomBar(
                         currentRoute = currentRoute,
                         libraryDetailActive = libraryDetailActive,
                         size = 56.dp,
-                        onClick = { scrollConnection.expand() }
+                        onClick = {
+                            scrollConnection.expand()
+                            activeTabAction()
+                        }
                     )
                     NowPlayingBar(
                         viewModel = playerViewModel,
@@ -223,11 +232,13 @@ fun AdaptiveBottomBar(
                         onDismiss = onDismissMiniPlayer,
                         modifier = Modifier.weight(1f)
                     )
-                    SearchCircleButton(
-                        isSelected = currentRoute == Screen.Search.route,
-                        size = 56.dp,
-                        onClick = onSearch
-                    )
+                    if (showSeparateSearchAction) {
+                        SearchCircleButton(
+                            isSelected = false,
+                            size = 56.dp,
+                            onClick = onSearch
+                        )
+                    }
                 }
             } else if (inline && !playing) {
                 // INLINE MODE WITHOUT MUSIC: centered Active Tab Circle + Search Circle
@@ -242,14 +253,19 @@ fun AdaptiveBottomBar(
                         currentRoute = currentRoute,
                         libraryDetailActive = libraryDetailActive,
                         size = 56.dp,
-                        onClick = { scrollConnection.expand() }
+                        onClick = {
+                            scrollConnection.expand()
+                            activeTabAction()
+                        }
                     )
-                    Spacer(Modifier.width(14.dp))
-                    SearchCircleButton(
-                        isSelected = currentRoute == Screen.Search.route,
-                        size = 56.dp,
-                        onClick = onSearch
-                    )
+                    if (showSeparateSearchAction) {
+                        Spacer(Modifier.width(14.dp))
+                        SearchCircleButton(
+                            isSelected = false,
+                            size = 56.dp,
+                            onClick = onSearch
+                        )
+                    }
                 }
             } else {
                 // EXPANDED MODE: full controls
@@ -468,7 +484,7 @@ private fun SearchCircleButton(
     }
 }
 
-/** Active Tab Circle shown on the left in inline mode; tapping re-expands the bar. */
+/** Active Tab Circle shown on the left in inline mode; tapping activates the displayed tab. */
 @Composable
 private fun ActiveTabCircleButton(
     currentRoute: String?,

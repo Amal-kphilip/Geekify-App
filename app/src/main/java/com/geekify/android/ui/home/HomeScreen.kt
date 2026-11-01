@@ -36,6 +36,8 @@ import com.geekify.android.data.model.*
 import com.geekify.android.ui.components.*
 import com.geekify.android.ui.theme.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 
 /** One card in the "Curated & trending" carousel. [lead] is the song the heart / queue / more buttons act on. */
 private data class DiscoverItem(
@@ -110,24 +112,30 @@ fun HomeScreen(
 
     val discoverListState = rememberLazyListState()
     val discoverSnapFling = rememberSnapFlingBehavior(lazyListState = discoverListState)
-    LaunchedEffect(discover.isNotEmpty()) {
-        if (discover.isNotEmpty()) {
+    // Use stable item identities rather than only the non-empty flag. The feed can first
+    // render cached/partial content and then replace it with the current curated cards.
+    // In that case the carousel must start at its first card again.
+    val discoverKeys = discover.map { it.key }
+    LaunchedEffect(discoverKeys) {
+        if (discoverKeys.isNotEmpty()) {
             discoverListState.scrollToItem(0)
         }
     }
-    LaunchedEffect(discover.size, discoverListState.isScrollInProgress) {
-        if (discover.size > 1 && !discoverListState.isScrollInProgress) {
+    // Do not key this effect on isScrollInProgress: animateScrollToItem itself toggles
+    // that state, and using it as an effect key cancels the animation before it completes.
+    // User scrolling simply skips the current interval; automatic scrolling resumes on
+    // the next interval without fighting the gesture.
+    LaunchedEffect(discoverKeys) {
+        if (discoverKeys.size > 1) {
             while (true) {
                 delay(4_200L)
-                if (!discoverListState.isScrollInProgress && discover.size > 1) {
+                if (!discoverListState.isScrollInProgress) {
                     val current = discoverListState.firstVisibleItemIndex
-                    val next = if (!discoverListState.canScrollForward || current + 1 >= discover.size) {
-                        0
-                    } else {
-                        current + 1
-                    }
-                    runCatching {
-                        discoverListState.animateScrollToItem(next)
+                    val next = if (current >= discoverKeys.lastIndex) 0 else current + 1
+                    // Isolate the animation job so a user drag can interrupt it without
+                    // cancelling the long-lived auto-scroll ticker itself.
+                    supervisorScope {
+                        launch { discoverListState.animateScrollToItem(next) }.join()
                     }
                 }
             }

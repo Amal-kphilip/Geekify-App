@@ -59,6 +59,8 @@ import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.components.DialogButtonStyle
 import com.geekify.android.ui.components.DialogPillButton
 import com.geekify.android.ui.components.GeekifyDialog
+import com.geekify.android.ui.glass.glassBackdropSource
+import com.geekify.android.ui.glass.rememberGlassBackdrop
 import com.geekify.android.ui.components.rememberArtColor
 import com.geekify.android.ui.components.bestArtworkUrl
 import com.geekify.android.ui.theme.*
@@ -158,6 +160,9 @@ fun ExpandedPlayerScreen(
     // The no-op click target is intentional: it makes the entire full-screen surface a
     // pointer target, so blank areas cannot send taps through to cards behind this overlay.
     val overlayInteraction = remember { MutableInteractionSource() }
+    // Sleep Timer is hosted by the root glass overlay portal. Give it a backdrop that
+    // records the Now Playing surface itself instead of the Home screen underneath.
+    val sleepTimerBackdrop = rememberGlassBackdrop()
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -194,6 +199,7 @@ fun ExpandedPlayerScreen(
                 indication = null,
                 onClick = {}
             )
+            .glassBackdropSource(sleepTimerBackdrop, enabled = showSleepTimer)
     ) {
         PlayerBackdrop(thumbUrl = thumbUrl, tint = artColor)
 
@@ -409,7 +415,8 @@ fun ExpandedPlayerScreen(
                     viewModel.cancelSleepTimer()
                     showSleepTimer = false
                 },
-                onDismiss = { showSleepTimer = false }
+                onDismiss = { showSleepTimer = false },
+                backdrop = sleepTimerBackdrop
             )
         }
     }
@@ -420,9 +427,10 @@ private fun SleepTimerDialog(
     remainingMs: Long?,
     onSelect: (Int) -> Unit,
     onCancelTimer: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    backdrop: com.geekify.android.ui.glass.GlassBackdrop
 ) {
-    GeekifyDialog(onDismissRequest = onDismiss) {
+    GeekifyDialog(onDismissRequest = onDismiss, backdrop = backdrop) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
