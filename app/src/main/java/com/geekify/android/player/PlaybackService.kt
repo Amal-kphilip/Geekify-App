@@ -5,9 +5,13 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -19,54 +23,56 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.datasource.okhttp.OkHttpDataSource
-import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
-import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.session.MediaSessionService
 import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.CommandButton
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
+import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
-import androidx.media3.session.DefaultMediaNotificationProvider
 import com.geekify.android.MainActivity
-import com.geekify.android.audio.AudioEffectsController
 import com.geekify.android.R
-import com.geekify.android.data.model.Track
+import com.geekify.android.audio.AudioEffectsController
 import com.geekify.android.data.local.ListeningSessionEntity
 import com.geekify.android.data.local.ListeningStatsRepository
+import com.geekify.android.data.model.Track
+import com.geekify.android.data.source.MusicSource
+import com.geekify.android.data.source.innertube.InnerTubeClient
 import com.geekify.android.domain.listening.SmartQueueRanker
 import com.geekify.android.notifications.NotificationChannels
 import com.geekify.android.player.artwork.ArtworkUrls
 import com.geekify.android.player.artwork.CoilBitmapLoader
-import com.geekify.android.data.source.innertube.InnerTubeClient
-import com.geekify.android.data.source.MusicSource
+import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
 import dagger.hilt.android.AndroidEntryPoint
+import java.util.UUID
+import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.cancel
 import okhttp3.OkHttpClient
-import com.google.common.util.concurrent.ListenableFuture
-import com.google.common.util.concurrent.SettableFuture
-import javax.inject.Inject
-import java.util.UUID
 
 @OptIn(UnstableApi::class)
 @AndroidEntryPoint
@@ -96,7 +102,7 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var libraryRepository: com.geekify.android.data.local.LibraryRepository
     @Inject lateinit var http: OkHttpClient
     @Inject lateinit var audioCache: SimpleCache
-    @Inject lateinit var syncRepository: com.geekify.android.data.sync.SyncRepository
+    @Inject lateinit var syncRepository: dagger.Lazy<com.geekify.android.data.sync.SyncRepository>
     @Inject lateinit var appSettings: com.geekify.android.settings.AppSettingsRepository
 
     private lateinit var player: ExoPlayer
@@ -109,10 +115,13 @@ class PlaybackService : MediaSessionService() {
     private var prefetchJob: Job? = null
     private var autoplayJob: Job? = null
     private var progressJob: Job? = null
+    /** Mirrors ExoPlayer's isPlaying; the progress ticker suspends on this while playback is paused/stopped. */
+    private val playerActivelyPlaying = MutableStateFlow(false)
     private var bufferingWatchdogJob: Job? = null
     private var lastPlayingVideoId: String? = null
-    private var resolveRetries = 0
-    private var playedSinceRetryMs = 0L
+    private val retryCoordinator = PlaybackRetryCoordinator(MAX_STREAM_RETRIES, RETRY_RESET_AFTER_MS)
+    private var connectivityManager: ConnectivityManager? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var placeholderShown = false
     private lateinit var artworkLoader: CoilBitmapLoader
     private var listenedMs = 0L
@@ -124,14 +133,12 @@ class PlaybackService : MediaSessionService() {
     private var activeListeningMs = 0L
     private var lastListeningCheckpointMs = 0L
     private var restoredPositionUsed = false
-    private var prevEqEnabled = false
-    private var prevPreset = ""
-    private var prevNormalize = false
 
     override fun onCreate() {
         super.onCreate()
 
         createPlaybackNotificationChannel()
+        registerConnectivityMonitor()
 
         // Warm the InnerTube API session and the player-config/cipher extractor off the playback path.
         scope.launch(Dispatchers.IO) {
@@ -239,9 +246,8 @@ class PlaybackService : MediaSessionService() {
             .launchIn(scope)
 
         // Tempo, pitch and silence skipping change on the running player (no re-initialisation).
-        prevEqEnabled = audioEffects.settings.value.eqEnabled
-        prevPreset = audioEffects.settings.value.preset
-        prevNormalize = audioEffects.settings.value.normalize
+        // Equalizer and normalization transitions are smoothed directly inside their audio processors
+        // without seeking or flushing the audio sink.
         observeRuntimeAppSettings()
         audioEffects.settings.onEach { s ->
             val current = player.playbackParameters
@@ -249,7 +255,6 @@ class PlaybackService : MediaSessionService() {
                 player.playbackParameters = PlaybackParameters(s.speed, s.pitch)
             }
             if (player.skipSilenceEnabled != s.skipSilence) player.skipSilenceEnabled = s.skipSilence
-            handleAudioEffectFlush(s)
         }.launchIn(scope)
 
         player.addListener(object : Player.Listener {
@@ -274,15 +279,28 @@ class PlaybackService : MediaSessionService() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                playerActivelyPlaying.value = isPlaying
                 if (isPlaying) {
                     queueManager.setBuffering(false)
                     queueManager.state.value.current?.let(::recordTrackStarted)
+                } else {
+                    // The ticker suspends while not playing: publish the exact stop position once.
+                    publishPlayerPosition()
                 }
             }
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 // A track can change while ExoPlayer remains continuously in the playing state.
                 // Pair this callback with onIsPlayingChanged so session accounting isn't missed.
                 if (player.isPlaying) queueManager.state.value.current?.let(::recordTrackStarted)
+            }
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int
+            ) {
+                // Seeks from the notification, Bluetooth or Android Auto while paused would otherwise
+                // not reach the UI until playback resumes, because the ticker is suspended.
+                if (!player.isPlaying) publishPlayerPosition()
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 when (playbackState) {
@@ -294,6 +312,8 @@ class PlaybackService : MediaSessionService() {
                         bufferingWatchdogJob?.cancel()
                         bufferingWatchdogJob = null
                         queueManager.setBuffering(false)
+                        // Duration becomes known here; publish it even if playback stays paused.
+                        publishPlayerPosition()
                     }
                     Player.STATE_ENDED -> {
                         bufferingWatchdogJob?.cancel()
@@ -314,20 +334,20 @@ class PlaybackService : MediaSessionService() {
             }
         })
 
-        // Periodically update progress in QueueManager for UI seekers
+        // Periodically update progress in QueueManager for UI seekers. The loop suspends entirely while
+        // the player is not playing (no polling while paused) and publishes only to the dedicated
+        // position flow, so queue observers below are not re-run on every tick.
         progressJob = scope.launch {
             var tick = 0
             while (isActive) {
+                if (!playerActivelyPlaying.value) playerActivelyPlaying.first { it }
                 if (player.isPlaying) {
                     val pos = player.currentPosition
                     val dur = player.duration.coerceAtLeast(0L)
                     queueManager.setProgress(pos, dur)
 
                     // A link that has played for a while is good: allow fresh-link retries again for later failures.
-                    if (resolveRetries > 0) {
-                        playedSinceRetryMs += 500
-                        if (playedSinceRetryMs >= RETRY_RESET_AFTER_MS) { resolveRetries = 0; playedSinceRetryMs = 0L }
-                    }
+                    retryCoordinator.onPlaybackProgressTick(500L)
 
                     // Accumulate actual playing time independently of play-count qualification. A qualifying
                     // play is still counted only once, after 30 seconds or half of a short track.
@@ -391,6 +411,85 @@ class PlaybackService : MediaSessionService() {
                 player.pause()
             }
         }.launchIn(scope)
+    }
+
+    /**
+     * Publishes the player's current position/duration to the dedicated position flow (main thread only).
+     * Skipped while the player still holds the previous item (e.g. right after STATE_ENDED advanced the
+     * queue), so the new track's reset position is never overwritten by the old track's end position.
+     */
+    private fun publishPlayerPosition() {
+        if (!::player.isInitialized) return
+        val currentId = queueManager.state.value.current?.videoId ?: return
+        if (player.currentMediaItem?.mediaId != currentId) return
+        queueManager.setProgress(
+            player.currentPosition.coerceAtLeast(0L),
+            player.duration.coerceAtLeast(0L)
+        )
+    }
+
+    private fun isCurrentlyConnected(): Boolean {
+        val cm = connectivityManager
+            ?: getSystemService(ConnectivityManager::class.java).also { connectivityManager = it }
+            ?: return true
+        val active = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(active) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    private fun registerConnectivityMonitor() {
+        val cm = getSystemService(ConnectivityManager::class.java) ?: return
+        connectivityManager = cm
+        retryCoordinator.onConnectivityChanged(isCurrentlyConnected(), null) {}
+
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                notifyConnectivityChanged(true)
+            }
+
+            override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+                val hasInternet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                notifyConnectivityChanged(hasInternet)
+            }
+
+            override fun onLost(network: Network) {
+                notifyConnectivityChanged(isCurrentlyConnected())
+            }
+        }
+        networkCallback = callback
+        runCatching {
+            val request = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+            cm.registerNetworkCallback(request, callback)
+        }
+    }
+
+    private fun unregisterConnectivityMonitor() {
+        val cb = networkCallback ?: return
+        networkCallback = null
+        runCatching { connectivityManager?.unregisterNetworkCallback(cb) }
+    }
+
+    private fun notifyConnectivityChanged(online: Boolean) {
+        scope.launch {
+            val currentTrack = queueManager.state.value.current
+            retryCoordinator.onConnectivityChanged(
+                online = online,
+                currentTrackId = currentTrack?.videoId
+            ) { recovery ->
+                queueManager.setError(null)
+                if (recovery.wasPlaying) {
+                    queueManager.setPlaying(true)
+                }
+                retryCurrentStream(
+                    track = recovery.track,
+                    resumeAt = recovery.resumeAtMs,
+                    wasPlaying = recovery.wasPlaying,
+                    markFailed = recovery.markFailed
+                )
+            }
+        }
     }
 
     /**
@@ -466,14 +565,14 @@ class PlaybackService : MediaSessionService() {
                     when (customCommand) {
                         likeCommand -> queueManager.state.value.current?.let { track ->
                             libraryRepository.toggleLike(track)
-                            syncRepository.pushNow()
+                            syncRepository.get().pushNow()
                         }
                         shuffleCommand -> queueManager.toggleShuffle()
                     }
                     updateMediaNotificationButtons()
                     result.set(SessionResult(SessionResult.RESULT_SUCCESS))
                 } catch (_: Exception) {
-                    result.set(SessionResult(SessionResult.RESULT_ERROR_UNKNOWN))
+                    result.set(SessionResult(androidx.media3.session.SessionError.ERROR_UNKNOWN))
                 }
             }
             return result
@@ -513,21 +612,6 @@ class PlaybackService : MediaSessionService() {
         override fun seekToPreviousMediaItem() { queueManager.previous(currentPosition.coerceAtLeast(0L) / 1000) }
     }
 
-    private fun handleAudioEffectFlush(s: com.geekify.android.audio.AudioSettings) {
-        val eqToggled = s.eqEnabled != prevEqEnabled
-        val presetSwitched = s.preset != prevPreset && s.preset != com.geekify.android.audio.EqPresets.CUSTOM
-        val normalizeToggled = s.normalize != prevNormalize
-        prevEqEnabled = s.eqEnabled
-        prevPreset = s.preset
-        prevNormalize = s.normalize
-        if ((eqToggled || presetSwitched || normalizeToggled) &&
-            player.playbackState == Player.STATE_READY &&
-            player.currentMediaItem != null
-        ) {
-            player.seekTo(player.currentPosition.coerceAtLeast(0L))
-        }
-    }
-
     private fun observeRuntimeAppSettings() {
         appSettings.state
             .map { it.audioQuality }
@@ -537,7 +621,7 @@ class PlaybackService : MediaSessionService() {
                 streamResolver.clearCache()
                 val currentTrack = queueManager.state.value.current
                 if (currentTrack != null && player.currentMediaItem != null) {
-                    resolveRetries = 0
+                    retryCoordinator.resetRetryBudget()
                     retryCurrentStream(
                         track = currentTrack,
                         resumeAt = player.currentPosition.coerceAtLeast(0L),
@@ -636,19 +720,21 @@ class PlaybackService : MediaSessionService() {
     private fun loadAndPlay(track: Track, autoPlay: Boolean = true) {
         // State emissions (progress, volume...) must not restart a lookup that is already running.
         if (loadingId == track.videoId && loadJob?.isActive == true) return
-        if (player.currentMediaItem?.mediaId == track.videoId) {
+        if (player.currentMediaItem?.mediaId == track.videoId && !retryCoordinator.isRetryActive()) {
             if (autoPlay && !player.isPlaying) player.play()
             return
         }
         loadJob?.cancel()
+        bufferingWatchdogJob?.cancel()
+        bufferingWatchdogJob = null
+        retryCoordinator.onNewTrackLoading(track.videoId)
         loadingId = track.videoId
-        resolveRetries = 0
         lastPlayingVideoId = null
         // Only the very first load after the app starts is a restored queue; it resumes at the saved position.
         val pendingStart = queueManager.takePendingStart()
         val startMs = when {
             pendingStart > 0L -> pendingStart
-            !restoredPositionUsed -> queueManager.state.value.progressMs.coerceAtLeast(0L)
+            !restoredPositionUsed -> queueManager.position.value.positionMs.coerceAtLeast(0L)
             else -> 0L
         }
         restoredPositionUsed = true
@@ -656,6 +742,7 @@ class PlaybackService : MediaSessionService() {
         loadJob = scope.launch {
             try {
                 val stream = streamResolver.resolve(track.videoId)
+                if (queueManager.state.value.current?.videoId != track.videoId) return@launch
                 audioEffects.setTrackLoudness(stream.loudnessDb)
                 val item = buildMediaItem(track, stream.url, stream.mimeType, stream.itag)
                 player.setMediaItem(item, startMs)
@@ -669,8 +756,14 @@ class PlaybackService : MediaSessionService() {
                 // Show the reason instead of failing silently. Only move on to the next song when the
                 // person was actually listening: a restored, paused queue must never start by itself.
                 val wasPlaying = queueManager.state.value.isPlaying
-                queueManager.setError(PlaybackErrors.message(e))
-                if (wasPlaying) skipAfterError(track)
+                val online = isCurrentlyConnected()
+                retryCoordinator.onConnectivityChanged(online, track.videoId) {}
+                if (retryCoordinator.deferIfOffline(track, startMs, wasPlaying, markFailed = false)) {
+                    queueManager.setError("No internet connection. Playback will resume when back online.")
+                } else {
+                    queueManager.setError(PlaybackErrors.message(e))
+                    if (wasPlaying) skipAfterError(track)
+                }
             } finally {
                 if (loadingId == track.videoId) loadingId = null
             }
@@ -679,12 +772,17 @@ class PlaybackService : MediaSessionService() {
 
     private fun skipAfterError(failed: Track) {
         if (!appSettings.state.value.autoSkipOnError) return
-        scope.launch {
+        val online = isCurrentlyConnected()
+        retryCoordinator.onConnectivityChanged(online, failed.videoId) {}
+        if (!retryCoordinator.canSkipAfterError()) return
+        val job = scope.launch {
             delay(3000)
+            if (!isCurrentlyConnected() || !retryCoordinator.canSkipAfterError()) return@launch
             val s = queueManager.state.value
             // Only skip if the user has not already moved to another track.
             if (s.current?.videoId == failed.videoId && s.queue.size > 1 && s.hasNext) queueManager.next()
         }
+        retryCoordinator.attachSkipJob(job)
     }
 
     private fun startBufferingWatchdog() {
@@ -697,9 +795,24 @@ class PlaybackService : MediaSessionService() {
             val state = queueManager.state.value
             if (state.current?.videoId != trackId || !state.isPlaying || player.playbackState != Player.STATE_BUFFERING) return@launch
 
+            val online = isCurrentlyConnected()
+            retryCoordinator.onConnectivityChanged(online, trackId) {}
+            if (!online) {
+                retryCoordinator.deferIfOffline(
+                    track = track,
+                    resumeAtMs = player.currentPosition.coerceAtLeast(0L),
+                    wasPlaying = true,
+                    markFailed = false
+                )
+                queueManager.setBuffering(false)
+                queueManager.setError("No internet connection. Playback will resume when back online.")
+                return@launch
+            }
+            if (!retryCoordinator.canWatchdogTriggerRetry(loadJob?.isActive == true)) return@launch
+
             // A stream that never becomes READY is normally a stale/rejected googlevideo URL. Refresh it instead
             // of leaving the user on an endless loading animation. The normal retry/error path is reused.
-            if (resolveRetries < MAX_STREAM_RETRIES) {
+            if (retryCoordinator.resolveRetries < MAX_STREAM_RETRIES) {
                 retryCurrentStream(
                     track = track,
                     resumeAt = player.currentPosition.coerceAtLeast(0L),
@@ -715,25 +828,46 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun retryCurrentStream(track: Track, resumeAt: Long, wasPlaying: Boolean, markFailed: Boolean) {
-        if (resolveRetries >= MAX_STREAM_RETRIES) {
+        val online = isCurrentlyConnected()
+        retryCoordinator.onConnectivityChanged(online, track.videoId) {}
+        if (retryCoordinator.deferIfOffline(track, resumeAt, wasPlaying, markFailed)) {
+            bufferingWatchdogJob?.cancel()
+            bufferingWatchdogJob = null
+            queueManager.setBuffering(false)
+            queueManager.setError("No internet connection. Playback will resume when back online.")
+            return
+        }
+
+        // Prevent simultaneous retry operations
+        if (retryCoordinator.isRetryActive()) return
+
+        val attempt = retryCoordinator.tryBeginRetry()
+        if (attempt == null) {
             queueManager.setBuffering(false)
             queueManager.setError("Could not start this track.")
             if (wasPlaying) skipAfterError(track)
             return
         }
 
-        resolveRetries++
-        playedSinceRetryMs = 0L
-        val attempt = resolveRetries
         if (markFailed) streamResolver.markFailed(track.videoId) else streamResolver.invalidate(track.videoId)
+        bufferingWatchdogJob?.cancel()
+        bufferingWatchdogJob = null
         loadJob?.cancel()
         loadingId = null
         player.stop()
         queueManager.setBuffering(true)
 
-        scope.launch {
-            delay(400L * attempt)
+        var launchedJob: Job? = null
+        launchedJob = scope.launch {
             try {
+                delay(400L * attempt)
+                val stillOnline = isCurrentlyConnected()
+                retryCoordinator.onConnectivityChanged(stillOnline, track.videoId) {}
+                if (retryCoordinator.deferIfOffline(track, resumeAt, wasPlaying, markFailed)) {
+                    queueManager.setBuffering(false)
+                    queueManager.setError("No internet connection. Playback will resume when back online.")
+                    return@launch
+                }
                 val stream = streamResolver.resolve(track.videoId, forceRefresh = true)
                 if (queueManager.state.value.current?.videoId != track.videoId) return@launch
                 audioEffects.setTrackLoudness(stream.loudnessDb)
@@ -746,15 +880,32 @@ class PlaybackService : MediaSessionService() {
                 throw e
             } catch (e: Exception) {
                 queueManager.setBuffering(false)
-                queueManager.setError(PlaybackErrors.message(e))
-                if (wasPlaying) skipAfterError(track)
+                val stillOnline = isCurrentlyConnected()
+                retryCoordinator.onConnectivityChanged(stillOnline, track.videoId) {}
+                if (retryCoordinator.deferIfOffline(track, resumeAt, wasPlaying, markFailed)) {
+                    queueManager.setError("No internet connection. Playback will resume when back online.")
+                } else {
+                    queueManager.setError(PlaybackErrors.message(e))
+                    if (wasPlaying) skipAfterError(track)
+                }
+            } finally {
+                retryCoordinator.clearRetryJob(launchedJob)
             }
         }
+        retryCoordinator.attachRetryJob(launchedJob)
     }
 
     private fun handlePlaybackError(error: PlaybackException) {
         val track = queueManager.state.value.current ?: return
         val wasPlaying = queueManager.state.value.isPlaying
+        val resumeAt = player.currentPosition.coerceAtLeast(0L)
+        val online = isCurrentlyConnected()
+        retryCoordinator.onConnectivityChanged(online, track.videoId) {}
+        if (retryCoordinator.deferIfOffline(track, resumeAt, wasPlaying, markFailed = false)) {
+            queueManager.setError("No internet connection. Playback will resume when back online.")
+            return
+        }
+
         val httpCode = generateSequence<Throwable>(error) { it.cause }
             .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
             .firstOrNull()?.responseCode
@@ -772,13 +923,12 @@ class PlaybackService : MediaSessionService() {
             // Rejected or expired URL: get a fresh one and try again from the same position.
             retryCurrentStream(
                 track = track,
-                resumeAt = player.currentPosition.coerceAtLeast(0L),
+                resumeAt = resumeAt,
                 wasPlaying = wasPlaying,
                 markFailed = httpCode == 403
             )
         } else {
-            resolveRetries = 0
-            playedSinceRetryMs = 0L
+            retryCoordinator.resetRetryBudget()
             queueManager.setError(PlaybackErrors.message(error))
             if (wasPlaying) skipAfterError(track)
         }
@@ -796,11 +946,9 @@ class PlaybackService : MediaSessionService() {
             scope.launch {
                 if (!appSettings.state.value.pauseListenHistory) {
                     historyRepository.add(current)
-                    syncRepository.schedulePush()
-                        // Plays are written locally first, so push them (debounced) to the cloud copy too.
-                }
-                // Plays are written locally first, so push them (debounced) to the cloud copy too.
                     // Plays are written locally first, so push them (debounced) to the cloud copy too.
+                    syncRepository.get().schedulePush()
+                }
             }
             startPrefetch(current.videoId)
             startAutoplay(current)
@@ -891,9 +1039,7 @@ class PlaybackService : MediaSessionService() {
             skipped = false
         )
         if (!appSettings.state.value.pauseListenHistory) {
-            if (!appSettings.state.value.pauseListenHistory) {
-                listeningPersistenceScope.launch { runCatching { listeningStatsRepository.save(record) } }
-            }
+            listeningPersistenceScope.launch { runCatching { listeningStatsRepository.save(record) } }
         }
     }
 
@@ -918,10 +1064,8 @@ class PlaybackService : MediaSessionService() {
                 skipped = skipped && !meaningfulCompletion
             )
             if (!appSettings.state.value.pauseListenHistory) {
-            if (!appSettings.state.value.pauseListenHistory) {
                 listeningPersistenceScope.launch { runCatching { listeningStatsRepository.save(record) } }
             }
-        }
         }
         activeListeningSessionId = null
         activeListeningTrack = null
@@ -941,15 +1085,19 @@ class PlaybackService : MediaSessionService() {
 
     @OptIn(UnstableApi::class)
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // Explicitly dismissing Geekify from recent apps should also end active playback.
-        // This does not affect normal background playback while the task remains open.
+        queueManager.persistProgress()
+        // Configurable task-removal behavior (defaults to true so dismissing Geekify from Recents stops playback).
+        if (!appSettings.state.value.stopPlaybackOnTaskRemoved && player.isPlaying) {
+            return
+        }
         player.pause()
         queueManager.setPlaying(false)
-        queueManager.persistProgress()
         pauseAllPlayersAndStopSelf()
     }
 
     override fun onDestroy() {
+        unregisterConnectivityMonitor()
+        retryCoordinator.cancelAll()
         finishListeningSession()
         queueManager.persistProgress()
         progressJob?.cancel()

@@ -139,7 +139,20 @@ data class PlaylistEntity(
     val createdAt: Long
 )
 
-@Entity(tableName = "playlist_tracks", primaryKeys = ["playlistId", "videoId"])
+@Entity(
+    tableName = "playlist_tracks",
+    primaryKeys = ["playlistId", "videoId"],
+    foreignKeys = [
+        ForeignKey(
+            entity = PlaylistEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["playlistId"],
+            onDelete = ForeignKey.CASCADE,
+            onUpdate = ForeignKey.CASCADE
+        )
+    ],
+    indices = [Index(value = ["playlistId", "position"])]
+)
 data class PlaylistTrackEntity(
     val playlistId: String,
     val position: Int,
@@ -165,6 +178,7 @@ fun PlaylistTrackEntity.toTrack() = Track(videoId, title, artist, artists, album
 fun Track.toPlaylistTrack(playlistId: String, position: Int) = PlaylistTrackEntity(playlistId, position, videoId, title, artist, artists, album, albumId, thumbnails, duration, durationSeconds, explicit, type)
 
 @Serializable
+@androidx.compose.runtime.Immutable
 data class LocalPlaylist(val id: String, val name: String, val createdAt: Long, val tracks: List<Track>)
 
 // ---- DAOs ----
@@ -178,6 +192,12 @@ interface LikedDao {
     @Query("DELETE FROM liked_tracks") suspend fun clear()
     @Query("SELECT * FROM liked_tracks ORDER BY addedAt DESC, rowid DESC") suspend fun allOnce(): List<LikedTrackEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAll(list: List<LikedTrackEntity>)
+
+    @Transaction
+    suspend fun replaceAll(list: List<LikedTrackEntity>) {
+        clear()
+        if (list.isNotEmpty()) insertAll(list)
+    }
 }
 
 @Dao
@@ -189,6 +209,12 @@ interface HistoryDao {
     @Query("DELETE FROM history_tracks") suspend fun clear()
     @Query("SELECT * FROM history_tracks ORDER BY playedAt DESC LIMIT 40") suspend fun allOnce(): List<HistoryTrackEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAll(list: List<HistoryTrackEntity>)
+
+    @Transaction
+    suspend fun replaceAll(list: List<HistoryTrackEntity>) {
+        clear()
+        if (list.isNotEmpty()) insertAll(list)
+    }
 }
 
 @Dao
@@ -265,16 +291,44 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlists ORDER BY createdAt DESC") fun allPlaylists(): Flow<List<PlaylistEntity>>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertPlaylist(p: PlaylistEntity)
     @Query("DELETE FROM playlists WHERE id=:id") suspend fun deletePlaylist(id: String)
+    @Query("DELETE FROM playlists") suspend fun clearPlaylists()
     @Query("UPDATE playlists SET name=:name WHERE id=:id") suspend fun rename(id: String, name: String)
     @Query("SELECT * FROM playlist_tracks WHERE playlistId=:id ORDER BY position ASC") fun tracksFor(id: String): Flow<List<PlaylistTrackEntity>>
     @Query("SELECT * FROM playlist_tracks ORDER BY playlistId, position ASC") fun allTracks(): Flow<List<PlaylistTrackEntity>>
+    @Query("SELECT * FROM playlist_tracks ORDER BY playlistId, position ASC") suspend fun allTracksOnce(): List<PlaylistTrackEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertTrack(t: PlaylistTrackEntity)
     @Query("DELETE FROM playlist_tracks WHERE playlistId=:pid AND videoId=:vid") suspend fun removeTrack(pid: String, vid: String)
+    @Query("UPDATE playlist_tracks SET position = :newPosition WHERE playlistId = :pid AND videoId = :vid")
+    suspend fun updateTrackPosition(pid: String, vid: String, newPosition: Int)
     @Query("DELETE FROM playlist_tracks WHERE playlistId=:id") suspend fun clearTracks(id: String)
+    @Query("DELETE FROM playlist_tracks") suspend fun clearAllTracks()
     @Query("SELECT * FROM playlists ORDER BY createdAt DESC") suspend fun allPlaylistsOnce(): List<PlaylistEntity>
     @Query("SELECT * FROM playlist_tracks WHERE playlistId=:id ORDER BY position ASC") suspend fun tracksOnce(id: String): List<PlaylistTrackEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAll(list: List<PlaylistEntity>)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAllTracks(list: List<PlaylistTrackEntity>)
+
+    @Transaction
+    suspend fun removeTrackAndCompactPositions(pid: String, vid: String) {
+        removeTrack(pid, vid)
+        val remaining = tracksOnce(pid)
+        remaining.forEachIndexed { index, entity ->
+            if (entity.position != index) {
+                updateTrackPosition(pid, entity.videoId, index)
+            }
+        }
+    }
+
+    @Transaction
+    suspend fun replaceAll(playlists: List<PlaylistEntity>, tracks: List<PlaylistTrackEntity>) {
+        clearAllTracks()
+        clearPlaylists()
+        if (playlists.isNotEmpty()) {
+            insertAll(playlists)
+            val validPlaylistIds = playlists.asSequence().map { it.id }.toSet()
+            val validTracks = tracks.filter { it.playlistId in validPlaylistIds }
+            if (validTracks.isNotEmpty()) insertAllTracks(validTracks)
+        }
+    }
 }
 
 // ---- Database ----
@@ -283,7 +337,7 @@ interface PlaylistDao {
     entities = [LikedTrackEntity::class, HistoryTrackEntity::class, PlaylistEntity::class, PlaylistTrackEntity::class, PlayStatEntity::class,
         TrackEntity::class, AlbumEntity::class, ArtistEntity::class, CachedShelfEntity::class, ListeningSessionEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -346,5 +400,34 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_listening_sessions_startedAt` ON `listening_sessions` (`startedAt`)")
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_listening_sessions_videoId` ON `listening_sessions` (`videoId`)")
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_listening_sessions_artist` ON `listening_sessions` (`artist`)")
+    }
+}
+
+/** v4 -> v5: adds foreign-key CASCADE constraint and composite (playlistId, position) index on playlist_tracks. */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `playlist_tracks_new` (" +
+                "`playlistId` TEXT NOT NULL, `position` INTEGER NOT NULL, `videoId` TEXT NOT NULL, " +
+                "`title` TEXT NOT NULL, `artist` TEXT NOT NULL, `artists` TEXT NOT NULL, " +
+                "`album` TEXT, `albumId` TEXT, `thumbnails` TEXT NOT NULL, `duration` TEXT, " +
+                "`durationSeconds` INTEGER, `explicit` INTEGER NOT NULL, `type` TEXT NOT NULL, " +
+                "PRIMARY KEY(`playlistId`, `videoId`), " +
+                "FOREIGN KEY(`playlistId`) REFERENCES `playlists`(`id`) ON UPDATE CASCADE ON DELETE CASCADE)"
+        )
+        db.execSQL(
+            "INSERT INTO `playlist_tracks_new` (" +
+                "`playlistId`, `position`, `videoId`, `title`, `artist`, `artists`, `album`, " +
+                "`albumId`, `thumbnails`, `duration`, `durationSeconds`, `explicit`, `type`) " +
+                "SELECT `playlistId`, `position`, `videoId`, `title`, `artist`, `artists`, `album`, " +
+                "`albumId`, `thumbnails`, `duration`, `durationSeconds`, `explicit`, `type` " +
+                "FROM `playlist_tracks` WHERE `playlistId` IN (SELECT `id` FROM `playlists`)"
+        )
+        db.execSQL("DROP TABLE `playlist_tracks`")
+        db.execSQL("ALTER TABLE `playlist_tracks_new` RENAME TO `playlist_tracks`")
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_playlist_tracks_playlistId_position` " +
+                "ON `playlist_tracks` (`playlistId`, `position`)"
+        )
     }
 }

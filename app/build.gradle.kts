@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -5,6 +7,34 @@ plugins {
     id("com.google.dagger.hilt.android")
     id("com.google.devtools.ksp")
     id("com.google.gms.google-services")
+}
+
+fun semanticVersionCode(versionName: String): Int? {
+    val parts = versionName.trim().removePrefix("v").substringBefore('-').split('.')
+    val nums = parts.map { it.toIntOrNull() ?: return null }
+    if (nums.isEmpty() || nums.size > 3) return null
+    val major = nums[0]
+    val minor = nums.getOrElse(1) { 0 }
+    val patch = nums.getOrElse(2) { 0 }
+    if (minor !in 0..99 || patch !in 0..99) return null
+    return major * 10_000 + minor * 100 + patch
+}
+
+val resolvedVersionName: String = providers.gradleProperty("appVersionName").orNull
+    ?.trim()
+    ?.removePrefix("v")
+    ?.takeIf { it.isNotEmpty() }
+    ?: "0.1.0"
+
+val resolvedVersionCode: Int = semanticVersionCode(resolvedVersionName)
+    ?: providers.gradleProperty("appVersionCode").orNull?.toIntOrNull()
+    ?: 100
+
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.isFile) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
 }
 
 android {
@@ -15,9 +45,32 @@ android {
         applicationId = "com.geekify.android"
         minSdk = 26
         targetSdk = 37
-        versionCode = providers.gradleProperty("appVersionCode").orNull?.toIntOrNull() ?: 110
-        versionName = providers.gradleProperty("appVersionName").orNull ?: "0.1.0"
+        versionCode = resolvedVersionCode
+        versionName = resolvedVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+    signingConfigs {
+        create("release") {
+            val envStoreFile = System.getenv("ANDROID_KEYSTORE_PATH")
+                ?: keystoreProperties.getProperty("storeFile")
+            val envStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                ?: keystoreProperties.getProperty("storePassword")
+            val envKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                ?: keystoreProperties.getProperty("keyAlias")
+            val envKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+                ?: keystoreProperties.getProperty("keyPassword")
+
+            if (!envStoreFile.isNullOrBlank() &&
+                !envStorePassword.isNullOrBlank() &&
+                !envKeyAlias.isNullOrBlank() &&
+                !envKeyPassword.isNullOrBlank()
+            ) {
+                storeFile = rootProject.file(envStoreFile)
+                storePassword = envStorePassword
+                keyAlias = envKeyAlias
+                keyPassword = envKeyPassword
+            }
+        }
     }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions {
@@ -33,6 +86,10 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            val releaseSigning = signingConfigs.findByName("release")
+            if (releaseSigning?.storeFile != null) {
+                signingConfig = releaseSigning
+            }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -83,6 +140,9 @@ dependencies {
     // Background checks for update/engagement notifications (about twice a day)
     implementation("androidx.work:work-runtime-ktx:2.10.0")
 
+    // Baseline Profile installer for faster startup and reduced jank
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+
     // DataStore
     implementation("androidx.datastore:datastore-preferences:1.2.1")
 
@@ -121,4 +181,16 @@ dependencies {
     // Testing
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+}
+
+// InnerTubeX v0.8.4 contains Java 21 bytecode (class-file version 65).
+// Run host-side unit tests on JDK 21 while keeping Android/Kotlin output targeted to Java 17.
+val jdk21TestLauncher = extensions
+    .getByType<org.gradle.jvm.toolchain.JavaToolchainService>()
+    .launcherFor {
+        languageVersion.set(org.gradle.jvm.toolchain.JavaLanguageVersion.of(21))
+    }
+
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    javaLauncher.set(jdk21TestLauncher)
 }

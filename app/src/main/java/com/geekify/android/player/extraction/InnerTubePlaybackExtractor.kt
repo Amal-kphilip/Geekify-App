@@ -2,11 +2,11 @@ package com.geekify.android.player.extraction
 
 import android.content.Context
 import android.net.ConnectivityManager
+import com.geekify.android.innertube.YouTube
+import com.geekify.android.innertube.models.YouTubeLocale
 import com.geekify.android.player.potoken.PoTokenGenerator
 import com.geekify.android.settings.AppSettingsRepository
 import com.geekify.android.settings.AudioQualityPreference
-import com.geekify.android.innertube.YouTube
-import com.geekify.android.innertube.models.YouTubeLocale
 import com.metrolist.innertubex.InnerTubeLogLevel
 import com.metrolist.innertubex.InnerTubeLogger
 import com.metrolist.innertubex.cipher.PlayerConfigRepository
@@ -24,13 +24,16 @@ import com.metrolist.innertubex.extraction.YtConfigParserImpl
 import com.metrolist.innertubex.extraction.generateClientPlaybackNonce
 import com.metrolist.innertubex.extraction.strategy.PoTokenProviderKind
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import timber.log.Timber
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import timber.log.Timber
 
 /**
  * Adapter around the InnerTubeX extractor. It owns stream-client fallback,
@@ -55,12 +58,33 @@ class InnerTubePlaybackExtractor @Inject constructor(
         val useRangeChunks: Boolean
     )
 
-    private companion object {
-        const val TAG = "InnerTubePlaybackExtractor"
-        const val STREAM_CLIENT_FAILURE_TTL_MS = 5 * 60 * 1000L
-        const val DEFAULT_STREAM_TTL_MS = 5 * 60 * 1000L
+    companion object {
+        private const val TAG = "InnerTubePlaybackExtractor"
+        private const val STREAM_CLIENT_FAILURE_TTL_MS = 5 * 60 * 1000L
+        private const val DEFAULT_STREAM_TTL_MS = 5 * 60 * 1000L
+        private const val MAX_CONFIG_JSON_BYTES = 512 * 1024
+        const val PINNED_PLAYER_CONFIG_COMMIT = "e9d93a1f77c5f4e615a560f0d90d6e622316f180"
         const val PLAYER_CONFIG_URL =
-            "https://raw.githubusercontent.com/ZemerTeam/zemer-cipher/master/library/src/main/assets/player_configs.json"
+            "https://raw.githubusercontent.com/ZemerTeam/zemer-cipher/$PINNED_PLAYER_CONFIG_COMMIT/library/src/main/assets/player_configs.json"
+
+        private val configJsonParser = Json { ignoreUnknownKeys = true }
+
+        /**
+         * Validates downloaded decipher configuration before persisting or applying it.
+         * Rejects blank, oversized, HTML, or structurally invalid JSON so the extractor
+         * safely falls back to the embedded configuration.
+         */
+        fun isValidPlayerConfigJson(raw: String): Boolean {
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty() || trimmed.length > MAX_CONFIG_JSON_BYTES) return false
+            if (trimmed.startsWith("<")) return false
+            val element = runCatching { configJsonParser.parseToJsonElement(trimmed) }.getOrNull() ?: return false
+            return when (element) {
+                is JsonObject -> element.isNotEmpty()
+                is JsonArray -> element.isNotEmpty() && element.all { it is JsonObject }
+                else -> false
+            }
+        }
     }
 
     init {
@@ -133,12 +157,6 @@ class InnerTubePlaybackExtractor @Inject constructor(
                     excludedClients = failedStreamClients(videoId),
                     audioQuality = effectiveAudioQuality,
                     clientPlaybackNonce = generateClientPlaybackNonce()
-
-
-
-
-
-
                 )
             ) { "InnerTubeX returned no playable stream" }
         } catch (error: CancellationException) {
@@ -226,16 +244,23 @@ class InnerTubePlaybackExtractor @Inject constructor(
 
     private class AndroidPlayerConfigRepository(context: Context) : PlayerConfigRepository {
         private val preferences = context.getSharedPreferences("innertubex_player_config", Context.MODE_PRIVATE)
-        private companion object {
-            const val PLAYER_CONFIG_URL =
-                "https://raw.githubusercontent.com/ZemerTeam/zemer-cipher/master/library/src/main/assets/player_configs.json"
-        }
         override val enabled: Boolean = true
         override val sourceUrl: String = PLAYER_CONFIG_URL
         override val defaultSourceUrl: String = PLAYER_CONFIG_URL
         override var cachedJson: String
-            get() = preferences.getString("json", "").orEmpty()
-            set(value) { preferences.edit().putString("json", value).apply() }
+            get() {
+                val stored = preferences.getString("json", "").orEmpty()
+                return if (isValidPlayerConfigJson(stored)) stored else ""
+            }
+            set(value) {
+                if (value.isBlank()) {
+                    preferences.edit().remove("json").apply()
+                } else if (isValidPlayerConfigJson(value)) {
+                    preferences.edit().putString("json", value).apply()
+                } else {
+                    Timber.tag(TAG).w("Rejected invalid remote player_configs.json payload; keeping embedded fallback")
+                }
+            }
         override var cachedAtMs: Long
             get() = preferences.getLong("cached_at_ms", 0L)
             set(value) { preferences.edit().putLong("cached_at_ms", value).apply() }

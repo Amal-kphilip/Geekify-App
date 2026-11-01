@@ -5,6 +5,9 @@ import androidx.activity.compose.BackHandler
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.geekify.android.player.PlaybackPosition
+import kotlinx.coroutines.flow.StateFlow
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.animateColorAsState
@@ -75,10 +78,10 @@ fun ExpandedPlayerScreen(
     onDismiss: () -> Unit,
     onQueueClick: () -> Unit
 ) {
-    val state by viewModel.state.collectAsState()
+    val state by viewModel.state.collectAsStateWithLifecycle()
     val lastSkipDirection = viewModel.lastSkipDirection
-    val isLiked by viewModel.isCurrentLiked.collectAsState()
-    val sleepTimerRemainingMs by viewModel.sleepTimerRemainingMs.collectAsState()
+    val isLiked by viewModel.isCurrentLiked.collectAsStateWithLifecycle()
+    val sleepTimerRemainingMs by viewModel.sleepTimerRemainingMs.collectAsStateWithLifecycle()
     var showSleepTimer by remember { mutableStateOf(false) }
     val track = state.current ?: run {
         onDismiss()
@@ -94,15 +97,6 @@ fun ExpandedPlayerScreen(
         if (keepScreenOn) currentView.keepScreenOn = true
         onDispose { if (keepScreenOn) currentView.keepScreenOn = false }
     }
-
-    var isDragging by remember { mutableStateOf(false) }
-    var dragFraction by remember { mutableStateOf(0f) }
-
-    val totalDurationMs = state.durationMs.coerceAtLeast(1L)
-    val liveFraction = (state.progressMs.toFloat() / totalDurationMs.toFloat()).coerceIn(0f, 1f)
-    val fraction = if (isDragging) dragFraction else liveFraction
-    val currentPositionMs = (fraction * totalDurationMs).toLong()
-    val remainingMs = (totalDurationMs - currentPositionMs).coerceAtLeast(0L)
 
     val thumbUrl = track.thumbnails.bestArtworkUrl()
     val artColor by rememberArtColor(thumbUrl, fallback = InkElevated)
@@ -330,42 +324,13 @@ fun ExpandedPlayerScreen(
             Spacer(Modifier.weight(0.5f))
 
             // ---- Seek bar + times (repeat sits between them) ----
-            SeekBar(
-                fraction = fraction,
-                onChange = {
-                    isDragging = true
-                    dragFraction = it
-                },
-                onChangeFinished = {
-                    viewModel.seek((dragFraction * totalDurationMs).toLong())
-                    isDragging = false
-                },
-                modifier = Modifier.fillMaxWidth(),
-                isPlaying = state.isPlaying
+            SeekSection(
+                position = viewModel.position,
+                isPlaying = state.isPlaying,
+                repeat = state.repeat,
+                onSeek = viewModel::seek,
+                onCycleRepeat = viewModel::cycleRepeat
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(formatMs(currentPositionMs), color = TextSecondary, fontSize = 13.sp, modifier = Modifier.width(56.dp))
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    IconButton(onClick = { viewModel.cycleRepeat() }, modifier = Modifier.size(34.dp)) {
-                        Icon(
-                            imageVector = if (state.repeat == RepeatMode.ONE) GeekifyIcons.RepeatOne else GeekifyIcons.Repeat,
-                            contentDescription = "Repeat",
-                            tint = if (state.repeat != RepeatMode.OFF) Lime else TextSecondary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-                Text(
-                    "-" + formatMs(remainingMs),
-                    color = TextSecondary,
-                    fontSize = 13.sp,
-                    modifier = Modifier.width(56.dp),
-                    textAlign = TextAlign.End
-                )
-            }
 
             Spacer(Modifier.height(16.dp))
 
@@ -632,4 +597,60 @@ private fun formatMs(ms: Long): String {
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return "%d:%02d".format(minutes, seconds)
+}
+
+@Composable
+private fun SeekSection(
+    position: StateFlow<PlaybackPosition>,
+    isPlaying: Boolean,
+    repeat: RepeatMode,
+    onSeek: (Long) -> Unit,
+    onCycleRepeat: () -> Unit
+) {
+    val pos by position.collectAsStateWithLifecycle()
+    var isDragging by remember { mutableStateOf(false) }
+    var dragFraction by remember { mutableFloatStateOf(0f) }
+
+    val totalDurationMs = pos.durationMs.coerceAtLeast(1L)
+    val liveFraction = (pos.positionMs.toFloat() / totalDurationMs.toFloat()).coerceIn(0f, 1f)
+    val fraction = if (isDragging) dragFraction else liveFraction
+    val currentPositionMs = (fraction * totalDurationMs).toLong()
+    val remainingMs = (totalDurationMs - currentPositionMs).coerceAtLeast(0L)
+
+    SeekBar(
+        fraction = fraction,
+        onChange = {
+            isDragging = true
+            dragFraction = it
+        },
+        onChangeFinished = {
+            onSeek((dragFraction * totalDurationMs).toLong())
+            isDragging = false
+        },
+        modifier = Modifier.fillMaxWidth(),
+        isPlaying = isPlaying
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(formatMs(currentPositionMs), color = TextSecondary, fontSize = 13.sp, modifier = Modifier.width(56.dp))
+        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            IconButton(onClick = onCycleRepeat, modifier = Modifier.size(34.dp)) {
+                Icon(
+                    imageVector = if (repeat == RepeatMode.ONE) GeekifyIcons.RepeatOne else GeekifyIcons.Repeat,
+                    contentDescription = "Repeat",
+                    tint = if (repeat != RepeatMode.OFF) Lime else TextSecondary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+        Text(
+            "-" + formatMs(remainingMs),
+            color = TextSecondary,
+            fontSize = 13.sp,
+            modifier = Modifier.width(56.dp),
+            textAlign = TextAlign.End
+        )
+    }
 }

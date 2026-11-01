@@ -119,7 +119,7 @@ fun LibraryScreen(
                 contentPadding = PaddingValues(horizontal = 20.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(filters) { name ->
+                items(filters, key = { it }) { name ->
                     PillChip(text = name, selected = filter == name, onClick = { filter = name })
                 }
             }
@@ -146,7 +146,11 @@ fun LibraryScreen(
                     }
                 }
 
-                items(shownPlaylists, key = { "playlist:" + it.id }) { playlist ->
+                items(
+                    items = shownPlaylists,
+                    key = { "playlist:" + it.id },
+                    contentType = { "playlist" }
+                ) { playlist ->
                     val cover = playlist.tracks.firstOrNull()?.thumbnails?.bestArtworkUrl(480)
                     LibraryRow(
                         title = playlist.name,
@@ -175,7 +179,11 @@ fun LibraryScreen(
                 }
 
                 // Albums and playlists added from a collection page.
-                items(shownSaved, key = { "saved:" + it.id }) { saved ->
+                items(
+                    items = shownSaved,
+                    key = { "saved:" + it.id },
+                    contentType = { "saved" }
+                ) { saved ->
                     val label = if (saved.kind == "ALBUM") "Album" else "Playlist"
                     LibraryRow(
                         title = saved.title,

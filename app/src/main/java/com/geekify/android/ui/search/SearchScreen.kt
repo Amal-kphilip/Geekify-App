@@ -233,7 +233,7 @@ fun SearchScreen(
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(tabs) { tab ->
+                    items(tabs, key = { it }) { tab ->
                         val selected = state.selectedTab == tab
                         Box(
                             modifier = Modifier
@@ -289,7 +289,11 @@ fun SearchScreen(
                                     modifier = Modifier.padding(bottom = 4.dp)
                                 )
                             }
-                            items(viewModel.genreTags.size) { index ->
+                            items(
+                                count = viewModel.genreTags.size,
+                                key = { viewModel.genreTags[it] },
+                                contentType = { "genre_tile" }
+                            ) { index ->
                                 val tag = viewModel.genreTags[index]
                                 val gradient = BrowseTileGradients[index % BrowseTileGradients.size]
                                 CategoryTile(

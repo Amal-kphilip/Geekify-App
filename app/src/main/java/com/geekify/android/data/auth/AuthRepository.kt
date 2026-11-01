@@ -1,7 +1,6 @@
 package com.geekify.android.data.auth
 
 import android.content.Context
-import com.geekify.android.R
 import android.util.Log
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
@@ -10,6 +9,7 @@ import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.GetCredentialProviderConfigurationException
 import androidx.credentials.exceptions.NoCredentialException
+import com.geekify.android.R
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
@@ -21,15 +21,22 @@ import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.io.File
+import java.security.MessageDigest
+import java.security.SecureRandom
+import java.util.Base64
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.tasks.await
-import javax.inject.Inject
-import javax.inject.Singleton
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 data class AccountUser(
     val uid: String,
@@ -39,7 +46,9 @@ data class AccountUser(
     /** Signed up with email + password (as opposed to Google). */
     val hasPassword: Boolean = false,
     /** [photoUrl] is a picture the person picked on this phone. */
-    val hasCustomPhoto: Boolean = false
+    val hasCustomPhoto: Boolean = false,
+    /** Whether the user's email address has been verified. */
+    val emailVerified: Boolean = true
 )
 
 enum class SyncState { IDLE, SYNCING, SAVED, ERROR }
@@ -56,7 +65,43 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
 
     private val profilePrefs = context.getSharedPreferences("geekify_profile", Context.MODE_PRIVATE)
 
+    companion object {
+        private val secureRandom = SecureRandom()
+        private val jwtJson = Json { ignoreUnknownKeys = true }
+
+        /** Generates a cryptographically random 256-bit nonce encoded as hex. */
+        fun generateRawNonce(): String {
+            val bytes = ByteArray(32)
+            secureRandom.nextBytes(bytes)
+            return bytes.joinToString("") { "%02x".format(it) }
+        }
+
+        /** Computes the lowercase SHA-256 hex digest of [input]. */
+        fun sha256Hex(input: String): String {
+            val digest = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
+            return digest.joinToString("") { "%02x".format(it) }
+        }
+
+        /**
+         * Verifies that a Google ID token JWT carries the expected [hashedNonce] (or [rawNonce])
+         * in its payload `nonce` claim to prevent token replay attacks.
+         */
+        fun verifyIdTokenNonce(idToken: String, hashedNonce: String, rawNonce: String): Boolean {
+            val parts = idToken.split('.')
+            if (parts.size < 2) return false
+            val payloadJson = runCatching {
+                val decoded = Base64.getUrlDecoder().decode(parts[1])
+                String(decoded, Charsets.UTF_8)
+            }.getOrNull() ?: return false
+            val claimNonce = runCatching {
+                jwtJson.parseToJsonElement(payloadJson).jsonObject["nonce"]?.jsonPrimitive?.contentOrNull
+            }.getOrNull() ?: return false
+            return claimNonce == hashedNonce || claimNonce == rawNonce
+        }
+    }
+
     init {
+        // Existing authentication sessions are preserved across app restarts.
         auth.addAuthStateListener { publishUser() }
     }
 
@@ -70,13 +115,15 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
         _user.value = auth.currentUser?.let { u ->
             val fallback = u.email?.substringBefore("@") ?: "Listener"
             val local = localAvatar(u.uid)
+            val isPasswordAccount = u.providerData.any { it.providerId == "password" }
             AccountUser(
                 uid = u.uid,
                 email = u.email,
                 name = u.displayName?.trim()?.ifBlank { fallback } ?: fallback,
                 photoUrl = local?.let { android.net.Uri.fromFile(it).toString() } ?: u.photoUrl?.toString(),
-                hasPassword = u.providerData.any { it.providerId == "password" },
-                hasCustomPhoto = local != null
+                hasPassword = isPasswordAccount,
+                hasCustomPhoto = local != null,
+                emailVerified = !isPasswordAccount || u.isEmailVerified
             )
         }
     }
@@ -132,13 +179,36 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
         publishUser()
     }
 
+    class EmailVerificationRequiredException(message: String) : Exception(message)
+
     suspend fun signInEmail(email: String, password: String) {
-        auth.signInWithEmailAndPassword(email.trim(), password).await()
+        val trimmedEmail = email.trim()
+        val cred = auth.signInWithEmailAndPassword(trimmedEmail, password).await()
+        val signedInUser = cred.user
+        if (signedInUser != null &&
+            signedInUser.providerData.any { it.providerId == "password" } &&
+            !signedInUser.isEmailVerified
+        ) {
+            runCatching { signedInUser.sendEmailVerification().await() }
+            auth.signOut()
+            throw EmailVerificationRequiredException(
+                "Please verify your email address ($trimmedEmail). We've sent a verification link to your inbox."
+            )
+        }
     }
 
     suspend fun signUpEmail(name: String, email: String, password: String) {
-        val cred = auth.createUserWithEmailAndPassword(email.trim(), password).await()
-        cred.user?.updateProfile(com.google.firebase.auth.userProfileChangeRequest { displayName = name.trim() })?.await()
+        val trimmedEmail = email.trim()
+        val cred = auth.createUserWithEmailAndPassword(trimmedEmail, password).await()
+        val createdUser = cred.user
+        createdUser?.updateProfile(com.google.firebase.auth.userProfileChangeRequest { displayName = name.trim() })?.await()
+        runCatching { createdUser?.sendEmailVerification()?.await() }
+        if (createdUser != null && !createdUser.isEmailVerified) {
+            auth.signOut()
+            throw EmailVerificationRequiredException(
+                "Account created! Check $trimmedEmail and click the verification link before signing in."
+            )
+        }
     }
 
     /** Thrown when the person closes the Google account picker; callers should stay silent. */
@@ -156,7 +226,11 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
     }
 
     private suspend fun fetchGoogleCredential(activityContext: Context): AuthCredential {
-        val option = GetSignInWithGoogleOption.Builder(context.getString(R.string.default_web_client_id)).build()
+        val rawNonce = generateRawNonce()
+        val hashedNonce = sha256Hex(rawNonce)
+        val option = GetSignInWithGoogleOption.Builder(context.getString(R.string.default_web_client_id))
+            .setNonce(hashedNonce)
+            .build()
         val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
         val googleId = try {
             val result = CredentialManager.create(activityContext).getCredential(activityContext, request)
@@ -183,6 +257,9 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
             Log.e(TAG, "Bad Google ID token", e)
             throw GoogleSignInException("Couldn't read the Google sign-in response. Please try again.", e)
         }
+        if (!verifyIdTokenNonce(googleId.idToken, hashedNonce = hashedNonce, rawNonce = rawNonce)) {
+            throw GoogleSignInException("Google sign-in security verification failed. Please try again.")
+        }
         return GoogleAuthProvider.getCredential(googleId.idToken, null)
     }
 
@@ -193,6 +270,7 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
     suspend fun signOut() = auth.signOut()
 
     fun friendlyError(e: Throwable): String {
+        if (e is EmailVerificationRequiredException) return e.message ?: "Please verify your email address before signing in."
         if (e is GoogleSignInException) return e.message ?: "Google sign-in failed."
         if (e is IllegalArgumentException || e is IllegalStateException) return e.message ?: "Something went wrong. Please try again."
         val code = (e as? FirebaseAuthException)?.errorCode ?: ""

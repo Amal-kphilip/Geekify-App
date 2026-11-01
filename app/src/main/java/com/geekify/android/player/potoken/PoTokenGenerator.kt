@@ -73,11 +73,22 @@ class PoTokenGenerator(context: Context) {
         }
     }
 
-    private companion object {
+    companion object {
         // Healthy cold-start (WebView spin-up + botguard JS + token gen) is ~2–5s in practice;
         // 8s leaves slack for a slow device without making the user wait too long before the
         // fallback chain (ANDROID_VR, etc.) takes over when the WebView hangs.
-        const val POTOKEN_TIMEOUT_MS = 8_000L
+        private const val POTOKEN_TIMEOUT_MS = 8_000L
+
+        /**
+         * Maps the video-scoped [playerPot] (minted from `videoId` for `/player` requests) and
+         * session-scoped [streamingPot] (minted from `visitorData`/`sessionId` for stream URLs)
+         * to their corresponding [PoTokenResult] fields.
+         */
+        internal fun mapTokens(playerPot: String, streamingPot: String): PoTokenResult =
+            PoTokenResult(
+                playerRequestPoToken = playerPot,
+                streamingDataPoToken = streamingPot
+            )
     }
 
     /**
@@ -149,9 +160,6 @@ class PoTokenGenerator(context: Context) {
 
         Timber.tag(TAG).d("PO token generated successfully")
 
-        return PoTokenResult(
-            playerRequestPoToken = streamingPot,
-            streamingDataPoToken = playerPot,
-        )
+        return mapTokens(playerPot = playerPot, streamingPot = streamingPot)
     }
 }

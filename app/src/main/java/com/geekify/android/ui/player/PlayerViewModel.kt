@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.geekify.android.data.local.LibraryRepository
 import com.geekify.android.data.sync.SyncRepository
 import com.geekify.android.data.model.Track
+import com.geekify.android.player.PlaybackPosition
 import com.geekify.android.player.PlayerController
 import com.geekify.android.player.QueueState
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -22,6 +23,8 @@ class PlayerViewModel @Inject constructor(
 ) : ViewModel() {
 
     val state: StateFlow<QueueState> = controller.state
+    /** High-frequency position, collected only by the progress UI so ticks don't recompose the whole player. */
+    val position: StateFlow<PlaybackPosition> = controller.position
     val beatIntensity: StateFlow<Float> = audioEffects.beatIntensity
     val sleepTimerRemainingMs: StateFlow<Long?> = controller.sleepTimerRemainingMs
 
@@ -48,7 +51,7 @@ class PlayerViewModel @Inject constructor(
     fun togglePlay() = controller.togglePlay()
     fun seek(positionMs: Long) = controller.seekTo(positionMs)
     fun next() = controller.next()
-    fun previous() = controller.previous(state.value.progressMs / 1000)
+    fun previous() = controller.previous(position.value.positionMs / 1000)
 
     fun toggleShuffle() = controller.toggleShuffle()
     fun cycleRepeat() = controller.cycleRepeat()

@@ -14,7 +14,7 @@ object NotificationPolicy {
     const val MIN_GAP_MS = DAY_MS
     /** Tips + engagement together: at most 2 in any rolling 7 days. Update notices are one-per-version and not counted here. */
     const val MAX_SOFT_PER_WEEK = 2
-    /** No "come back" style message if the app was opened in the last 3 days. */
+    /** No "come back" style message if the app was opened in the last 6 hours. */
     const val ENGAGEMENT_QUIET_AFTER_OPEN_MS = 6 * HOUR_MS
     /** No tip within a day of the user having the app open. */
     const val TIP_QUIET_AFTER_OPEN_MS = DAY_MS

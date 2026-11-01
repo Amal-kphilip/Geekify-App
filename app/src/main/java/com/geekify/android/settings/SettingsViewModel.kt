@@ -155,6 +155,10 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { repository.setKeepScreenOn(enabled) }
     }
 
+    fun setStopPlaybackOnTaskRemoved(enabled: Boolean) {
+        viewModelScope.launch { repository.setStopPlaybackOnTaskRemoved(enabled) }
+    }
+
     // ---- Liquid Glass & Appearance ----
     fun setGlassEnabled(enabled: Boolean) {
         viewModelScope.launch { repository.setGlassEnabled(enabled) }

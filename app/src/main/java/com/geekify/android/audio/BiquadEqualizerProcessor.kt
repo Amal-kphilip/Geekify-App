@@ -18,9 +18,9 @@ import kotlin.math.tanh
 /**
  * Five-band parametric equalizer built from RBJ "peaking" biquad filters, applied to 16-bit or 32-bit float PCM.
  *
- * Gains can change at any moment from the UI thread: [setBands] only stores the new values, and the audio
- * thread recomputes coefficients at the start of the next buffer. No player re-initialisation is needed.
- * Mild headroom compensation plus a smooth soft-limiter prevent clipping while preserving full perceived boost.
+ * Gains and enable/disable state can change at any moment from the UI thread: [setBands] stores the target
+ * values, and the audio thread smoothly interpolates band gains, biquad coefficients, and headroom pre-gain
+ * across 32-frame sub-blocks so preset switches, slider movements, and EQ toggles never produce audible clicks.
  */
 @OptIn(UnstableApi::class)
 class BiquadEqualizerProcessor : BaseAudioProcessor() {
@@ -31,12 +31,14 @@ class BiquadEqualizerProcessor : BaseAudioProcessor() {
     private var sampleRate = 0
     private var channels = 0
     private var encoding = C.ENCODING_INVALID
-    private var appliedGains = FloatArray(BANDS) { Float.NaN }
-    private var appliedEnabled = false
+
+    /** Currently smoothed gain (dB) per band. Ramps smoothly toward [requestedGains] (or 0 dB when disabled). */
+    private var smoothedGains = FloatArray(BANDS)
     private var preGain = 1f
+    private var historyClearedWhileBypassed = true
 
     // Per band: b0, b1, b2, a1, a2 (already divided by a0). Bands with ~0 dB are bypassed.
-    private val coef = Array(BANDS) { FloatArray(5) }
+    private val coef = Array(BANDS) { FloatArray(5).also { it[0] = 1f } }
     private val bandActive = BooleanArray(BANDS)
     // Per channel and band: x1, x2, y1, y2.
     private var history: Array<FloatArray> = emptyArray()
@@ -45,6 +47,10 @@ class BiquadEqualizerProcessor : BaseAudioProcessor() {
         requestedGains = FloatArray(BANDS) { (gainsDb.getOrNull(it) ?: 0f).coerceIn(-MAX_DB, MAX_DB) }
         this.enabled = enabled
     }
+
+    internal fun currentBandGains(): FloatArray = smoothedGains.copyOf()
+
+    internal fun currentCoefficients(band: Int): FloatArray = coef[band].copyOf()
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
         val enc = inputAudioFormat.encoding
@@ -55,7 +61,9 @@ class BiquadEqualizerProcessor : BaseAudioProcessor() {
         channels = inputAudioFormat.channelCount
         encoding = enc
         history = Array(channels * BANDS) { FloatArray(4) }
-        appliedGains = FloatArray(BANDS) { Float.NaN }
+        smoothedGains = FloatArray(BANDS)
+        preGain = 1f
+        historyClearedWhileBypassed = true
         return inputAudioFormat
     }
 
@@ -64,32 +72,52 @@ class BiquadEqualizerProcessor : BaseAudioProcessor() {
         if (size == 0) return
         inputBuffer.order(ByteOrder.nativeOrder())
         val out = replaceOutputBuffer(size).order(ByteOrder.nativeOrder())
-        val on = enabled
-        if (!on || channels == 0) {
+
+        if (channels == 0 || isSettledBypass()) {
+            if (!historyClearedWhileBypassed) {
+                history.forEach { it.fill(0f) }
+                historyClearedWhileBypassed = true
+            }
             out.put(inputBuffer)
-        } else {
-            refreshCoefficients(on)
-            if (encoding == C.ENCODING_PCM_FLOAT) {
-                val frames = size / (4 * channels)
-                for (frame in 0 until frames) {
-                    for (ch in 0 until channels) {
-                        val x = inputBuffer.getFloat() * preGain
-                        out.putFloat(processSample(x, ch))
-                    }
+            out.flip()
+            return
+        }
+
+        historyClearedWhileBypassed = false
+        if (encoding == C.ENCODING_PCM_FLOAT) {
+            val frames = size / (4 * channels)
+            for (frame in 0 until frames) {
+                if (frame % SMOOTHING_SUBBLOCK_FRAMES == 0) {
+                    stepSmoothedCoefficients()
                 }
-            } else {
-                val frames = size / (2 * channels)
-                for (frame in 0 until frames) {
-                    for (ch in 0 until channels) {
-                        val x = (inputBuffer.getShort() / 32768f) * preGain
-                        val y = processSample(x, ch)
-                        out.putShort((y * 32767f).roundToInt().coerceIn(-32768, 32767).toShort())
-                    }
+                for (ch in 0 until channels) {
+                    val x = inputBuffer.getFloat() * preGain
+                    out.putFloat(processSample(x, ch))
                 }
             }
-            while (inputBuffer.hasRemaining()) out.put(inputBuffer.get())
+        } else {
+            val frames = size / (2 * channels)
+            for (frame in 0 until frames) {
+                if (frame % SMOOTHING_SUBBLOCK_FRAMES == 0) {
+                    stepSmoothedCoefficients()
+                }
+                for (ch in 0 until channels) {
+                    val x = (inputBuffer.getShort() / 32768f) * preGain
+                    val y = processSample(x, ch)
+                    out.putShort((y * 32767f).roundToInt().coerceIn(-32768, 32767).toShort())
+                }
+            }
         }
+        while (inputBuffer.hasRemaining()) out.put(inputBuffer.get())
         out.flip()
+    }
+
+    private fun isSettledBypass(): Boolean {
+        if (enabled) return false
+        for (band in 0 until BANDS) {
+            if (abs(smoothedGains[band]) >= BYPASS_EPSILON_DB) return false
+        }
+        return true
     }
 
     private fun processSample(input: Float, ch: Int): Float {
@@ -121,29 +149,48 @@ class BiquadEqualizerProcessor : BaseAudioProcessor() {
 
     override fun onReset() {
         history = emptyArray()
+        smoothedGains = FloatArray(BANDS)
         channels = 0
         sampleRate = 0
         encoding = C.ENCODING_INVALID
+        preGain = 1f
+        historyClearedWhileBypassed = true
     }
 
-    private fun refreshCoefficients(on: Boolean) {
-        val gains = requestedGains
-        if (on == appliedEnabled && gains.contentEquals(appliedGains)) return
-        appliedEnabled = on
-        appliedGains = gains.copyOf()
-        // Mild headroom compensation (-0.22 dB per dB of peak boost) paired with the soft limiter
-        // keeps boosted bands audibly punchy without cutting overall volume in half.
-        val maxBoostDb = (gains.maxOrNull() ?: 0f).coerceAtLeast(0f)
-        preGain = 10f.pow(-(maxBoostDb * 0.22f) / 20f)
+    /**
+     * Advances [smoothedGains] toward the target gains by one sub-block step and updates
+     * biquad filter coefficients and headroom [preGain] without clearing filter state.
+     */
+    internal fun stepSmoothedCoefficients(effectiveSampleRate: Int = sampleRate) {
+        val sr = if (effectiveSampleRate > 0) effectiveSampleRate else 48_000
+        val on = enabled
+        val targets = requestedGains
+        var maxBoostDb = 0f
+
         for (band in 0 until BANDS) {
-            val gainDb = gains[band]
+            val targetDb = if (on) targets[band] else 0f
+            val currentDb = smoothedGains[band]
+            val delta = targetDb - currentDb
+            val nextDb = if (abs(delta) <= SNAP_EPSILON_DB) {
+                targetDb
+            } else {
+                currentDb + delta * SMOOTHING_ALPHA
+            }
+            smoothedGains[band] = nextDb
+            if (nextDb > maxBoostDb) maxBoostDb = nextDb
+
             val freq = EqPresets.BAND_HZ[band].toDouble()
-            if (abs(gainDb) < 0.05f || freq >= 0.45 * sampleRate) {
+            if (abs(nextDb) < BYPASS_EPSILON_DB || freq >= 0.45 * sr) {
                 bandActive[band] = false
+                coef[band][0] = 1f
+                coef[band][1] = 0f
+                coef[band][2] = 0f
+                coef[band][3] = 0f
+                coef[band][4] = 0f
                 continue
             }
-            val a = 10.0.pow(gainDb / 40.0)
-            val w0 = 2.0 * PI * freq / sampleRate
+            val a = 10.0.pow(nextDb / 40.0)
+            val w0 = 2.0 * PI * freq / sr
             val alpha = sin(w0) / (2.0 * Q)
             val cosW = cos(w0)
             val a0 = 1.0 + alpha / a
@@ -154,6 +201,11 @@ class BiquadEqualizerProcessor : BaseAudioProcessor() {
             coef[band][4] = ((1.0 - alpha / a) / a0).toFloat()
             bandActive[band] = true
         }
+
+        // Mild headroom compensation (-0.22 dB per dB of peak boost) paired with the soft limiter
+        // keeps boosted bands audibly punchy without cutting overall volume in half.
+        val targetPreGain = 10f.pow(-(maxBoostDb * 0.22f) / 20f)
+        preGain += (targetPreGain - preGain) * SMOOTHING_ALPHA
     }
 
     private companion object {
@@ -161,5 +213,9 @@ class BiquadEqualizerProcessor : BaseAudioProcessor() {
         const val MAX_DB = 12f
         const val Q = 0.9
         const val LIMITER_KNEE = 0.85f
+        const val SMOOTHING_SUBBLOCK_FRAMES = 32
+        const val SMOOTHING_ALPHA = 0.22f
+        const val SNAP_EPSILON_DB = 0.015f
+        const val BYPASS_EPSILON_DB = 0.02f
     }
 }

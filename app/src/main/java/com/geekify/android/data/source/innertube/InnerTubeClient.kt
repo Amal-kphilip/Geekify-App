@@ -22,7 +22,7 @@ class InnerTubeClient @Inject constructor(
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private data class Config(val key: String, val version: String)
-    @Volatile private var config: Config? = null
+    @Volatile private var config: Config? = Config(DEFAULT_API_KEY, DEFAULT_CLIENT_VERSION)
 
     /** Anonymous visitor id; the player endpoint wants it (taken from the music page, then from any response). */
     @Volatile private var visitorData: String? = null
@@ -172,11 +172,8 @@ class InnerTubeClient @Inject constructor(
         }
     }
 
-    /** Loads the Music config + anonymous visitor id ahead of time so the first song starts faster. */
+    /** Prewarms InnerTubeX discovery and playback extraction off the main thread without downloading homepage HTML. */
     suspend fun warmUp() {
-        // Warm both transports in the background: existing metadata-player calls keep their
-        // lightweight config path, while discovery/extraction share InnerTubeX session data.
-        try { getConfig() } catch (error: CancellationException) { throw error } catch (_: Exception) { }
         try { innerTubeBackend.warmUp() } catch (error: CancellationException) { throw error } catch (_: Exception) { }
     }
 
@@ -246,6 +243,9 @@ class InnerTubeClient @Inject constructor(
 
     class InnerTubeException(message: String, val retryable: Boolean, cause: Throwable? = null) : IOException(message, cause)
     companion object {
+        private const val DEFAULT_API_KEY = "AIzaSyAO_FJ2SlqAEpdpbHGCEqLGSQfCoMKQno"
+        private const val DEFAULT_CLIENT_VERSION = "1.20260707.12.00"
+
         /** User-Agent used by the legacy raw player request for metadata fallback. */
         const val PLAYER_USER_AGENT =
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"

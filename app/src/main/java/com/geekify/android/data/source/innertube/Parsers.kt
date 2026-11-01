@@ -6,11 +6,25 @@ import kotlinx.serialization.json.*
 /** Kotlin port of backend/app/services/parsers.py. */
 object Parsers {
     private val duration = Regex("^(\\d+:)?\\d{1,2}:\\d{2}$")
+    /** Iterative DFS without recursive sequence/coroutine allocation. */
     fun walk(e: JsonElement): Sequence<JsonObject> = sequence {
-        when (e) {
-            is JsonObject -> { yield(e); e.values.forEach { yieldAll(walk(it)) } }
-            is JsonArray -> e.forEach { yieldAll(walk(it)) }
-            else -> Unit
+        val stack = ArrayDeque<JsonElement>()
+        stack.add(e)
+        while (stack.isNotEmpty()) {
+            when (val curr = stack.removeLast()) {
+                is JsonObject -> {
+                    yield(curr)
+                    for (v in curr.values) {
+                        if (v is JsonObject || v is JsonArray) stack.add(v)
+                    }
+                }
+                is JsonArray -> {
+                    for (item in curr) {
+                        if (item is JsonObject || item is JsonArray) stack.add(item)
+                    }
+                }
+                else -> Unit
+            }
         }
     }
     fun text(e: JsonElement?): String = when (e) {
@@ -40,11 +54,24 @@ object Parsers {
     fun findThumbnails(e: JsonElement): List<Thumbnail> {
         val direct = thumbnails(e)
         if (direct.isNotEmpty()) return direct
+        if (e is JsonObject) {
+            val fromChild = thumbnails(e["thumbnail"] ?: e["musicThumbnailRenderer"] ?: e["croppedSquareThumbnailRenderer"])
+            if (fromChild.isNotEmpty()) return fromChild
+        }
         return walk(e).firstNotNullOfOrNull { node ->
             thumbnails(node["thumbnails"] ?: node["musicThumbnailRenderer"] ?: node["croppedSquareThumbnailRenderer"] ?: node["thumbnail"]).takeIf { it.isNotEmpty() }
         }.orEmpty()
     }
     private fun browse(node: JsonElement): Pair<String?, String?> {
+        if (node is JsonObject) {
+            val endpoint = objectOrNull(node["browseEndpoint"])
+                ?: objectOrNull(objectOrNull(node["navigationEndpoint"])?.get("browseEndpoint"))
+            if (endpoint != null) {
+                val id = endpoint.str("browseId")
+                val page = objectOrNull(objectOrNull(endpoint["browseEndpointContextSupportedConfigs"])?.get("browseEndpointContextMusicConfig"))?.str("pageType")
+                if (id != null) return id to page
+            }
+        }
         for (o in walk(node)) {
             val endpoint = objectOrNull(o["browseEndpoint"]) ?: continue
             val id = endpoint.str("browseId")
@@ -52,8 +79,19 @@ object Parsers {
             if (id != null) return id to page
         }; return null to null
     }
-    private fun videoId(node: JsonElement): String? = walk(node).firstNotNullOfOrNull { o ->
-        objectOrNull(o["watchEndpoint"])?.str("videoId") ?: objectOrNull(o["watchPlaylistEndpoint"])?.str("videoId") ?: objectOrNull(o["playlistItemData"])?.str("videoId")
+    private fun videoId(node: JsonElement): String? {
+        if (node is JsonObject) {
+            objectOrNull(node["playlistItemData"])?.str("videoId")?.let { return it }
+            objectOrNull(node["watchEndpoint"])?.str("videoId")?.let { return it }
+            objectOrNull(node["watchPlaylistEndpoint"])?.str("videoId")?.let { return it }
+            objectOrNull(node["navigationEndpoint"])?.let { nav ->
+                objectOrNull(nav["watchEndpoint"])?.str("videoId")?.let { return it }
+                objectOrNull(nav["watchPlaylistEndpoint"])?.str("videoId")?.let { return it }
+            }
+        }
+        return walk(node).firstNotNullOfOrNull { o ->
+            objectOrNull(o["watchEndpoint"])?.str("videoId") ?: objectOrNull(o["watchPlaylistEndpoint"])?.str("videoId") ?: objectOrNull(o["playlistItemData"])?.str("videoId")
+        }
     }
     private fun artistRefs(runs: JsonArray?): List<ArtistRef> {
         val found = runs.orEmpty().mapNotNull { r ->

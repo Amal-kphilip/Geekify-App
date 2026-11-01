@@ -104,6 +104,19 @@ fun isLowRamDevice(): Boolean {
 }
 
 @Composable
+fun isBatterySaverOrThrottled(): Boolean {
+    val context = LocalContext.current
+    return remember(context) {
+        val pm = context.getSystemService(android.os.PowerManager::class.java)
+        val isPowerSave = pm?.isPowerSaveMode == true
+        val isThermal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            (pm?.currentThermalStatus ?: 0) >= android.os.PowerManager.THERMAL_STATUS_SEVERE
+        } else false
+        isPowerSave || isThermal
+    }
+}
+
+@Composable
 fun isGlassAllowed(): Boolean = isGlassSupported() && !isLowRamDevice()
 
 fun glassSaturation(vibrancy: Float): Float = 1f + 0.5f * vibrancy.coerceIn(0f, 2f)

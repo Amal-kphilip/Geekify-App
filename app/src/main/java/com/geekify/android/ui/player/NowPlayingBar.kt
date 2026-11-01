@@ -13,7 +13,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,6 +27,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.geekify.android.player.PlaybackPosition
+import kotlinx.coroutines.flow.StateFlow
 import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.components.bestArtworkUrl
 import androidx.compose.runtime.mutableStateOf
@@ -53,8 +55,8 @@ fun NowPlayingBar(
     onClick: () -> Unit,
     onDismiss: () -> Unit = {}
 ) {
-    val state by viewModel.state.collectAsState()
-    val liked by viewModel.isCurrentLiked.collectAsState()
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val liked by viewModel.isCurrentLiked.collectAsStateWithLifecycle()
     val track = state.current ?: return
 
     val thumbUrl = track.thumbnails.bestArtworkUrl(480)
@@ -219,30 +221,44 @@ fun NowPlayingBar(
             }
         }
 
-        // Hairline progress, eased so it glides rather than ticking.
-        val target = if (state.durationMs > 0L) {
-            (state.progressMs.toFloat() / state.durationMs.toFloat()).coerceIn(0f, 1f)
-        } else 0f
-        val progress by animateFloatAsState(target, tween(900, easing = LinearEasing), label = "miniProgress")
+        // Hairline progress, eased so it glides rather than ticking. Isolated in its own composable so
+        // position ticks recompose only this line, not the whole capsule.
+        MiniProgressLine(
+            position = viewModel.position,
+            isInline = isInline,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
+    }
+}
+
+@Composable
+private fun MiniProgressLine(
+    position: StateFlow<PlaybackPosition>,
+    isInline: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val pos by position.collectAsStateWithLifecycle()
+    val target = if (pos.durationMs > 0L) {
+        (pos.positionMs.toFloat() / pos.durationMs.toFloat()).coerceIn(0f, 1f)
+    } else 0f
+    val progress by animateFloatAsState(target, tween(900, easing = LinearEasing), label = "miniProgress")
+    Box(
+        modifier = modifier
+            .padding(
+                horizontal = if (isInline) 18.dp else 30.dp,
+                vertical = if (isInline) 2.dp else 5.dp
+            )
+            .fillMaxWidth()
+            .height(if (isInline) 1.5.dp else 2.dp)
+            .clip(RoundedCornerShape(1.dp))
+            .background(Color.White.copy(alpha = 0.16f))
+    ) {
         Box(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(
-                    horizontal = if (isInline) 18.dp else 30.dp,
-                    vertical = if (isInline) 2.dp else 5.dp
-                )
-                .fillMaxWidth()
-                .height(if (isInline) 1.5.dp else 2.dp)
-                .clip(RoundedCornerShape(1.dp))
-                .background(Color.White.copy(alpha = 0.16f))
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .fillMaxWidth(progress)
-                    .background(Lime)
-            )
-        }
+                .fillMaxHeight()
+                .fillMaxWidth(progress)
+                .background(Lime)
+        )
     }
 }
 

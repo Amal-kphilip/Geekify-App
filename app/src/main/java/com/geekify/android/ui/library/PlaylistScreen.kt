@@ -5,12 +5,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -35,7 +36,7 @@ fun PlaylistScreen(
     onPlayTrack: (Track, List<Track>) -> Unit,
     onShufflePlay: ((List<Track>) -> Unit)? = null
 ) {
-    val tracks by viewModel.playlistTracks(playlistId).collectAsState(initial = emptyList())
+    val tracks by viewModel.playlistTracks(playlistId).collectAsStateWithLifecycle(initialValue = emptyList())
     val coverUrl = tracks.firstOrNull()?.thumbnails?.lastOrNull()?.url
     val tint by rememberArtColor(coverUrl, fallback = InkElevated)
 
@@ -80,7 +81,11 @@ fun PlaylistScreen(
                 }
             }
 
-            items(tracks, key = { it.videoId }) { track ->
+            itemsIndexed(
+                items = tracks,
+                key = { index, track -> "$index:${track.videoId}" },
+                contentType = { _, _ -> "track_row" }
+            ) { _, track ->
                 TrackRow(
                     track = track,
                     onClick = { onPlayTrack(track, tracks) },

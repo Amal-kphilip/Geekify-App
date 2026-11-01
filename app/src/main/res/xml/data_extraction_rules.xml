@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="database" path="geekify.db" />
+        <include domain="sharedpref" path="." />
+        <include domain="file" path="." />
+        <exclude domain="sharedpref" path="com.google.android.gms.signin.xml" />
+        <exclude domain="sharedpref" path="com.google.firebase.auth.api.Store." />
+        <exclude domain="sharedpref" path="FirebaseHeartBeat" />
+        <exclude domain="sharedpref" path="listen_together.xml" />
+        <exclude domain="file" path="PersistedInstallation." />
+        <exclude domain="file" path="generatefid.lock" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="database" path="geekify.db" />
+        <include domain="sharedpref" path="." />
+        <include domain="file" path="." />
+        <exclude domain="sharedpref" path="com.google.android.gms.signin.xml" />
+        <exclude domain="sharedpref" path="com.google.firebase.auth.api.Store." />
+        <exclude domain="sharedpref" path="FirebaseHeartBeat" />
+        <exclude domain="sharedpref" path="listen_together.xml" />
+        <exclude domain="file" path="PersistedInstallation." />
+        <exclude domain="file" path="generatefid.lock" />
+    </device-transfer>
+</data-extraction-rules>

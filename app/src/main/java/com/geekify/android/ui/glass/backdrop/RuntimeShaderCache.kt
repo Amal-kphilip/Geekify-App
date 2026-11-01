@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Vendored from Kyant0/backdrop v2.0.0 (io.github.kyant0:backdrop)
  * https://github.com/Kyant0/backdrop — Copyright 2025 Kyant0, Apache License 2.0
  *
@@ -9,6 +9,7 @@
  */
 package com.geekify.android.ui.glass.backdrop
 
+import android.annotation.SuppressLint
 import org.intellij.lang.annotations.Language
 
 sealed interface RuntimeShaderCache {
@@ -20,6 +21,7 @@ internal class RuntimeShaderCacheImpl : RuntimeShaderCache {
 
     private val runtimeShaders = mutableMapOf<String, RuntimeShader>()
 
+    @SuppressLint("NewApi")
     override fun obtainRuntimeShader(key: String, string: String): RuntimeShader {
         return runtimeShaders.getOrPut(key) { RuntimeShader(string) }
     }

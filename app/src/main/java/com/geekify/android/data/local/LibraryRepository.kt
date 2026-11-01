@@ -87,41 +87,55 @@ class LibraryRepository @Inject constructor(
     }
 
     suspend fun renamePlaylist(id: String, name: String) = dao.rename(id, name)
-    suspend fun deletePlaylist(id: String) { dao.deletePlaylist(id); dao.clearTracks(id) }
+    suspend fun deletePlaylist(id: String) {
+        dao.deletePlaylist(id)
+        dao.clearTracks(id)
+    }
 
     fun playlistTracks(id: String): Flow<List<Track>> = dao.tracksFor(id).map { it.map(PlaylistTrackEntity::toTrack) }
 
     suspend fun addToPlaylist(id: String, track: Track) {
         val existing = dao.tracksOnce(id)
         if (existing.any { it.videoId == track.videoId }) return
-        dao.insertTrack(track.toPlaylistTrack(id, existing.size))
+        val nextPosition = nextPlaylistPosition(existing.map { it.position })
+        dao.insertTrack(track.toPlaylistTrack(id, nextPosition))
     }
 
-    suspend fun removeFromPlaylist(id: String, videoId: String) = dao.removeTrack(id, videoId)
+    suspend fun removeFromPlaylist(id: String, videoId: String) =
+        dao.removeTrackAndCompactPositions(id, videoId)
+
+    companion object {
+        /** Computes the next sequential position even if earlier removals left gaps in [existingPositions]. */
+        fun nextPlaylistPosition(existingPositions: List<Int>): Int =
+            (existingPositions.maxOrNull() ?: -1) + 1
+    }
 
     // Cloud sync helpers
     suspend fun likedOnce(): List<Track> = likedDao.allOnce().map(LikedTrackEntity::toTrack)
     suspend fun replaceAllLiked(tracks: List<Track>) {
-        likedDao.clear()
-        if (tracks.isEmpty()) return
         val newestFirstBase = System.currentTimeMillis()
-        likedDao.insertAll(
+        likedDao.replaceAll(
             tracks.mapIndexed { index, track ->
                 track.toLiked(addedAt = newestFirstBase - index)
             }
         )
     }
     suspend fun playlistsOnce(): List<LocalPlaylist> {
+        val allTracksByPlaylist = dao.allTracksOnce().groupBy { it.playlistId }
         return dao.allPlaylistsOnce().map { pl ->
-            LocalPlaylist(pl.id, pl.name, pl.createdAt, dao.tracksOnce(pl.id).map(PlaylistTrackEntity::toTrack))
+            LocalPlaylist(
+                pl.id,
+                pl.name,
+                pl.createdAt,
+                allTracksByPlaylist[pl.id].orEmpty().map(PlaylistTrackEntity::toTrack)
+            )
         }
     }
     suspend fun replaceAllPlaylists(pls: List<LocalPlaylist>) {
-        // Delete old
-        dao.allPlaylistsOnce().forEach { dao.deletePlaylist(it.id); dao.clearTracks(it.id) }
-        pls.forEach { pl ->
-            dao.insertPlaylist(PlaylistEntity(pl.id, pl.name, pl.createdAt))
-            dao.insertAllTracks(pl.tracks.mapIndexed { i, t -> t.toPlaylistTrack(pl.id, i) })
+        val playlistEntities = pls.map { pl -> PlaylistEntity(pl.id, pl.name, pl.createdAt) }
+        val trackEntities = pls.flatMap { pl ->
+            pl.tracks.mapIndexed { i, t -> t.toPlaylistTrack(pl.id, i) }
         }
+        dao.replaceAll(playlistEntities, trackEntities)
     }
 }

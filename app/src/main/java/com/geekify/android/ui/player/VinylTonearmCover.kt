@@ -17,11 +17,12 @@ import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,8 +68,8 @@ fun VinylTonearmCover(
     isPlaying: Boolean,
     beatIntensity: StateFlow<Float>,
     baseScale: Float,
-    onTonearmLanded: (String) -> Unit = {},
     modifier: Modifier = Modifier,
+    onTonearmLanded: (String) -> Unit = {},
     discSize: Dp = 300.dp,
 ) {
     var shownTrackId by remember { mutableStateOf(trackId) }
@@ -85,7 +86,11 @@ fun VinylTonearmCover(
     val tonearmSway = remember { Animatable(0f) }
     var tonearmLanded by remember { mutableStateOf(true) }
 
-    val currentBeatIntensity by beatIntensity.collectAsState()
+    val currentBeatIntensity by if (isPlaying) {
+        beatIntensity.collectAsStateWithLifecycle()
+    } else {
+        remember { mutableFloatStateOf(0f) }
+    }
     val normalizedBeat = ((currentBeatIntensity - BEAT_FLOOR) / (1f - BEAT_FLOOR))
         .coerceIn(0f, 1f)
     val beatScale by animateFloatAsState(

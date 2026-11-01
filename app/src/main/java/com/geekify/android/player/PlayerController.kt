@@ -23,6 +23,7 @@ class PlayerController @Inject constructor(
     val queueManager: QueueManager
 ) {
     val state: StateFlow<QueueState> = queueManager.state
+    val position: StateFlow<PlaybackPosition> = queueManager.position
 
     private val sleepTimerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var sleepTimerJob: Job? = null

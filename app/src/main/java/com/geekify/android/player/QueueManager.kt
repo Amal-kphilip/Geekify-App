@@ -9,9 +9,13 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.geekify.android.data.model.Track
 import com.geekify.android.settings.AppSettingsRepository
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -20,6 +24,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
@@ -27,13 +33,21 @@ import javax.inject.Singleton
 
 enum class RepeatMode { OFF, ALL, ONE }
 
+/**
+ * High-frequency playback position, exposed separately from [QueueState] so periodic progress
+ * ticks never re-emit the queue state (and never re-run queue observers or recompose
+ * queue-dependent UI).
+ */
+data class PlaybackPosition(
+    val positionMs: Long = 0L,
+    val durationMs: Long = 0L
+)
+
 data class QueueState(
     val queue: List<Track> = emptyList(),
     val index: Int = -1,
     val isPlaying: Boolean = false,
     val isBuffering: Boolean = false,
-    val progressMs: Long = 0L,
-    val durationMs: Long = 0L,
     val shuffle: Boolean = false,
     val repeat: RepeatMode = RepeatMode.OFF,
     val volume: Float = 0.85f,
@@ -57,10 +71,48 @@ data class QueueState(
 }
 
 @Singleton
-class QueueManager @Inject constructor(private val dataStore: DataStore<Preferences>) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+class QueueManager(
+    private val dataStore: DataStore<Preferences>,
+    dispatcher: CoroutineDispatcher,
+    private val debounceMs: Long
+) {
+    @Inject
+    constructor(dataStore: DataStore<Preferences>) : this(
+        dataStore = dataStore,
+        dispatcher = Dispatchers.IO,
+        debounceMs = DEFAULT_PERSIST_DEBOUNCE_MS
+    )
+
+    private val scope = CoroutineScope(SupervisorJob() + dispatcher)
+    private val stateLock = Any()
+    private val persistMutex = Mutex()
+    private val loadCompleted = CompletableDeferred<Unit>()
+
+    @Volatile private var isLoaded = false
+    private val preLoadMutations = mutableListOf<() -> Unit>()
+
+    @Volatile private var dirtyQueue = false
+    @Volatile private var dirtyModes = false
+    @Volatile private var dirtyVolume = false
+    @Volatile private var dirtyProgress = false
+    @Volatile private var persistJob: Job? = null
+
+    /** Counts how many full-queue JSON serializations occurred (inspected by unit tests). */
+    @Volatile var queueSerializationCount: Int = 0
+        private set
+
     private val _state = MutableStateFlow(QueueState())
     val state: StateFlow<QueueState> = _state.asStateFlow()
+
+    private val _position = MutableStateFlow(PlaybackPosition())
+    /** Current playback position/duration. Updated by the player only while actively playing, and on seeks/track changes. */
+    val position: StateFlow<PlaybackPosition> = _position.asStateFlow()
+
+    /** Resets the position to [positionMs] for a track change or seek; keeps the last known duration until the player reports a new one. */
+    private fun resetPosition(positionMs: Long) {
+        val cur = _position.value
+        if (cur.positionMs != positionMs) _position.value = cur.copy(positionMs = positionMs)
+    }
 
     /** Enabled only while the expanded Now Playing screen is visible. */
     @Volatile private var tonearmSyncEnabled = false
@@ -68,19 +120,23 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
     fun setTonearmSyncEnabled(enabled: Boolean) {
         tonearmSyncEnabled = enabled
         if (!enabled) {
-            val current = _state.value
-            if (current.tonearmTransitionPending) {
-                // Do not leave playback blocked if the screen closes during an animation.
-                _state.value = current.copy(tonearmTransitionPending = false)
+            synchronized(stateLock) {
+                val current = _state.value
+                if (current.tonearmTransitionPending) {
+                    // Do not leave playback blocked if the screen closes during an animation.
+                    _state.value = current.copy(tonearmTransitionPending = false)
+                }
             }
         }
     }
 
     /** Called by the tonearm animation after the stylus has settled onto this exact track. */
     fun completeTonearmTransition(trackVideoId: String) {
-        val current = _state.value
-        if (current.current?.videoId == trackVideoId && current.tonearmTransitionPending) {
-            _state.value = current.copy(tonearmTransitionPending = false)
+        synchronized(stateLock) {
+            val current = _state.value
+            if (current.current?.videoId == trackVideoId && current.tonearmTransitionPending) {
+                _state.value = current.copy(tonearmTransitionPending = false)
+            }
         }
     }
 
@@ -90,91 +146,135 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
     private val json = Json { ignoreUnknownKeys = true }
 
     companion object {
-        private val KEY_QUEUE = stringPreferencesKey("player_queue")
-        private val KEY_INDEX = intPreferencesKey("player_index")
-        private val KEY_SHUFFLE = stringPreferencesKey("player_shuffle")
-        private val KEY_REPEAT = stringPreferencesKey("player_repeat")
-        private val KEY_VOLUME = floatPreferencesKey("player_volume")
-        private val KEY_PROGRESS = longPreferencesKey("player_progress_ms")
-        private val KEY_RECOMMENDATION_REASONS = stringPreferencesKey("player_recommendation_reasons")
+        private const val DEFAULT_PERSIST_DEBOUNCE_MS = 150L
+        val KEY_QUEUE = stringPreferencesKey("player_queue")
+        val KEY_INDEX = intPreferencesKey("player_index")
+        val KEY_SHUFFLE = stringPreferencesKey("player_shuffle")
+        val KEY_REPEAT = stringPreferencesKey("player_repeat")
+        val KEY_VOLUME = floatPreferencesKey("player_volume")
+        val KEY_PROGRESS = longPreferencesKey("player_progress_ms")
+        val KEY_RECOMMENDATION_REASONS = stringPreferencesKey("player_recommendation_reasons")
     }
 
     init {
         load()
     }
 
+    suspend fun awaitLoaded() {
+        loadCompleted.await()
+    }
+
     private fun load() {
         scope.launch {
-            val prefs = dataStore.data.first()
-            val persistentQueue = prefs[AppSettingsRepository.KEY_PERSISTENT_QUEUE] ?: true
-            val rememberShuffleRepeat = prefs[AppSettingsRepository.KEY_REMEMBER_SHUFFLE_REPEAT] ?: true
-            val vol = prefs[KEY_VOLUME] ?: 0.85f
-            val shuf = if (rememberShuffleRepeat) prefs[KEY_SHUFFLE] == "true" else false
-            val rep = if (rememberShuffleRepeat) prefs[KEY_REPEAT]?.let { runCatching { RepeatMode.valueOf(it) }.getOrNull() } ?: RepeatMode.OFF else RepeatMode.OFF
-            val queueJson = prefs[KEY_QUEUE]
-            if (!persistentQueue || queueJson == null) {
-                _state.value = QueueState(shuffle = shuf, repeat = rep, volume = vol)
-                return@launch
-            }
             try {
-                val queue = json.decodeFromString<List<Track>>(queueJson)
-                val index = prefs[KEY_INDEX] ?: -1
-                val progress = (prefs[KEY_PROGRESS] ?: 0L).coerceAtLeast(0L)
-                val reasons = prefs[KEY_RECOMMENDATION_REASONS]?.let {
-                    runCatching { json.decodeFromString<Map<String, String>>(it) }.getOrNull()
-                }.orEmpty()
-                // A restored queue is always PAUSED (isPlaying = false): reopening the app never starts
-                // music by itself. The track and the position are kept so Play continues where it stopped.
-                _state.value = QueueState(
-                    queue = queue,
-                    index = index.coerceIn(-1, queue.size - 1),
-                    isPlaying = false,
-                    isBuffering = false,
-                    progressMs = progress,
-                    durationMs = 0L,
-                    shuffle = shuf,
-                    repeat = rep,
-                    volume = vol,
-                    recommendationReasons = reasons.filterKeys { id -> queue.any { it.videoId == id } }
-                )
-            } catch (_: Exception) {}
+                val prefs = dataStore.data.first()
+                val persistentQueue = prefs[AppSettingsRepository.KEY_PERSISTENT_QUEUE] ?: true
+                val rememberShuffleRepeat = prefs[AppSettingsRepository.KEY_REMEMBER_SHUFFLE_REPEAT] ?: true
+                val vol = prefs[KEY_VOLUME] ?: 0.85f
+                val shuf = if (rememberShuffleRepeat) prefs[KEY_SHUFFLE] == "true" else false
+                val rep = if (rememberShuffleRepeat) {
+                    prefs[KEY_REPEAT]?.let { runCatching { RepeatMode.valueOf(it) }.getOrNull() } ?: RepeatMode.OFF
+                } else {
+                    RepeatMode.OFF
+                }
+                val queueJson = prefs[KEY_QUEUE]
+                var restoredProgress = 0L
+
+                val restoredState = if (!persistentQueue || queueJson == null) {
+                    QueueState(shuffle = shuf, repeat = rep, volume = vol)
+                } else {
+                    try {
+                        val queue = json.decodeFromString<List<Track>>(queueJson)
+                        val index = prefs[KEY_INDEX] ?: -1
+                        restoredProgress = (prefs[KEY_PROGRESS] ?: 0L).coerceAtLeast(0L)
+                        val reasons = prefs[KEY_RECOMMENDATION_REASONS]?.let {
+                            runCatching { json.decodeFromString<Map<String, String>>(it) }.getOrNull()
+                        }.orEmpty()
+                        // A restored queue is always PAUSED (isPlaying = false): reopening the app never starts
+                        // music by itself. The track and the position are kept so Play continues where it stopped.
+                        QueueState(
+                            queue = queue,
+                            index = index.coerceIn(-1, queue.size - 1),
+                            isPlaying = false,
+                            isBuffering = false,
+                            shuffle = shuf,
+                            repeat = rep,
+                            volume = vol,
+                            recommendationReasons = reasons.filterKeys { id -> queue.any { it.videoId == id } }
+                        )
+                    } catch (_: Exception) {
+                        restoredProgress = 0L
+                        QueueState(shuffle = shuf, repeat = rep, volume = vol)
+                    }
+                }
+
+                synchronized(stateLock) {
+                    _position.value = PlaybackPosition(positionMs = restoredProgress, durationMs = 0L)
+                    _state.value = restoredState
+                    isLoaded = true
+                    val queued = preLoadMutations.toList()
+                    preLoadMutations.clear()
+                    queued.forEach { it() }
+                }
+            } finally {
+                loadCompleted.complete(Unit)
+            }
         }
     }
 
-    fun play(track: Track, queue: List<Track> = emptyList()) {
+    private fun runWhenLoaded(mutation: () -> Unit) {
+        synchronized(stateLock) {
+            if (!isLoaded) {
+                preLoadMutations += mutation
+                return
+            }
+            mutation()
+        }
+    }
+
+    fun play(track: Track, queue: List<Track> = emptyList()) = runWhenLoaded {
         val old = _state.value
         val q = queue.ifEmpty { listOf(track) }
         val idx = maxOf(0, q.indexOfFirst { it.videoId == track.videoId })
         // Preserve explanations when a user selects a song from the existing queue; a new library/search
         // queue starts clean so old recommendations cannot leak into unrelated tracks.
         val sameQueue = old.queue.map { it.videoId } == q.map { it.videoId }
-        update(old.copy(
-            queue = q,
-            index = idx,
-            isPlaying = true,
-            isBuffering = true,
-            progressMs = 0L,
-            error = null,
-            recommendationReasons = if (sameQueue) old.recommendationReasons else emptyMap(),
-            skipDirection = 1
-        ))
+        resetPosition(0L)
+        update(
+            old.copy(
+                queue = q,
+                index = idx,
+                isPlaying = true,
+                isBuffering = true,
+                error = null,
+                recommendationReasons = if (sameQueue) old.recommendationReasons else emptyMap(),
+                skipDirection = 1
+            ),
+            queueChanged = true,
+            progressChanged = true
+        )
     }
 
-    /** Starts [tracks] from a random song with shuffle switched on, like Spotify's shuffle-play. */
-    fun playShuffled(tracks: List<Track>) {
-        if (tracks.isEmpty()) return
+    /** Starts [tracks] from a random song with shuffle switched on. */
+    fun playShuffled(tracks: List<Track>) = runWhenLoaded {
+        if (tracks.isEmpty()) return@runWhenLoaded
         val idx = tracks.indices.random()
-        update(_state.value.copy(
-            queue = tracks,
-            index = idx,
-            isPlaying = true,
-            isBuffering = true,
-            progressMs = 0L,
-            shuffle = true,
-            error = null,
-            recommendationReasons = emptyMap(),
-            skipDirection = 1
-        ))
+        resetPosition(0L)
+        update(
+            _state.value.copy(
+                queue = tracks,
+                index = idx,
+                isPlaying = true,
+                isBuffering = true,
+                shuffle = true,
+                error = null,
+                recommendationReasons = emptyMap(),
+                skipDirection = 1
+            ),
+            queueChanged = true,
+            modesChanged = true,
+            progressChanged = true
+        )
     }
 
     @Volatile private var pendingStartMs = 0L
@@ -185,6 +285,39 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
         play(track, listOf(track))
     }
 
+    /**
+     * Synchronizes a remote track in Listen Together without wiping the user's existing local queue:
+     * if [track] is already in the queue, jumps to it; otherwise inserts it right after the current item
+     * (or as the first item if the queue was empty) and selects it.
+     */
+    fun syncRemoteTrackAt(track: Track, startMs: Long, playing: Boolean) = runWhenLoaded {
+        pendingStartMs = startMs.coerceAtLeast(0L)
+        val old = _state.value
+        val existingIdx = old.queue.indexOfFirst { it.videoId == track.videoId }
+        val (newQueue, targetIdx) = if (existingIdx >= 0) {
+            old.queue to existingIdx
+        } else if (old.queue.isEmpty()) {
+            listOf(track) to 0
+        } else {
+            val insertAt = (old.index + 1).coerceIn(0, old.queue.size)
+            val mutable = old.queue.toMutableList().apply { add(insertAt, track) }
+            mutable to insertAt
+        }
+        resetPosition(startMs.coerceAtLeast(0L))
+        update(
+            old.copy(
+                queue = newQueue,
+                index = targetIdx,
+                isPlaying = playing,
+                isBuffering = playing,
+                error = null,
+                skipDirection = 1
+            ),
+            queueChanged = true,
+            progressChanged = true
+        )
+    }
+
     /** Read once by the player when it loads a track: where that track should start (0 = the beginning). */
     fun takePendingStart(): Long {
         val v = pendingStartMs
@@ -192,43 +325,53 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
         return v
     }
 
-    fun togglePlay() {
-        if (_state.value.current == null) return
-        update(_state.value.copy(isPlaying = !_state.value.isPlaying))
+    fun togglePlay() = runWhenLoaded {
+        if (_state.value.current == null) return@runWhenLoaded
+        _state.value = _state.value.copy(isPlaying = !_state.value.isPlaying)
     }
 
-    fun setPlaying(playing: Boolean) {
+    fun setPlaying(playing: Boolean) = runWhenLoaded {
         if (_state.value.isPlaying != playing) {
             _state.value = _state.value.copy(isPlaying = playing)
         }
     }
 
-    fun setError(message: String?) {
-        _state.value = _state.value.copy(error = message, isBuffering = false, isPlaying = if (message != null) false else _state.value.isPlaying)
+    fun setError(message: String?) = runWhenLoaded {
+        _state.value = _state.value.copy(
+            error = message,
+            isBuffering = false,
+            isPlaying = if (message != null) false else _state.value.isPlaying
+        )
     }
 
-    fun setBuffering(buffering: Boolean) {
+    fun setBuffering(buffering: Boolean) = runWhenLoaded {
         if (_state.value.isBuffering != buffering) {
             _state.value = _state.value.copy(isBuffering = buffering)
         }
     }
 
+    /** Publishes the player position. Touches only [position], never [state], so ticks do not re-emit the queue. */
     fun setProgress(posMs: Long, durMs: Long) {
-        _state.value = _state.value.copy(progressMs = posMs, durationMs = durMs)
+        val cur = _position.value
+        if (cur.positionMs != posMs || cur.durationMs != durMs) {
+            _position.value = PlaybackPosition(positionMs = posMs, durationMs = durMs)
+        }
     }
 
-    fun seekTo(positionMs: Long) {
-        _state.value = _state.value.copy(progressMs = positionMs)
+    fun seekTo(positionMs: Long) = runWhenLoaded {
+        resetPosition(positionMs)
         _seekEvents.tryEmit(positionMs)
+        dirtyProgress = true
+        schedulePersist()
     }
 
-    fun next() {
+    fun next() = runWhenLoaded {
         val s = _state.value
-        if (s.queue.isEmpty()) return
+        if (s.queue.isEmpty()) return@runWhenLoaded
         if (s.repeat == RepeatMode.ONE) {
             seekTo(0)
-            update(s.copy(isPlaying = true, progressMs = 0L))
-            return
+            _state.value = _state.value.copy(isPlaying = true)
+            return@runWhenLoaded
         }
         val next = when {
             s.shuffle && s.queue.size > 1 -> {
@@ -238,62 +381,101 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
             }
             s.index + 1 < s.queue.size -> s.index + 1
             s.repeat == RepeatMode.ALL -> 0
-            else -> { update(s.copy(isPlaying = false)); return }
+            else -> {
+                _state.value = s.copy(isPlaying = false)
+                return@runWhenLoaded
+            }
         }
         if (next == s.index) {
             // Repeat-all with a single song: same handling as repeat-one.
             seekTo(0)
-            update(s.copy(isPlaying = true, progressMs = 0L))
-            return
+            _state.value = _state.value.copy(isPlaying = true)
+            return@runWhenLoaded
         }
-        update(s.copy(
-            index = next,
-            isPlaying = true,
-            isBuffering = true,
-            progressMs = 0L,
-            error = null,
-            skipDirection = 1,
-            tonearmTransitionPending = tonearmSyncEnabled
-        ))
+        resetPosition(0L)
+        update(
+            s.copy(
+                index = next,
+                isPlaying = true,
+                isBuffering = true,
+                error = null,
+                skipDirection = 1,
+                tonearmTransitionPending = tonearmSyncEnabled
+            ),
+            queueChanged = true,
+            progressChanged = true
+        )
     }
 
     fun previous(progressSeconds: Long): Boolean {
-        val s = _state.value
-        if (s.queue.isEmpty()) return false
-        if (progressSeconds > 3 && s.current != null) {
-            seekTo(0)
-            return false
+        var moved = false
+        runWhenLoaded {
+            val s = _state.value
+            if (s.queue.isEmpty()) return@runWhenLoaded
+            if (progressSeconds > 3 && s.current != null) {
+                seekTo(0)
+                return@runWhenLoaded
+            }
+            if (s.index <= 0) {
+                // Already on the first song: restart it in place (a same-index "load" would never run
+                // and would leave the buffering spinner stuck).
+                seekTo(0)
+                _state.value = _state.value.copy(isPlaying = true, error = null)
+                return@runWhenLoaded
+            }
+            resetPosition(0L)
+            update(
+                s.copy(
+                    index = s.index - 1,
+                    isPlaying = true,
+                    isBuffering = true,
+                    error = null,
+                    skipDirection = -1,
+                    tonearmTransitionPending = tonearmSyncEnabled
+                ),
+                queueChanged = true,
+                progressChanged = true
+            )
+            moved = true
         }
-        if (s.index <= 0) {
-            // Already on the first song: restart it in place (a same-index "load" would never run
-            // and would leave the buffering spinner stuck).
-            seekTo(0)
-            update(s.copy(isPlaying = true, progressMs = 0L, error = null))
-            return false
-        }
-        update(s.copy(
-            index = s.index - 1,
-            isPlaying = true,
-            isBuffering = true,
-            progressMs = 0L,
-            error = null,
-            skipDirection = -1,
-            tonearmTransitionPending = tonearmSyncEnabled
-        ))
-        return true
+        return moved
     }
 
-    fun toggleShuffle() = update(_state.value.copy(shuffle = !_state.value.shuffle))
-    fun cycleRepeat() {
+    fun toggleShuffle() = runWhenLoaded {
+        update(
+            _state.value.copy(shuffle = !_state.value.shuffle),
+            modesChanged = true
+        )
+    }
+
+    fun cycleRepeat() = runWhenLoaded {
         val order = RepeatMode.values()
         val next = order[(order.indexOf(_state.value.repeat) + 1) % order.size]
-        update(_state.value.copy(repeat = next))
+        update(
+            _state.value.copy(repeat = next),
+            modesChanged = true
+        )
     }
-    fun setVolume(v: Float) = update(_state.value.copy(volume = v.coerceIn(0f, 1f)))
-    fun addToQueue(track: Track) = update(_state.value.copy(queue = _state.value.queue + track))
-    fun removeFromQueue(index: Int) {
+
+    fun setVolume(v: Float) = runWhenLoaded {
+        val coerced = v.coerceIn(0f, 1f)
+        if (_state.value.volume == coerced) return@runWhenLoaded
+        update(
+            _state.value.copy(volume = coerced),
+            volumeChanged = true
+        )
+    }
+
+    fun addToQueue(track: Track) = runWhenLoaded {
+        update(
+            _state.value.copy(queue = _state.value.queue + track),
+            queueChanged = true
+        )
+    }
+
+    fun removeFromQueue(index: Int) = runWhenLoaded {
         val s = _state.value
-        if (index !in s.queue.indices) return
+        if (index !in s.queue.indices) return@runWhenLoaded
         val q = s.queue.toMutableList().also { it.removeAt(index) }
         val newIdx = when {
             index < s.index -> s.index - 1
@@ -301,33 +483,45 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
             else -> s.index
         }
         val remainingIds = q.map { it.videoId }.toSet()
-        update(s.copy(
-            queue = q,
-            index = newIdx,
-            recommendationReasons = s.recommendationReasons.filterKeys { it in remainingIds },
-            skipDirection = if (index == s.index && newIdx >= 0) 1 else s.skipDirection
-        ))
+        update(
+            s.copy(
+                queue = q,
+                index = newIdx,
+                recommendationReasons = s.recommendationReasons.filterKeys { it in remainingIds },
+                skipDirection = if (index == s.index && newIdx >= 0) 1 else s.skipDirection
+            ),
+            queueChanged = true
+        )
     }
-    fun reorder(from: Int, to: Int) {
+
+    fun reorder(from: Int, to: Int) = runWhenLoaded {
         val s = _state.value
         val q = s.queue.toMutableList()
-        if (from < 0 || to < 0 || from >= q.size || to >= q.size) return
+        if (from < 0 || to < 0 || from >= q.size || to >= q.size) return@runWhenLoaded
         val item = q.removeAt(from); q.add(to, item)
         val current = s.current
         val idx = if (current != null) q.indexOfFirst { it.videoId == current.videoId }.coerceAtLeast(0) else s.index
-        update(s.copy(queue = q, index = idx))
+        update(
+            s.copy(queue = q, index = idx),
+            queueChanged = true
+        )
     }
-    fun clearQueue() {
+
+    fun clearQueue() = runWhenLoaded {
         val s = _state.value
         val kept = if (s.current != null) listOf(s.current!!) else emptyList()
         val keptIds = kept.map { it.videoId }.toSet()
-        update(s.copy(
-            queue = kept,
-            index = if (kept.isEmpty()) -1 else 0,
-            recommendationReasons = s.recommendationReasons.filterKeys { it in keptIds }
-        ))
+        update(
+            s.copy(
+                queue = kept,
+                index = if (kept.isEmpty()) -1 else 0,
+                recommendationReasons = s.recommendationReasons.filterKeys { it in keptIds }
+            ),
+            queueChanged = true
+        )
     }
-    fun appendRelated(tracks: List<Track>, reasonsByVideoId: Map<String, String> = emptyMap()) {
+
+    fun appendRelated(tracks: List<Track>, reasonsByVideoId: Map<String, String> = emptyMap()) = runWhenLoaded {
         val s = _state.value
         val existing = s.queue.map { it.videoId }.toSet()
         val fresh = tracks.filter { it.videoId !in existing }.distinctBy { it.videoId }
@@ -335,14 +529,17 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
             val nextReasons = s.recommendationReasons + fresh.mapNotNull { track ->
                 reasonsByVideoId[track.videoId]?.takeIf { it.isNotBlank() }?.let { track.videoId to it }
             }
-            update(s.copy(queue = s.queue + fresh, recommendationReasons = nextReasons))
+            update(
+                s.copy(queue = s.queue + fresh, recommendationReasons = nextReasons),
+                queueChanged = true
+            )
         }
     }
 
     /** Removes upcoming auto-recommended tracks when Endless Autoplay is switched off. */
-    fun removeAutoplayTracks() {
+    fun removeAutoplayTracks() = runWhenLoaded {
         val s = _state.value
-        if (s.recommendationReasons.isEmpty() || s.queue.isEmpty()) return
+        if (s.recommendationReasons.isEmpty() || s.queue.isEmpty()) return@runWhenLoaded
         val autoIds = s.recommendationReasons.keys
         val filtered = s.queue.filterIndexed { idx, track ->
             idx <= s.index || track.videoId !in autoIds
@@ -353,15 +550,16 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
                 s.copy(
                     queue = filtered,
                     recommendationReasons = s.recommendationReasons.filterKeys { it in remainingIds }
-                )
+                ),
+                queueChanged = true
             )
         }
     }
 
     /** Removes upcoming explicit tracks when Hide Explicit Content is enabled. */
-    fun removeExplicitUpcomingTracks() {
+    fun removeExplicitUpcomingTracks() = runWhenLoaded {
         val s = _state.value
-        if (s.queue.isEmpty()) return
+        if (s.queue.isEmpty()) return@runWhenLoaded
         val filtered = s.queue.filterIndexed { idx, track ->
             idx <= s.index || !track.explicit
         }
@@ -371,52 +569,117 @@ class QueueManager @Inject constructor(private val dataStore: DataStore<Preferen
                 s.copy(
                     queue = filtered,
                     recommendationReasons = s.recommendationReasons.filterKeys { it in remainingIds }
-                )
+                ),
+                queueChanged = true
             )
         }
     }
 
-    private fun update(newState: QueueState) {
+    private fun update(
+        newState: QueueState,
+        queueChanged: Boolean = false,
+        modesChanged: Boolean = false,
+        volumeChanged: Boolean = false,
+        progressChanged: Boolean = false
+    ) {
         _state.value = newState
-        persist(newState)
+        if (queueChanged) dirtyQueue = true
+        if (modesChanged) dirtyModes = true
+        if (volumeChanged) dirtyVolume = true
+        if (progressChanged) dirtyProgress = true
+        if (queueChanged || modesChanged || volumeChanged || progressChanged) {
+            schedulePersist()
+        }
     }
 
     /** Saves just the playback position (called every few seconds while playing and on pause). */
     fun persistProgress() {
-        val progress = _state.value.progressMs
-        scope.launch {
-            dataStore.edit { prefs ->
-                val persistentQueue = prefs[AppSettingsRepository.KEY_PERSISTENT_QUEUE] ?: true
-                if (persistentQueue) {
-                    prefs[KEY_PROGRESS] = progress
+        dirtyProgress = true
+        schedulePersist(immediate = false)
+    }
+
+    private fun schedulePersist(immediate: Boolean = false) {
+        synchronized(stateLock) {
+            persistJob?.cancel()
+            persistJob = scope.launch {
+                if (!immediate && debounceMs > 0L) {
+                    delay(debounceMs)
                 }
+                flushPersistence()
             }
         }
     }
 
-    private fun persist(s: QueueState) {
-        scope.launch {
+    /**
+     * Single ordered persistence writer. Reads a coherent snapshot of [_state] and dirty flags
+     * under lock so older states can never overwrite newer states and volume/progress updates
+     * never serialize the entire queue.
+     */
+    suspend fun flushPersistence() {
+        persistMutex.withLock {
+            val snapshot: QueueState
+            val snapshotProgressMs: Long
+            val writeQueue: Boolean
+            val writeModes: Boolean
+            val writeVolume: Boolean
+            val writeProgress: Boolean
+
+            synchronized(stateLock) {
+                if (!dirtyQueue && !dirtyModes && !dirtyVolume && !dirtyProgress) return
+                snapshot = _state.value
+                snapshotProgressMs = _position.value.positionMs
+                writeQueue = dirtyQueue
+                writeModes = dirtyModes
+                writeVolume = dirtyVolume
+                writeProgress = dirtyProgress
+                dirtyQueue = false
+                dirtyModes = false
+                dirtyVolume = false
+                dirtyProgress = false
+            }
+
+            val encodedQueue = if (writeQueue) {
+                queueSerializationCount++
+                json.encodeToString(snapshot.queue)
+            } else null
+            val encodedReasons = if (writeQueue) {
+                json.encodeToString(snapshot.recommendationReasons)
+            } else null
+
             dataStore.edit { prefs ->
                 val persistentQueue = prefs[AppSettingsRepository.KEY_PERSISTENT_QUEUE] ?: true
                 val rememberShuffleRepeat = prefs[AppSettingsRepository.KEY_REMEMBER_SHUFFLE_REPEAT] ?: true
-                prefs[KEY_VOLUME] = s.volume
-                if (persistentQueue) {
-                    prefs[KEY_PROGRESS] = s.progressMs
-                    prefs[KEY_QUEUE] = json.encodeToString(s.queue)
-                    prefs[KEY_INDEX] = s.index
-                    prefs[KEY_RECOMMENDATION_REASONS] = json.encodeToString(s.recommendationReasons)
-                } else {
-                    prefs.remove(KEY_PROGRESS)
-                    prefs.remove(KEY_QUEUE)
-                    prefs.remove(KEY_INDEX)
-                    prefs.remove(KEY_RECOMMENDATION_REASONS)
+
+                if (writeVolume) {
+                    prefs[KEY_VOLUME] = snapshot.volume
                 }
-                if (rememberShuffleRepeat) {
-                    prefs[KEY_SHUFFLE] = s.shuffle.toString()
-                    prefs[KEY_REPEAT] = s.repeat.name
-                } else {
-                    prefs.remove(KEY_SHUFFLE)
-                    prefs.remove(KEY_REPEAT)
+                if (writeQueue) {
+                    if (persistentQueue) {
+                        prefs[KEY_QUEUE] = encodedQueue!!
+                        prefs[KEY_INDEX] = snapshot.index
+                        prefs[KEY_RECOMMENDATION_REASONS] = encodedReasons!!
+                    } else {
+                        prefs.remove(KEY_PROGRESS)
+                        prefs.remove(KEY_QUEUE)
+                        prefs.remove(KEY_INDEX)
+                        prefs.remove(KEY_RECOMMENDATION_REASONS)
+                    }
+                }
+                if (writeProgress) {
+                    if (persistentQueue) {
+                        prefs[KEY_PROGRESS] = snapshotProgressMs
+                    } else {
+                        prefs.remove(KEY_PROGRESS)
+                    }
+                }
+                if (writeModes) {
+                    if (rememberShuffleRepeat) {
+                        prefs[KEY_SHUFFLE] = snapshot.shuffle.toString()
+                        prefs[KEY_REPEAT] = snapshot.repeat.name
+                    } else {
+                        prefs.remove(KEY_SHUFFLE)
+                        prefs.remove(KEY_REPEAT)
+                    }
                 }
             }
         }

@@ -14,7 +14,13 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.random.Random
@@ -63,25 +69,33 @@ class YouTubeMusicSource @Inject constructor(
     }
 
     private suspend fun trackLive(videoId: String): MusicResult<Track> = guarded {
-        val key = "track:$videoId"; cache.get<Track>(key) ?: run {
-            val raw = innerTube.player(videoId); val details = raw["videoDetails"] as? JsonObject ?: error("Track metadata is unavailable.")
-            val seconds = details["lengthSeconds"]?.toString()?.trim('"')?.toIntOrNull()
-            val artist = details["author"]?.toString()?.trim('"').orEmpty().ifBlank { "Unknown" }
-            Track(details["videoId"]?.toString()?.trim('"') ?: videoId, details["title"]?.toString()?.trim('"').orEmpty().ifBlank { "Unknown" }, artist, listOf(ArtistRef(artist, details["channelId"]?.toString()?.trim('"'))), thumbnails = Parsers.findThumbnails(raw), durationSeconds = seconds, duration = seconds?.let(::formatDuration)).also { cache.put(key, it, FIFTEEN_MINUTES) }
+        val key = "track:$videoId"
+        cache.get<Track>(key) ?: run {
+            val raw = innerTube.player(videoId)
+            withContext(Dispatchers.Default) {
+                parseTrackDetails(raw, videoId)
+            }.also { cache.put(key, it, FIFTEEN_MINUTES) }
         }
     }
 
     override suspend fun related(videoId: String): MusicResult<List<Track>> = guarded {
         val key = "related:$videoId:${localeSuffix()}"; (cache.get<List<Track>>(key) ?: run {
             val radio = runCatching { innerTube.next(videoId, "RDAMVM$videoId") }.getOrElse { innerTube.next(videoId) }
-            Parsers.tracks(radio, 50).filterNot { it.videoId == videoId }.also { if (it.isNotEmpty()) cache.put(key, it, FIFTEEN_MINUTES) }
+            withContext(Dispatchers.Default) {
+                Parsers.tracks(radio, 50).filterNot { it.videoId == videoId }
+            }.also { if (it.isNotEmpty()) cache.put(key, it, FIFTEEN_MINUTES) }
         }).filterExplicitIfNeeded()
     }
 
     override suspend fun artist(channelId: String): MusicResult<ArtistPage> = guarded {
-        val key = "artist:$channelId:${localeSuffix()}"; cache.get<ArtistPage>(key) ?: parseArtist(innerTube.browse(channelId), channelId).also {
-            cache.put(key, it, FIFTEEN_MINUTES)
-            cacheScope.launch { catalog.cacheArtist(it) }
+        val key = "artist:$channelId:${localeSuffix()}"; cache.get<ArtistPage>(key) ?: run {
+            val raw = innerTube.browse(channelId)
+            withContext(Dispatchers.Default) {
+                parseArtist(raw, channelId)
+            }.also {
+                cache.put(key, it, FIFTEEN_MINUTES)
+                cacheScope.launch { catalog.cacheArtist(it) }
+            }
         }
     }
 
@@ -93,7 +107,10 @@ class YouTubeMusicSource @Inject constructor(
                 runCatching { innerTube.browse(candidate) }.onSuccess { raw = it }.onFailure { last = it }
                 if (raw != null) break
             }
-            parseCollection(raw ?: throw (last ?: IllegalStateException("Collection not found")), id, kind).also {
+            val rawCollection = raw ?: throw (last ?: IllegalStateException("Collection not found"))
+            withContext(Dispatchers.Default) {
+                parseCollection(rawCollection, id, kind)
+            }.also {
                 if (it.tracks.isEmpty()) error("Collection not found.")
                 cache.put(key, it, FIFTEEN_MINUTES)
                 cacheScope.launch { catalog.cacheCollection(it) }
@@ -110,16 +127,28 @@ class YouTubeMusicSource @Inject constructor(
         val poolKey = "home-pool:$countryCode:$languageCode"
 
         val pool = cache.get<List<Shelf>>(poolKey) ?: coroutineScope {
+            val concurrencyLimit = Semaphore(3)
             val endpoints = listOf("FEmusic_home", "FEmusic_explore", "FEmusic_charts", "FEmusic_new_releases")
             val browseDeferred = endpoints.map { endpoint ->
-                async {
-                    runCatching { parseHome(innerTube.browse(endpoint)).shelves }.getOrDefault(emptyList())
+                async(Dispatchers.IO) {
+                    concurrencyLimit.withPermit {
+                        withTimeoutOrNull(10_000L) {
+                            runCatching {
+                                val raw = innerTube.browse(endpoint)
+                                withContext(Dispatchers.Default) { parseHome(raw).shelves }
+                            }.getOrDefault(emptyList())
+                        }.orEmpty()
+                    }
                 }
             }
             val regionalSpecs = buildRegionalShelfSpecs(countryCode, countryName, languageCode, languageName)
             val regionalDeferred = regionalSpecs.map { spec ->
-                async {
-                    runCatching { fetchCuratedShelf(spec) }.getOrNull()
+                async(Dispatchers.IO) {
+                    concurrencyLimit.withPermit {
+                        withTimeoutOrNull(8_000L) {
+                            runCatching { fetchCuratedShelf(spec) }.getOrNull()
+                        }
+                    }
                 }
             }
             val browsed = browseDeferred.awaitAll().flatten()
@@ -274,26 +303,28 @@ class YouTubeMusicSource @Inject constructor(
     }
 
     /** A filtered tab (albums / artists / playlists) that comes back empty falls back to the unfiltered results, which list those too. */
-    private suspend fun searchAndParse(query: String, kind: String?): SearchResponse {
-        val parsed = parseSearch(innerTube.search(query, kind), query, kind)
+    private suspend fun searchAndParse(query: String, kind: String?): SearchResponse = withContext(Dispatchers.IO) {
+        val raw = innerTube.search(query, kind)
+        val parsed = withContext(Dispatchers.Default) { parseSearch(raw, query, kind) }
         val empty = when (kind) {
             "album" -> parsed.albums.isEmpty()
             "artist" -> parsed.artists.isEmpty()
             "playlist" -> parsed.playlists.isEmpty()
             else -> false
         }
-        return if (empty) runCatching { parseSearch(innerTube.search(query, null), query, null) }.getOrDefault(parsed) else parsed
+        if (empty) {
+            runCatching {
+                val fallbackRaw = innerTube.search(query, null)
+                withContext(Dispatchers.Default) { parseSearch(fallbackRaw, query, null) }
+            }.getOrDefault(parsed)
+        } else parsed
     }
 
-    private fun parseSearch(raw: JsonObject, query: String, type: String?): SearchResponse {
-        val shelves = Parsers.shelves(raw).mapNotNull { (title, block) ->
-            val tracks = Parsers.tracks(block); val cards = Parsers.cards(block)
-            val items = (if (tracks.isNotEmpty() && cards.isEmpty()) tracks.map(::ShelfTrack) else cards.map(::ShelfCard)); items.takeIf { it.isNotEmpty() }?.let { Shelf(title, it) }
-        }
-        val allTracks = shelves.flatMap { it.items }.filterIsInstance<ShelfTrack>().map { it.value }.distinctBy { it.videoId }.ifEmpty { Parsers.tracks(raw) }
-        fun cards(kind: String) = (Parsers.searchEntities(raw, kind) + Parsers.cards(raw, kind)).distinctBy { it.id }
-        return SearchResponse(query, allTracks, if (type == "album") cards("album") else cards("album"), if (type == "artist") cards("artist") else cards("artist"), if (type == "playlist") cards("playlist") else cards("playlist"), shelves)
-    }
+    internal fun parseSearch(raw: JsonObject, query: String, type: String?): SearchResponse =
+        Companion.parseSearch(raw, query, type)
+
+    internal fun parseTrackDetails(raw: JsonObject, fallbackVideoId: String): Track =
+        Companion.parseTrackDetails(raw, fallbackVideoId)
 
     private fun parseHome(raw: JsonObject) = HomeResponse(Parsers.shelves(raw).mapNotNull { (title, block) ->
         val tracks = Parsers.tracks(block, 24)
@@ -327,10 +358,66 @@ class YouTubeMusicSource @Inject constructor(
         MusicResult.Failure(e.message ?: "Something went wrong. Please try again.", e is InnerTubeClient.InnerTubeException && e.retryable)
     }
 
-    private fun formatDuration(s: Int): String = if (s >= 3600) "%d:%02d:%02d".format(s / 3600, (s % 3600) / 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
-
-    private companion object {
+    internal companion object {
         const val FIFTEEN_MINUTES = 15 * 60 * 1000L
+
+        internal fun formatDuration(s: Int): String =
+            if (s >= 3600) "%d:%02d:%02d".format(s / 3600, (s % 3600) / 60, s % 60)
+            else "%d:%02d".format(s / 60, s % 60)
+
+        internal fun parseSearch(raw: JsonObject, query: String, type: String?): SearchResponse {
+            val shelves = Parsers.shelves(raw).mapNotNull { (title, block) ->
+                val tracks = Parsers.tracks(block)
+                val cards = Parsers.cards(block)
+                val items = if (tracks.isNotEmpty() && cards.isEmpty()) {
+                    tracks.map(::ShelfTrack)
+                } else {
+                    cards.map(::ShelfCard)
+                }
+                items.takeIf { it.isNotEmpty() }?.let { Shelf(title, it) }
+            }
+            val allTracks = shelves
+                .flatMap { it.items }
+                .filterIsInstance<ShelfTrack>()
+                .map { it.value }
+                .distinctBy { it.videoId }
+                .ifEmpty { Parsers.tracks(raw) }
+
+            val entityFilter = type?.takeIf { it == "album" || it == "artist" || it == "playlist" }
+            val allCards = (Parsers.searchEntities(raw, entityFilter, limit = 300) + Parsers.cards(raw, entityFilter, limit = 300))
+                .distinctBy { it.id }
+            val byKind = allCards.groupBy { it.type }
+
+            return SearchResponse(
+                query = query,
+                songs = allTracks,
+                albums = byKind["album"].orEmpty(),
+                artists = byKind["artist"].orEmpty(),
+                playlists = byKind["playlist"].orEmpty(),
+                shelves = shelves
+            )
+        }
+
+        internal fun parseTrackDetails(raw: JsonObject, fallbackVideoId: String): Track {
+            val details = raw["videoDetails"] as? JsonObject ?: error("Track metadata is unavailable.")
+            fun JsonObject.primitiveString(key: String): String? =
+                (this[key] as? JsonPrimitive)?.contentOrNull
+
+            val seconds = details.primitiveString("lengthSeconds")?.toIntOrNull()
+            val artist = details.primitiveString("author")?.trim().orEmpty().ifBlank { "Unknown" }
+            val resolvedId = details.primitiveString("videoId")?.trim()?.takeIf { it.isNotEmpty() } ?: fallbackVideoId
+            val title = details.primitiveString("title")?.trim().orEmpty().ifBlank { "Unknown" }
+            val channelId = details.primitiveString("channelId")?.trim()?.takeIf { it.isNotEmpty() }
+            return Track(
+                videoId = resolvedId,
+                title = title,
+                artist = artist,
+                artists = listOf(ArtistRef(artist, channelId)),
+                thumbnails = Parsers.findThumbnails(raw),
+                durationSeconds = seconds,
+                duration = seconds?.let(::formatDuration)
+            )
+        }
 
         val COUNTRY_NAMES = mapOf(
             "IN" to "India",

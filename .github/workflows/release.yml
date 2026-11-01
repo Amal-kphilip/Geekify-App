@@ -15,28 +15,59 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK
+      - name: Set up JDK 17 and 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: |
+            21
+            17
 
-      - name: Restore release keystore
+      - name: Validate release tag and derive version
+        id: release_version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          if [[ "$RELEASE_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            major_num=$((10#${BASH_REMATCH[1]}))
+            minor_num=$((10#${BASH_REMATCH[2]}))
+            patch_num=$((10#${BASH_REMATCH[3]}))
+            if (( minor_num <= 99 && patch_num <= 99 )); then
+              version_name="${major_num}.${minor_num}.${patch_num}"
+              version_code=$((major_num * 10000 + minor_num * 100 + patch_num))
+              echo "valid=true" >> "$GITHUB_OUTPUT"
+              echo "version=${version_name}" >> "$GITHUB_OUTPUT"
+              echo "version_code=${version_code}" >> "$GITHUB_OUTPUT"
+            else
+              echo "::error::Invalid semantic version tag '$RELEASE_TAG': minor and patch components must be at most 99."
+              exit 1
+            fi
+          else
+            echo "::error::Release workflow requires a semantic version tag matching vMAJOR.MINOR.PATCH (got '$RELEASE_TAG')."
+            exit 1
+          fi
+
+      - name: Restore and verify release keystore
         id: keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
         run: |
-          if [[ -n "$ANDROID_KEYSTORE_BASE64" ]]; then
-            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::ANDROID_KEYSTORE_BASE64 secret is not set — APK will be debug-signed (installable, but not Play-signed)."
-            echo "available=false" >> "$GITHUB_OUTPUT"
+          if [[ -z "$ANDROID_KEYSTORE_BASE64" || -z "$ANDROID_KEYSTORE_PASSWORD" || -z "$ANDROID_KEY_ALIAS" || -z "$ANDROID_KEY_PASSWORD" ]]; then
+            echo "::error::Release signing credentials (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD) are required. Refusing to fall back to a debug-signed APK."
+            exit 1
           fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+          keytool -list -keystore "$RUNNER_TEMP/release.keystore" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" > /dev/null
 
       - name: Restore Firebase configuration
         env:
           GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        shell: bash
         run: |
           if [[ -n "$GOOGLE_SERVICES_JSON_BASE64" ]]; then
             echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > app/google-services.json
@@ -64,48 +95,62 @@ jobs:
           JSON
           fi
 
-      - name: Build APK
+      - name: Run unit tests, lint, and assemble signed release APK (R8 enabled)
         id: build
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          KEYSTORE_AVAILABLE: ${{ steps.keystore.outputs.available }}
+          VERSION_NAME: ${{ steps.release_version.outputs.version }}
+          VERSION_CODE: ${{ steps.release_version.outputs.version_code }}
+        shell: bash
         run: |
           chmod +x gradlew
-          VERSION_NAME="${GITHUB_REF_NAME#v}"
-          VERSION_CODE="$(echo "$VERSION_NAME" | awk -F. '{ printf "%d%02d%02d", $1, $2, $3 }')"
+          ./gradlew \
+            :innertube:testDebugUnitTest \
+            :app:testDebugUnitTest \
+            :app:lintDebug \
+            :app:assembleRelease \
+            -PappVersionName="$VERSION_NAME" \
+            -PappVersionCode="$VERSION_CODE" \
+            -Pandroid.injected.signing.store.file="$ANDROID_KEYSTORE_PATH" \
+            -Pandroid.injected.signing.store.password="$ANDROID_KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$ANDROID_KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$ANDROID_KEY_PASSWORD"
 
-          if [[ "$KEYSTORE_AVAILABLE" == "true" ]]; then
-            echo "Building release APK with release signing..."
-            ./gradlew :app:assembleRelease \
-              -PappVersionName="$VERSION_NAME" \
-              -PappVersionCode="$VERSION_CODE" \
-              -Pandroid.injected.signing.store.file="$ANDROID_KEYSTORE_PATH" \
-              -Pandroid.injected.signing.store.password="$ANDROID_KEYSTORE_PASSWORD" \
-              -Pandroid.injected.signing.key.alias="$ANDROID_KEY_ALIAS" \
-              -Pandroid.injected.signing.key.password="$ANDROID_KEY_PASSWORD"
-            APK_PATH="$(find app/build/outputs/apk/release -name '*.apk' | head -1)"
-          else
-            echo "Building debug APK (debug-signed — installable on any device)..."
-            ./gradlew :app:assembleDebug \
-              -PappVersionName="$VERSION_NAME" \
-              -PappVersionCode="$VERSION_CODE"
-            APK_PATH="$(find app/build/outputs/apk/debug -name '*.apk' | head -1)"
+          APK_PATH="$(find app/build/outputs/apk/release -name '*-release.apk' | head -1)"
+          if [[ -z "$APK_PATH" || ! -f "$APK_PATH" ]]; then
+            echo "::error::Signed release APK was not produced."
+            exit 1
+          fi
+
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)"
+          if [[ -n "$APKSIGNER" ]]; then
+            CERT_INFO="$("$APKSIGNER" verify --verbose --print-certs "$APK_PATH")"
+            echo "$CERT_INFO"
+            if echo "$CERT_INFO" | grep -Fq "CN=Android Debug"; then
+              echo "::error::Release APK is signed with the Android debug certificate. Aborting publish."
+              exit 1
+            fi
           fi
 
           echo "APK resolved: $APK_PATH"
           cp "$APK_PATH" "Geekify-v${VERSION_NAME}.apk"
           cp "$APK_PATH" "Geekify-latest.apk"
+          sha256sum "Geekify-v${VERSION_NAME}.apk" | awk '{ print $1 }' > "Geekify-v${VERSION_NAME}.apk.sha256"
+          sha256sum "Geekify-latest.apk" | awk '{ print $1 }' > "Geekify-latest.apk.sha256"
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           TAG="$GITHUB_REF_NAME"
           VERSIONED_APK="Geekify-${TAG}.apk"
           LATEST_APK="Geekify-latest.apk"
+          VERSIONED_SHA="${VERSIONED_APK}.sha256"
+          LATEST_SHA="${LATEST_APK}.sha256"
 
           # Create or resume draft release
           if ! gh release view "$TAG" > /dev/null 2>&1; then
@@ -114,7 +159,7 @@ jobs:
 
           # Upload only missing assets (idempotent on reruns)
           EXISTING_ASSETS="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
-          for ASSET in "$VERSIONED_APK" "$LATEST_APK"; do
+          for ASSET in "$VERSIONED_APK" "$LATEST_APK" "$VERSIONED_SHA" "$LATEST_SHA"; do
             if printf '%s\n' "$EXISTING_ASSETS" | grep -Fxq "$ASSET"; then
               echo "Asset already present, skipping: $ASSET"
             else
@@ -124,32 +169,6 @@ jobs:
 
           # Publish the draft
           gh release edit "$TAG" --draft=false
-
-      - name: Validate stable release version for update notification
-        id: release_version
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        shell: bash
-        run: |
-          if [[ "$RELEASE_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-            major="${BASH_REMATCH[1]}"
-            minor="${BASH_REMATCH[2]}"
-            patch="${BASH_REMATCH[3]}"
-            major_num=$((10#$major))
-            minor_num=$((10#$minor))
-            patch_num=$((10#$patch))
-            if (( minor_num <= 99 && patch_num <= 99 )); then
-              echo "valid=true" >> "$GITHUB_OUTPUT"
-              echo "version=${major_num}.${minor_num}.${patch_num}" >> "$GITHUB_OUTPUT"
-              echo "version_code=$((major_num * 10000 + minor_num * 100 + patch_num))" >> "$GITHUB_OUTPUT"
-            else
-              echo "valid=false" >> "$GITHUB_OUTPUT"
-              echo "::notice::Skipping FCM notification: minor and patch components must be at most 99."
-            fi
-          else
-            echo "valid=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Skipping FCM notification for non-stable semantic version tag '$RELEASE_TAG'."
-          fi
 
       - name: Check optional Firebase FCM sender credentials
         id: fcm_credentials

@@ -8,12 +8,12 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
-import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -28,13 +28,13 @@ import com.geekify.android.player.PlaybackService
 import com.geekify.android.ui.navigation.MainScreen
 import com.geekify.android.ui.theme.GeekifyTheme
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.launch
 import javax.inject.Inject
+import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
-    @Inject lateinit var syncRepository: SyncRepository
+    @Inject lateinit var syncRepository: dagger.Lazy<SyncRepository>
     @Inject lateinit var notificationStore: NotificationStore
     @Inject lateinit var notificationCoordinator: NotificationCoordinator
     @Inject lateinit var appSettings: com.geekify.android.settings.AppSettingsRepository
@@ -84,7 +84,7 @@ class MainActivity : ComponentActivity() {
         // Observe foregrounding for Firestore pull sync
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
-                syncRepository.onForeground()
+                syncRepository.get().onForeground()
             }
         }
 
@@ -120,10 +120,12 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        AppForeground.isVisible = false
-        // Run the existing notification pass shortly after Geekify leaves the foreground.
-        // This keeps update/tip notifications responsive without running work while the app is visible.
-        NotificationWorker.kick(this)
+        if (!isChangingConfigurations) {
+            AppForeground.isVisible = false
+            // Run the existing notification pass shortly after Geekify leaves the foreground.
+            // This keeps update/tip notifications responsive without running work while the app is visible.
+            NotificationWorker.kick(this)
+        }
         super.onStop()
     }
 }

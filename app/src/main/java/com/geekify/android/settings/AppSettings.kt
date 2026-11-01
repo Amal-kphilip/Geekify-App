@@ -51,6 +51,7 @@ data class AppSettingsState(
     val rememberShuffleRepeat: Boolean = true,
     val autoSkipOnError: Boolean = true,
     val keepScreenOn: Boolean = false,
+    val stopPlaybackOnTaskRemoved: Boolean = true,
 
     // Liquid Glass & Appearance
     val glass: GlassConfig = GlassConfig(),
@@ -83,6 +84,7 @@ class AppSettingsRepository @Inject constructor(
         val KEY_REMEMBER_SHUFFLE_REPEAT = booleanPreferencesKey("settings_remember_shuffle_repeat")
         val KEY_AUTO_SKIP_ON_ERROR = booleanPreferencesKey("settings_auto_skip_on_error")
         val KEY_KEEP_SCREEN_ON = booleanPreferencesKey("settings_keep_screen_on")
+        val KEY_STOP_ON_TASK_REMOVED = booleanPreferencesKey("settings_stop_on_task_removed")
 
         val KEY_GLASS_ENABLED = booleanPreferencesKey("settings_glass_enabled")
         val KEY_GLASS_BLUR_DP = floatPreferencesKey("settings_glass_blur_dp")
@@ -128,6 +130,7 @@ class AppSettingsRepository @Inject constructor(
                 rememberShuffleRepeat = prefs[KEY_REMEMBER_SHUFFLE_REPEAT] ?: true,
                 autoSkipOnError = prefs[KEY_AUTO_SKIP_ON_ERROR] ?: true,
                 keepScreenOn = prefs[KEY_KEEP_SCREEN_ON] ?: false,
+                stopPlaybackOnTaskRemoved = prefs[KEY_STOP_ON_TASK_REMOVED] ?: true,
                 glass = GlassConfig(
                     enabled = prefs[KEY_GLASS_ENABLED] ?: true,
                     blurDp = (prefs[KEY_GLASS_BLUR_DP] ?: 3f).coerceIn(0f, 25f),
@@ -193,6 +196,10 @@ class AppSettingsRepository @Inject constructor(
 
     suspend fun setKeepScreenOn(enabled: Boolean) {
         dataStore.edit { it[KEY_KEEP_SCREEN_ON] = enabled }
+    }
+
+    suspend fun setStopPlaybackOnTaskRemoved(enabled: Boolean) {
+        dataStore.edit { it[KEY_STOP_ON_TASK_REMOVED] = enabled }
     }
 
     suspend fun setGlassEnabled(enabled: Boolean) {

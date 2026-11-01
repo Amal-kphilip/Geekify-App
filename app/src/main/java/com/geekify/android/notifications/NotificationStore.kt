@@ -9,6 +9,8 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.geekify.android.di.IoDispatcher
+import javax.inject.Inject
+import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -16,8 +18,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /** What the user chose in Settings. Tips default on (rare, one per version); engagement is opt-in. */
 data class NotificationPrefs(
@@ -32,6 +32,8 @@ data class NotificationState(
     val latestVersionCode: Int = 0,
     val latestVersionName: String? = null,
     val latestReleaseUrl: String? = null,
+    val latestReleaseEtag: String? = null,
+    val rateLimitResetAt: Long = 0L,
     val updateShownForVersion: Int = 0,
     val dismissedVersion: Int = 0,
     /** Version code for which the "what's new" tip was last handled (0 = never seen, i.e. fresh install). */
@@ -61,6 +63,8 @@ class NotificationStore @Inject constructor(
         val latestCode = intPreferencesKey("notif_latest_version_code")
         val latestName = stringPreferencesKey("notif_latest_version_name")
         val latestUrl = stringPreferencesKey("notif_latest_release_url")
+        val latestEtag = stringPreferencesKey("notif_latest_release_etag")
+        val rateLimitResetAt = longPreferencesKey("notif_rate_limit_reset_at")
         val shownFor = intPreferencesKey("notif_update_shown_for")
         val dismissed = intPreferencesKey("notif_dismissed_version")
         val tipFor = intPreferencesKey("notif_tip_handled_for")
@@ -89,6 +93,8 @@ class NotificationStore @Inject constructor(
         p[K.latestCode] = next.latestVersionCode
         next.latestVersionName?.let { p[K.latestName] = it } ?: p.remove(K.latestName)
         next.latestReleaseUrl?.let { p[K.latestUrl] = it } ?: p.remove(K.latestUrl)
+        next.latestReleaseEtag?.let { p[K.latestEtag] = it } ?: p.remove(K.latestEtag)
+        p[K.rateLimitResetAt] = next.rateLimitResetAt
         p[K.shownFor] = next.updateShownForVersion
         p[K.dismissed] = next.dismissedVersion
         p[K.tipFor] = next.tipHandledForVersion
@@ -114,6 +120,8 @@ class NotificationStore @Inject constructor(
         latestVersionCode = p[K.latestCode] ?: 0,
         latestVersionName = p[K.latestName],
         latestReleaseUrl = p[K.latestUrl],
+        latestReleaseEtag = p[K.latestEtag],
+        rateLimitResetAt = p[K.rateLimitResetAt] ?: 0L,
         updateShownForVersion = p[K.shownFor] ?: 0,
         dismissedVersion = p[K.dismissed] ?: 0,
         tipHandledForVersion = p[K.tipFor] ?: 0,

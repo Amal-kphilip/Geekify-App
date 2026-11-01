@@ -1,38 +1,39 @@
 package com.geekify.android.di
 
 import android.content.Context
+import androidx.annotation.OptIn
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
-import androidx.room.Room
-import com.geekify.android.data.local.GeekifyDatabase
-import com.geekify.android.data.local.HistoryDao
-import com.geekify.android.data.local.LikedDao
-import com.geekify.android.data.local.CatalogDao
-import com.geekify.android.data.local.MIGRATION_1_2
-import com.geekify.android.data.local.MIGRATION_2_3
-import com.geekify.android.data.local.MIGRATION_3_4
-import com.geekify.android.data.local.ShelfCacheDao
-import com.geekify.android.data.local.PlayStatDao
-import com.geekify.android.data.local.PlaylistDao
-import com.geekify.android.data.local.ListeningSessionDao
-import com.geekify.android.data.source.MusicSource
-import com.geekify.android.data.source.YouTubeMusicSource
-import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
+import androidx.room.Room
+import com.geekify.android.data.local.CatalogDao
+import com.geekify.android.data.local.GeekifyDatabase
+import com.geekify.android.data.local.HistoryDao
+import com.geekify.android.data.local.LikedDao
+import com.geekify.android.data.local.ListeningSessionDao
+import com.geekify.android.data.local.MIGRATION_1_2
+import com.geekify.android.data.local.MIGRATION_2_3
+import com.geekify.android.data.local.MIGRATION_3_4
+import com.geekify.android.data.local.MIGRATION_4_5
+import com.geekify.android.data.local.PlayStatDao
+import com.geekify.android.data.local.PlaylistDao
+import com.geekify.android.data.local.ShelfCacheDao
+import com.geekify.android.data.source.MusicSource
+import com.geekify.android.data.source.YouTubeMusicSource
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
-import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
+import okhttp3.OkHttpClient
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "geekify_prefs")
 
@@ -70,7 +71,7 @@ abstract class AppModule {
         @Provides @Singleton
         fun provideDatabase(@ApplicationContext ctx: Context): GeekifyDatabase =
             Room.databaseBuilder(ctx, GeekifyDatabase::class.java, "geekify.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
 
         @Provides fun provideLikedDao(db: GeekifyDatabase): LikedDao = db.likedDao()

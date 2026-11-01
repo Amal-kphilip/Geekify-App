@@ -18,6 +18,7 @@ import kotlin.math.tanh
  *  - When YouTube provides track `loudnessDb`, applies the exact reference loudness correction (-12..+6 dB).
  *  - When `loudnessDb` is missing (common on several InnerTube clients), falls back to a smooth adaptive RMS
  *    normaliser targeting -14 dBFS so "Normalize volume" always evens out quiet and loud tracks.
+ *  - Samples whole multi-channel frames so interleaved stereo (L/R) is measured symmetrically across all channels.
  *  - Runs all output through a soft limiter at 0.80 full-scale so boosts never clip or distort.
  */
 @OptIn(UnstableApi::class)
@@ -28,6 +29,7 @@ class NormalizationProcessor : BaseAudioProcessor() {
     @Volatile private var metadataGain = 1f
 
     private var encoding = C.ENCODING_INVALID
+    private var channels = 2
     private var adaptiveGain = 1f
     private var runningRms = TARGET_RMS
 
@@ -50,10 +52,11 @@ class NormalizationProcessor : BaseAudioProcessor() {
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
         val enc = inputAudioFormat.encoding
-        if (enc != C.ENCODING_PCM_16BIT && enc != C.ENCODING_PCM_FLOAT) {
+        if ((enc != C.ENCODING_PCM_16BIT && enc != C.ENCODING_PCM_FLOAT) || inputAudioFormat.channelCount <= 0) {
             return AudioProcessor.AudioFormat.NOT_SET
         }
         encoding = enc
+        channels = inputAudioFormat.channelCount.coerceAtLeast(1)
         return inputAudioFormat
     }
 
@@ -87,37 +90,13 @@ class NormalizationProcessor : BaseAudioProcessor() {
 
     private fun currentGainForShortBuffer(buf: ByteBuffer): Float {
         if (hasTrackLoudness) return metadataGain
-        val startPos = buf.position()
-        val count = buf.remaining() / 2
-        if (count <= 0) return adaptiveGain
-        var sumSq = 0.0
-        var i = 0
-        val step = maxOf(1, count / 128)
-        while (i < count) {
-            val s = buf.getShort(startPos + i * 2) / 32768.0
-            sumSq += s * s
-            i += step
-        }
-        val measuredSamples = (count + step - 1) / step
-        val blockRms = sqrt(sumSq / measuredSamples.coerceAtLeast(1)).toFloat()
+        val blockRms = computeBlockRmsShort(buf, channels) ?: return adaptiveGain
         return updateAdaptiveGain(blockRms)
     }
 
     private fun currentGainForFloatBuffer(buf: ByteBuffer): Float {
         if (hasTrackLoudness) return metadataGain
-        val startPos = buf.position()
-        val count = buf.remaining() / 4
-        if (count <= 0) return adaptiveGain
-        var sumSq = 0.0
-        var i = 0
-        val step = maxOf(1, count / 128)
-        while (i < count) {
-            val s = buf.getFloat(startPos + i * 4).toDouble()
-            sumSq += s * s
-            i += step
-        }
-        val measuredSamples = (count + step - 1) / step
-        val blockRms = sqrt(sumSq / measuredSamples.coerceAtLeast(1)).toFloat()
+        val blockRms = computeBlockRmsFloat(buf, channels) ?: return adaptiveGain
         return updateAdaptiveGain(blockRms)
     }
 
@@ -141,6 +120,7 @@ class NormalizationProcessor : BaseAudioProcessor() {
 
     override fun onReset() {
         encoding = C.ENCODING_INVALID
+        channels = 2
         adaptiveGain = 1f
         runningRms = TARGET_RMS
     }
@@ -152,13 +132,67 @@ class NormalizationProcessor : BaseAudioProcessor() {
         return if (x < 0f) -limited else limited
     }
 
-    private companion object {
-        const val KNEE = 0.8f
-        const val MIN_CORRECTION_DB = -12f
-        const val MAX_CORRECTION_DB = 6f
-        const val TARGET_RMS = 0.20f // ~ -14 dBFS
-        const val SILENCE_FLOOR_RMS = 0.008f
-        const val MIN_GAIN_LINEAR = 0.35f // ~ -9 dB
-        const val MAX_GAIN_LINEAR = 2.00f // ~ +6 dB
+    companion object {
+        private const val KNEE = 0.8f
+        private const val MIN_CORRECTION_DB = -12f
+        private const val MAX_CORRECTION_DB = 6f
+        private const val TARGET_RMS = 0.20f // ~ -14 dBFS
+        private const val SILENCE_FLOOR_RMS = 0.008f
+        private const val MIN_GAIN_LINEAR = 0.35f // ~ -9 dB
+        private const val MAX_GAIN_LINEAR = 2.00f // ~ +6 dB
+
+        /**
+         * Computes RMS across interleaved 16-bit PCM frames by stepping in whole frames and
+         * sampling all channels (`0 until channelCount`) at each visited frame.
+         */
+        internal fun computeBlockRmsShort(buf: ByteBuffer, channelCount: Int): Float? {
+            val chCount = channelCount.coerceAtLeast(1)
+            val startPos = buf.position()
+            val totalSamples = buf.remaining() / 2
+            val totalFrames = totalSamples / chCount
+            if (totalFrames <= 0) return null
+
+            val frameStep = maxOf(1, totalFrames / 128)
+            var sumSq = 0.0
+            var sampledCount = 0
+            var frame = 0
+            while (frame < totalFrames) {
+                val baseSampleIndex = frame * chCount
+                for (ch in 0 until chCount) {
+                    val s = buf.getShort(startPos + (baseSampleIndex + ch) * 2) / 32768.0
+                    sumSq += s * s
+                    sampledCount++
+                }
+                frame += frameStep
+            }
+            return if (sampledCount > 0) sqrt(sumSq / sampledCount).toFloat() else null
+        }
+
+        /**
+         * Computes RMS across interleaved 32-bit float PCM frames by stepping in whole frames and
+         * sampling all channels (`0 until channelCount`) at each visited frame.
+         */
+        internal fun computeBlockRmsFloat(buf: ByteBuffer, channelCount: Int): Float? {
+            val chCount = channelCount.coerceAtLeast(1)
+            val startPos = buf.position()
+            val totalSamples = buf.remaining() / 4
+            val totalFrames = totalSamples / chCount
+            if (totalFrames <= 0) return null
+
+            val frameStep = maxOf(1, totalFrames / 128)
+            var sumSq = 0.0
+            var sampledCount = 0
+            var frame = 0
+            while (frame < totalFrames) {
+                val baseSampleIndex = frame * chCount
+                for (ch in 0 until chCount) {
+                    val s = buf.getFloat(startPos + (baseSampleIndex + ch) * 4).toDouble()
+                    sumSq += s * s
+                    sampledCount++
+                }
+                frame += frameStep
+            }
+            return if (sampledCount > 0) sqrt(sumSq / sampledCount).toFloat() else null
+        }
     }
 }

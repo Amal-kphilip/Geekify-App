@@ -12,10 +12,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.flow.StateFlow
-import androidx.compose.runtime.collectAsState
 
 /**
  * Rotating, audio-reactive artwork treatment for the Now Playing cover.
@@ -25,11 +26,15 @@ import androidx.compose.runtime.collectAsState
 fun MusicReactiveArtwork(
     isPlaying: Boolean,
     beatIntensity: StateFlow<Float>,
-    baseScale: Float = 1f,
     modifier: Modifier = Modifier,
+    baseScale: Float = 1f,
     content: @Composable BoxScope.() -> Unit
 ) {
-    val currentBeatIntensity by beatIntensity.collectAsState()
+    val currentBeatIntensity by if (isPlaying) {
+        beatIntensity.collectAsStateWithLifecycle()
+    } else {
+        remember { mutableFloatStateOf(0f) }
+    }
     val rotation = remember { Animatable(0f) }
 
     LaunchedEffect(isPlaying) {

@@ -261,7 +261,8 @@ fun Modifier.liquidGlass(
         GlassRole.Preview, GlassRole.Overlay, GlassRole.Panel -> glassConfig.enabled
     }
 
-    val effectiveStyle = if (isFloatingOrNav) {
+    val isThrottled = isBatterySaverOrThrottled()
+    val baseStyle = if (isFloatingOrNav) {
         style.copy(
             blur = glassConfig.blurDp.dp,
             saturation = glassConfig.saturation,
@@ -276,6 +277,18 @@ fun Modifier.liquidGlass(
             chromaticAberration = glassConfig.chromaticAberration,
             depthEffect = glassConfig.depthEffect
         )
+    }
+    // Under battery saver or high thermal pressure, degrade expensive secondary GPU passes
+    // (lens refraction, chromatic aberration, depth) while preserving the clean blurred glass surface.
+    val effectiveStyle = if (isThrottled) {
+        baseStyle.copy(
+            chromaticAberration = false,
+            depthEffect = false,
+            lensAmount = 0.dp,
+            lensHeight = 0.dp
+        )
+    } else {
+        baseStyle
     }
 
     // Check device capability (Android 12+ for RenderEffect)

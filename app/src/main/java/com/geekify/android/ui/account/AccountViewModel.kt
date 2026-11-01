@@ -59,10 +59,12 @@ class AccountViewModel @Inject constructor(
 
     fun signUpEmail(name: String, email: String, pass: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
+            _uiState.update { it.copy(isLoading = true, error = null, message = null) }
             try {
                 auth.signUpEmail(name, email, pass)
                 _uiState.update { it.copy(isLoading = false) }
+            } catch (e: AuthRepository.EmailVerificationRequiredException) {
+                _uiState.update { it.copy(isLoading = false, message = auth.friendlyError(e)) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, error = auth.friendlyError(e)) }
             }

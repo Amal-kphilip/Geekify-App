@@ -52,12 +52,10 @@ class HistoryRepository @Inject constructor(
     suspend fun allTimed(): List<Pair<Track, Long>> = dao.allOnce().map { it.toTrack() to it.playedAt }
 
     suspend fun replaceAll(tracks: List<Track>) {
-        dao.clear()
-        dao.insertAll(tracks.take(40).map(Track::toHistory))
+        dao.replaceAll(tracks.take(40).map(Track::toHistory))
     }
 
     suspend fun replaceAllTimed(entries: List<Pair<Track, Long>>) {
-        dao.clear()
-        dao.insertAll(entries.take(40).map { (track, at) -> track.toHistory().copy(playedAt = at) })
+        dao.replaceAll(entries.take(40).map { (track, at) -> track.toHistory().copy(playedAt = at) })
     }
 }

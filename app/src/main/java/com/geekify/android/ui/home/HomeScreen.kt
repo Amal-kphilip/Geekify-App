@@ -220,7 +220,7 @@ fun HomeScreen(
                             contentPadding = PaddingValues(horizontal = 20.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            items(filters) { filter ->
+                            items(filters, key = { it }) { filter ->
                                 PillChip(
                                     text = if (filter == "Everything") "All" else filter,
                                     selected = state.selectedFilter == filter,
@@ -323,7 +323,11 @@ fun HomeScreen(
                                 contentPadding = PaddingValues(horizontal = 20.dp),
                                 horizontalArrangement = Arrangement.spacedBy(14.dp)
                             ) {
-                                items(discover.size, key = { discover[it].key }) { index ->
+                                items(
+                                    count = discover.size,
+                                    key = { discover[it].key },
+                                    contentType = { "discover_card" }
+                                ) { index ->
                                     val card = discover[index]
                                     val lead = card.lead
                                     DiscoverCard(
@@ -389,13 +393,21 @@ fun HomeScreen(
                             }
                         }
                     }
-                    items(visibleList.size) { index ->
+                    items(
+                        count = visibleList.size,
+                        key = { index -> "daily:${visibleList[index].title}:${visibleList[index].subtitle}" },
+                        contentType = { "daily_row" }
+                    ) { index ->
                         PlaylistRow(item = visibleList[index])
                     }
                 }
 
                 // ---- Remaining shelves from the feed ----
-                itemsIndexed(state.shelves, key = { index, shelf -> "shelf:$index:${shelf.title}" }) { _, shelf ->
+                itemsIndexed(
+                    items = state.shelves,
+                    key = { index, shelf -> "shelf:$index:${shelf.title}" },
+                    contentType = { _, _ -> "shelf" }
+                ) { _, shelf ->
                     ShelfRow(shelf = shelf, onTrackClick = onTrackClick, onCardClick = onCardClick)
                 }
 
