@@ -1,12 +1,12 @@
 package com.geekify.android.notifications
 
-import android.util.Log
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import timber.log.Timber
 import javax.inject.Inject
 
 /**
@@ -36,7 +36,7 @@ class GeekifyUpdateMessagingService : FirebaseMessagingService() {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                Log.e(TAG, "Failed to handle engagement/tip push", error)
+                Timber.tag(TAG).e(error, "Failed to handle engagement/tip push")
             }
             return
         }
@@ -50,7 +50,7 @@ class GeekifyUpdateMessagingService : FirebaseMessagingService() {
         val versionCode = ReleaseParser.versionCodeFor(versionName) ?: return
         val announcedCode = data[KEY_VERSION_CODE]?.toIntOrNull()
         if (announcedCode != null && announcedCode != versionCode) {
-            Log.w(TAG, "Ignoring update push with mismatched version metadata")
+            Timber.tag(TAG).w("Ignoring update push with mismatched version metadata")
             return
         }
 
@@ -70,7 +70,7 @@ class GeekifyUpdateMessagingService : FirebaseMessagingService() {
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            Log.e(TAG, "Failed to handle release update push", error)
+            Timber.tag(TAG).e(error, "Failed to handle release update push")
         }
     }
 

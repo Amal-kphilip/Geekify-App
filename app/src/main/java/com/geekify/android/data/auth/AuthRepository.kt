@@ -1,7 +1,6 @@
 package com.geekify.android.data.auth
 
 import android.content.Context
-import android.util.Log
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
@@ -28,6 +27,7 @@ import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import timber.log.Timber
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -242,19 +242,19 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
         } catch (e: GetCredentialCancellationException) {
             throw GoogleSignInCancelledException()
         } catch (e: NoCredentialException) {
-            Log.e(TAG, "No Google credential available", e)
+            Timber.tag(TAG).e(e, "No Google credential available")
             throw GoogleSignInException(
                 "Google sign-in isn't available. Make sure a Google account is added on this phone, " +
                     "and that this app's SHA-1 fingerprint is registered in Firebase.", e
             )
         } catch (e: GetCredentialProviderConfigurationException) {
-            Log.e(TAG, "Credential provider not configured", e)
+            Timber.tag(TAG).e(e, "Credential provider not configured")
             throw GoogleSignInException("Google Play services needs to be updated to use Google sign-in.", e)
         } catch (e: GetCredentialException) {
-            Log.e(TAG, "Google sign-in failed", e)
+            Timber.tag(TAG).e(e, "Google sign-in failed")
             throw GoogleSignInException("Google sign-in failed (${e.type.substringAfterLast('.')}). Please try again.", e)
         } catch (e: GoogleIdTokenParsingException) {
-            Log.e(TAG, "Bad Google ID token", e)
+            Timber.tag(TAG).e(e, "Bad Google ID token")
             throw GoogleSignInException("Couldn't read the Google sign-in response. Please try again.", e)
         }
         if (!verifyIdTokenNonce(googleId.idToken, hashedNonce = hashedNonce, rawNonce = rawNonce)) {

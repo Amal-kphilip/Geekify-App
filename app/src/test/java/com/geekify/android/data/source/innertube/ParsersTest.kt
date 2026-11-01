@@ -30,4 +30,28 @@ class ParsersTest {
         assertEquals("song1234567", card.id)
     }
 
+    @Test fun `iterative walk handles deeply nested structures without stack overflow`() {
+        // Construct deeply nested JSON object with 150 levels
+        var jsonStr = """{"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"deep123"},"flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Deep Song"}]}}}]}}"""
+        repeat(150) {
+            jsonStr = """{"nested":$jsonStr}"""
+        }
+        val raw = Json.parseToJsonElement(jsonStr)
+        val tracks = Parsers.tracks(raw)
+        assertEquals(1, tracks.size)
+        assertEquals("deep123", tracks.first().videoId)
+        assertEquals("Deep Song", tracks.first().title)
+    }
+
+    @Test fun `handles malformed and empty elements gracefully`() {
+        val emptyObj = Json.parseToJsonElement("{}")
+        assertEquals(0, Parsers.tracks(emptyObj).size)
+        assertEquals(0, Parsers.cards(emptyObj).size)
+
+        val malformedRenderer = Json.parseToJsonElement(
+            """{"musicResponsiveListItemRenderer":{}}"""
+        )
+        val parsed = Parsers.tracks(malformedRenderer)
+        assertEquals(0, parsed.size)
+    }
 }

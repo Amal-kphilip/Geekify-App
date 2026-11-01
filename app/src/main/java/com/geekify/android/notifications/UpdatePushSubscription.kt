@@ -5,10 +5,10 @@ import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.google.firebase.messaging.FirebaseMessaging
+import timber.log.Timber
 
 /**
  * Keeps the app's opt-in "Updates" preference aligned with the FCM topic subscription.
@@ -31,11 +31,11 @@ object UpdatePushSubscription {
                 messaging.unsubscribeFromTopic(TOPIC)
             }
             task.addOnFailureListener { error ->
-                Log.w(TAG, "Could not ${if (shouldSubscribe) "subscribe to" else "unsubscribe from"} update topic", error)
+                Timber.tag(TAG).w(error, "Could not ${if (shouldSubscribe) "subscribe to" else "unsubscribe from"} update topic")
             }
         }.onFailure { error ->
             // In particular, do not block app startup on non-GMS devices. WorkManager remains available.
-            Log.w(TAG, "FCM update topic sync is unavailable", error)
+            Timber.tag(TAG).w(error, "FCM update topic sync is unavailable")
         }
     }
 
