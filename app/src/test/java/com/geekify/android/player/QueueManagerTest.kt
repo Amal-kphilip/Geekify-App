@@ -167,4 +167,59 @@ class QueueManagerTest {
 
         collectJob.cancel()
     }
+
+    @Test
+    fun `toggleShuffle advances through randomized order without repeating and untoggle preserves queue`() = runBlocking {
+        val store = FakePreferencesDataStore()
+        val manager = QueueManager(store, Dispatchers.Unconfined, debounceMs = 0L)
+        manager.awaitLoaded()
+
+        val originalTracks = listOf(track("s1"), track("s2"), track("s3"), track("s4"), track("s5"))
+        manager.play(track("s3"), originalTracks)
+        assertEquals("s3", manager.state.value.current?.videoId)
+
+        // Turn shuffle ON
+        manager.toggleShuffle()
+        assertTrue(manager.state.value.shuffle)
+        assertEquals("s3", manager.state.value.current?.videoId)
+        assertEquals(listOf("s1", "s2", "s3", "s4", "s5"), manager.state.value.queue.map { it.videoId })
+
+        // Advance through all remaining songs
+        val playedInShuffle = mutableListOf<String>()
+        playedInShuffle.add(manager.state.value.current!!.videoId)
+        repeat(4) {
+            manager.next()
+            playedInShuffle.add(manager.state.value.current!!.videoId)
+        }
+
+        // All 5 songs played exactly once
+        assertEquals(5, playedInShuffle.size)
+        assertEquals(5, playedInShuffle.distinct().size)
+        assertTrue(playedInShuffle.containsAll(listOf("s1", "s2", "s3", "s4", "s5")))
+
+        // Previous walks backwards through the shuffle sequence
+        manager.previous(progressSeconds = 0)
+        assertEquals(playedInShuffle[3], manager.state.value.current?.videoId)
+
+        // Turn shuffle OFF -> Queue remains original order
+        manager.toggleShuffle()
+        assertFalse(manager.state.value.shuffle)
+        assertEquals(listOf("s1", "s2", "s3", "s4", "s5"), manager.state.value.queue.map { it.videoId })
+    }
+
+    @Test
+    fun `playShuffled initializes queue with random track and shuffle mode true`() = runBlocking {
+        val store = FakePreferencesDataStore()
+        val manager = QueueManager(store, Dispatchers.Unconfined, debounceMs = 0L)
+        manager.awaitLoaded()
+
+        val tracks = listOf(track("a1"), track("a2"), track("a3"), track("a4"))
+        manager.playShuffled(tracks)
+
+        val state = manager.state.value
+        assertTrue(state.shuffle)
+        assertTrue(state.index in tracks.indices)
+        assertEquals(4, state.queue.size)
+        assertEquals(tracks[state.index], state.current)
+    }
 }

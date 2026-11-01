@@ -90,6 +90,8 @@ class QueueManager(
 
     @Volatile private var isLoaded = false
     private val preLoadMutations = mutableListOf<() -> Unit>()
+    private var shuffleOrder: List<Int>? = null
+    private var shufflePointer: Int = 0
 
     @Volatile private var dirtyQueue = false
     @Volatile private var dirtyModes = false
@@ -233,9 +235,18 @@ class QueueManager(
     }
 
     fun play(track: Track, queue: List<Track> = emptyList()) = runWhenLoaded {
+        shuffleOrder = null
+        shufflePointer = 0
         val old = _state.value
         val q = queue.ifEmpty { listOf(track) }
         val idx = maxOf(0, q.indexOfFirst { it.videoId == track.videoId })
+        if (old.shuffle && q.size > 1) {
+            val indices = q.indices.toMutableList()
+            indices.remove(idx)
+            indices.shuffle()
+            shuffleOrder = listOf(idx) + indices
+            shufflePointer = 0
+        }
         // Preserve explanations when a user selects a song from the existing queue; a new library/search
         // queue starts clean so old recommendations cannot leak into unrelated tracks.
         val sameQueue = old.queue.map { it.videoId } == q.map { it.videoId }
@@ -255,15 +266,20 @@ class QueueManager(
         )
     }
 
-    /** Starts [tracks] from a random song with shuffle switched on. */
+    /** Starts [tracks] from a random song with shuffle switched on and true randomized permutation. */
     fun playShuffled(tracks: List<Track>) = runWhenLoaded {
         if (tracks.isEmpty()) return@runWhenLoaded
-        val idx = tracks.indices.random()
+        val firstIndex = tracks.indices.random()
+        val indices = tracks.indices.toMutableList()
+        indices.remove(firstIndex)
+        indices.shuffle()
+        shuffleOrder = listOf(firstIndex) + indices
+        shufflePointer = 0
         resetPosition(0L)
         update(
             _state.value.copy(
                 queue = tracks,
-                index = idx,
+                index = firstIndex,
                 isPlaying = true,
                 isBuffering = true,
                 shuffle = true,
@@ -375,9 +391,28 @@ class QueueManager(
         }
         val next = when {
             s.shuffle && s.queue.size > 1 -> {
-                var n: Int
-                do { n = (s.queue.indices).random() } while (n == s.index)
-                n
+                val order = shuffleOrder ?: run {
+                    val ind = s.queue.indices.toMutableList()
+                    ind.remove(s.index)
+                    ind.shuffle()
+                    val gen = listOf(s.index) + ind
+                    shuffleOrder = gen
+                    shufflePointer = 0
+                    gen
+                }
+                if (shufflePointer + 1 < order.size) {
+                    shufflePointer++
+                    order[shufflePointer]
+                } else if (s.repeat == RepeatMode.ALL) {
+                    val ind = s.queue.indices.toMutableList()
+                    ind.shuffle()
+                    shuffleOrder = ind
+                    shufflePointer = 0
+                    ind[0]
+                } else {
+                    _state.value = s.copy(isPlaying = false)
+                    return@runWhenLoaded
+                }
             }
             s.index + 1 < s.queue.size -> s.index + 1
             s.repeat == RepeatMode.ALL -> 0
@@ -416,6 +451,25 @@ class QueueManager(
                 seekTo(0)
                 return@runWhenLoaded
             }
+            if (s.shuffle && s.queue.size > 1 && shuffleOrder != null && shufflePointer > 0) {
+                shufflePointer--
+                val prev = shuffleOrder!![shufflePointer]
+                resetPosition(0L)
+                update(
+                    s.copy(
+                        index = prev,
+                        isPlaying = true,
+                        isBuffering = true,
+                        error = null,
+                        skipDirection = -1,
+                        tonearmTransitionPending = tonearmSyncEnabled
+                    ),
+                    queueChanged = true,
+                    progressChanged = true
+                )
+                moved = true
+                return@runWhenLoaded
+            }
             if (s.index <= 0) {
                 // Already on the first song: restart it in place (a same-index "load" would never run
                 // and would leave the buffering spinner stuck).
@@ -442,8 +496,20 @@ class QueueManager(
     }
 
     fun toggleShuffle() = runWhenLoaded {
+        val s = _state.value
+        val willBeShuffle = !s.shuffle
+        if (willBeShuffle && s.queue.size > 1) {
+            val indices = s.queue.indices.toMutableList()
+            indices.remove(s.index)
+            indices.shuffle()
+            shuffleOrder = listOf(s.index) + indices
+            shufflePointer = 0
+        } else {
+            shuffleOrder = null
+            shufflePointer = 0
+        }
         update(
-            _state.value.copy(shuffle = !_state.value.shuffle),
+            s.copy(shuffle = willBeShuffle),
             modesChanged = true
         )
     }
