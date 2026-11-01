@@ -236,6 +236,13 @@ fun MainScreen(
     val floatingBarsHeight = with(LocalDensity.current) { floatingBarsHeightPx.toDp() }
     val scrollConnection = rememberFloatingTabBarScrollConnection(inlineBehavior = appSettingsState.navInlineBehavior)
 
+    // Settings has its own large, scrollable hierarchy and an in-content search field.
+    // Keep the shared dock compact only while this route is visible; restore the user's
+    // normal navigation behavior as soon as they leave Settings.
+    LaunchedEffect(currentRoute, scrollConnection) {
+        scrollConnection.setInlineLocked(currentRoute == Screen.Settings.route)
+    }
+
     var appliedDefaultTab by remember { mutableStateOf(false) }
     LaunchedEffect(appSettingsState.defaultTab) {
         if (!appliedDefaultTab) {

@@ -387,19 +387,11 @@ fun SettingsScreen(
                         scrollState = rootScrollState,
                         onBack = onBack,
                         maxContentWidth = 380.dp,
-                        bottomPadding = bottomInset + 104.dp,
-                        floatingBottomBar = {
-                            DockedSearchPill(
-                                query = searchQuery,
-                                onQueryChange = { searchQuery = it },
-                                modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .padding(bottom = bottomInset + 16.dp)
-                            )
-                        }
+                        bottomPadding = bottomInset + 32.dp
                     ) {
                         RootListBody(
                             searchQuery = searchQuery,
+                            onQueryChange = { searchQuery = it },
                             rootGroups = rootGroups,
                             searchRegistry = searchRegistry,
                             selectedSubPage = splitActivePage,
@@ -461,16 +453,7 @@ fun SettingsScreen(
                         title = "Settings",
                         scrollState = rootScrollState,
                         onBack = onBack,
-                        bottomPadding = bottomInset + 108.dp,
-                        floatingBottomBar = {
-                            DockedSearchPill(
-                                query = searchQuery,
-                                onQueryChange = { searchQuery = it },
-                                modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .padding(bottom = bottomInset + 16.dp)
-                            )
-                        }
+                        bottomPadding = bottomInset + 32.dp
                     ) {
                         AnimatedVisibility(visible = statusMessage != null) {
                             statusMessage?.let { msg ->
@@ -483,6 +466,7 @@ fun SettingsScreen(
 
                         RootListBody(
                             searchQuery = searchQuery,
+                            onQueryChange = { searchQuery = it },
                             rootGroups = rootGroups,
                             searchRegistry = searchRegistry,
                             selectedSubPage = null,
@@ -508,11 +492,20 @@ fun SettingsScreen(
 @Composable
 private fun RootListBody(
     searchQuery: String,
+    onQueryChange: (String) -> Unit,
     rootGroups: List<List<SettingsRootItem>>,
     searchRegistry: List<SearchableSettingEntry>,
     selectedSubPage: SettingsSubPage?,
     onClearSearch: () -> Unit
 ) {
+    // Keep settings search in the page's normal scroll flow. A docked overlay at the
+    // bottom competed with the app-wide mini-player/navigation dock and covered rows.
+    DockedSearchPill(
+        query = searchQuery,
+        onQueryChange = onQueryChange,
+        modifier = Modifier.padding(bottom = 22.dp)
+    )
+
     val trimmedQuery = searchQuery.trim()
     if (trimmedQuery.isEmpty()) {
         rootGroups.forEachIndexed { groupIdx, group ->

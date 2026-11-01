@@ -84,6 +84,13 @@ class FloatingTabBarScrollConnection(
         private set
 
     private var accumulatedScroll = 0f
+    private var inlineLocked = false
+
+    /** Keeps the dock compact on screens that need more unobstructed content space. */
+    fun setInlineLocked(locked: Boolean) {
+        inlineLocked = locked
+        if (locked) inline() else expand()
+    }
 
     fun expand() {
         isInline = false
@@ -96,7 +103,7 @@ class FloatingTabBarScrollConnection(
     }
 
     override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-        if (inlineBehavior == FloatingTabBarInlineBehavior.Never) return Offset.Zero
+        if (inlineLocked || inlineBehavior == FloatingTabBarInlineBehavior.Never) return Offset.Zero
 
         val scrollDelta = available.y
         if ((accumulatedScroll > 0 && scrollDelta < 0) || (accumulatedScroll < 0 && scrollDelta > 0)) {
@@ -134,7 +141,7 @@ class FloatingTabBarScrollConnection(
         available: Offset,
         source: NestedScrollSource
     ): Offset {
-        if (inlineBehavior == FloatingTabBarInlineBehavior.ExpandedAtTopOnly) {
+        if (!inlineLocked && inlineBehavior == FloatingTabBarInlineBehavior.ExpandedAtTopOnly) {
             if (available.y > 0.5f) {
                 if (isInline) {
                     isInline = false
