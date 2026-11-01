@@ -65,6 +65,9 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
 
     private val profilePrefs = context.getSharedPreferences("geekify_profile", Context.MODE_PRIVATE)
 
+    /** Synchronous Firebase session UID, available to WorkManager before the auth Flow listener emits. */
+    fun currentUid(): String? = auth.currentUser?.uid
+
     companion object {
         private val secureRandom = SecureRandom()
         private val jwtJson = Json { ignoreUnknownKeys = true }

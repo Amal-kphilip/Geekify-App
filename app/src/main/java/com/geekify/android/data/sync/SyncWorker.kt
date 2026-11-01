@@ -62,7 +62,6 @@ class SyncWorker(
                 .build()
             val request = OneTimeWorkRequestBuilder<SyncWorker>()
                 .setConstraints(constraints)
-                .setInitialDelay(15, TimeUnit.MINUTES)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 5, TimeUnit.MINUTES)
                 .build()
             runCatching {

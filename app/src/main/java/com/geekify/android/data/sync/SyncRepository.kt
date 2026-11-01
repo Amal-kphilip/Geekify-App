@@ -14,12 +14,16 @@ import com.geekify.android.data.auth.AuthRepository
 import com.geekify.android.data.auth.SyncState
 import com.geekify.android.data.local.HistoryRepository
 import com.geekify.android.data.local.LibraryRepository
+import com.geekify.android.data.local.ListeningSessionEntity
+import com.geekify.android.data.local.ListeningStatsRepository
 import com.geekify.android.data.local.LocalPlaylist
 import com.geekify.android.data.local.SavedCollection
 import com.geekify.android.data.model.ArtistRef
 import com.geekify.android.data.model.Thumbnail
 import com.geekify.android.data.model.Track
 import com.google.firebase.firestore.SetOptions
+import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -58,6 +62,7 @@ class SyncRepository @Inject constructor(
     private val auth: AuthRepository,
     private val library: LibraryRepository,
     private val history: HistoryRepository,
+    private val listeningStats: ListeningStatsRepository,
     private val dataStore: DataStore<Preferences>
 ) {
     companion object {
@@ -90,6 +95,25 @@ class SyncRepository @Inject constructor(
                 .groupBy { it.first.videoId }
                 .map { (_, entries) -> entries.maxByOrNull { it.second }!! }
                 .sortedByDescending { it.second }
+
+        /** Merge durable listening checkpoints by session ID, retaining the newest checkpoint. */
+        fun mergeSessions(
+            first: List<ListeningSessionEntity>,
+            second: List<ListeningSessionEntity>
+        ): List<ListeningSessionEntity> = (first + second)
+            .filter { it.sessionId.isNotBlank() && it.videoId.isNotBlank() }
+            .groupBy { it.sessionId }
+            .map { (_, entries) ->
+                val newest = entries.maxByOrNull { it.updatedAt }!!
+                newest.copy(
+                    listenedMs = entries.maxOf { it.listenedMs },
+                    completed = entries.any { it.completed },
+                    skipped = entries.any { it.skipped },
+                    updatedAt = entries.maxOf { it.updatedAt }
+                )
+            }
+            .sortedByDescending { it.startedAt }
+            .take(5_000)
 
         fun mergePlaylists(local: List<LocalPlaylist>, cloud: List<LocalPlaylist>): List<LocalPlaylist> {
             val byId = cloud.associateBy { it.id }.toMutableMap()
@@ -137,6 +161,7 @@ class SyncRepository @Inject constructor(
                     playlists = mergePlaylists(local.playlists, cloud.playlists),
                     history = mergeHistory(local.history, cloud.history).take(MAX_HISTORY),
                     saved = mergeSaved(local.saved.orEmpty(), cloud.saved.orEmpty()),
+                    sessions = mergeSessions(local.sessions, cloud.sessions),
                     updatedAt = maxOf(localModifiedAt, cloud.updatedAt, System.currentTimeMillis())
                 )
                 return SyncResolution(
@@ -149,11 +174,17 @@ class SyncRepository @Inject constructor(
                 playlists = cloud.playlists,
                 history = mergeHistory(local.history, cloud.history).take(MAX_HISTORY),
                 saved = cloud.saved,
+                sessions = mergeSessions(local.sessions, cloud.sessions),
                 updatedAt = cloud.updatedAt
             )
+            val cloudSessionsById = cloud.sessions.associateBy { it.sessionId }
+            val localHasNewSessions = local.sessions.any { localSession ->
+                val cloudSession = cloudSessionsById[localSession.sessionId]
+                cloudSession == null || localSession.updatedAt > cloudSession.updatedAt
+            }
             return SyncResolution(
                 dataToApply = applied,
-                shouldPushToCloud = false
+                shouldPushToCloud = localHasNewSessions
             )
         }
     }
@@ -163,6 +194,7 @@ class SyncRepository @Inject constructor(
         val playlists: List<LocalPlaylist>,
         val history: List<Pair<Track, Long>>,
         val saved: List<SavedCollection>?,
+        val sessions: List<ListeningSessionEntity> = emptyList(),
         val updatedAt: Long = 0L
     )
 
@@ -179,6 +211,8 @@ class SyncRepository @Inject constructor(
 
     private val _syncState = MutableStateFlow(SyncState.IDLE)
     val syncState: StateFlow<SyncState> = _syncState.asStateFlow()
+    private val _syncError = MutableStateFlow<String?>(null)
+    val syncError: StateFlow<String?> = _syncError.asStateFlow()
 
     @Volatile private var activeUid: String? = null
     @Volatile private var pushJob: Job? = null
@@ -202,6 +236,7 @@ class SyncRepository @Inject constructor(
                     val uid = activeUid ?: auth.user.value?.uid
                     if (uid != null && _syncState.value != SyncState.SYNCING && _syncState.value != SyncState.SAVED) {
                         _syncState.value = SyncState.OFFLINE
+                        _syncError.value = null
                     }
                 }
             })
@@ -212,11 +247,13 @@ class SyncRepository @Inject constructor(
         val cm = connectivityManager ?: return true
         val active = cm.activeNetwork ?: return false
         val caps = cm.getNetworkCapabilities(active) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
 
     private fun onConnectivityRestored() {
-        val uid = activeUid ?: auth.user.value?.uid ?: return
+        val uid = auth.currentUid() ?: auth.user.value?.uid ?: activeUid ?: return
+        activeUid = uid
         if (_syncState.value == SyncState.OFFLINE) {
             scope.launch {
                 flushPendingSync(isBackgroundWorker = true)
@@ -290,8 +327,44 @@ class SyncRepository @Inject constructor(
         playlists = library.playlistsOnce(),
         history = history.allTimed(),
         saved = library.savedCollectionsOnce(),
+        sessions = listeningStats.latest(5_000),
         updatedAt = System.currentTimeMillis()
     )
+
+    private fun ListeningSessionEntity.toMap(): Map<String, Any?> = mapOf(
+        "sessionId" to sessionId,
+        "videoId" to videoId,
+        "title" to title,
+        "artist" to artist,
+        "artists" to artists.map { mapOf("name" to it.name, "id" to it.id) },
+        "listenedMs" to listenedMs,
+        "durationMs" to durationMs,
+        "startedAt" to startedAt,
+        "updatedAt" to updatedAt,
+        "completed" to completed,
+        "skipped" to skipped
+    )
+
+    @Suppress("UNCHECKED_CAST")
+    private fun Map<String, Any?>.toListeningSession(): ListeningSessionEntity? {
+        val id = get("sessionId") as? String ?: return null
+        val videoId = get("videoId") as? String ?: return null
+        return ListeningSessionEntity(
+            sessionId = id,
+            videoId = videoId,
+            title = get("title") as? String ?: "",
+            artist = get("artist") as? String ?: "",
+            artists = (get("artists") as? List<Map<String, Any?>>)?.map {
+                ArtistRef(it["name"] as? String ?: "", it["id"] as? String)
+            } ?: emptyList(),
+            listenedMs = (get("listenedMs") as? Number)?.toLong() ?: 0L,
+            durationMs = (get("durationMs") as? Number)?.toLong() ?: 0L,
+            startedAt = (get("startedAt") as? Number)?.toLong() ?: 0L,
+            updatedAt = (get("updatedAt") as? Number)?.toLong() ?: 0L,
+            completed = get("completed") as? Boolean ?: false,
+            skipped = get("skipped") as? Boolean ?: false
+        )
+    }
 
     private suspend fun markLocalDirty(now: Long = System.currentTimeMillis()) {
         dataStore.edit { prefs ->
@@ -301,6 +374,7 @@ class SyncRepository @Inject constructor(
     }
 
     private suspend fun markSyncClean(uid: String, syncedAt: Long) {
+        _syncError.value = null
         dataStore.edit { prefs ->
             prefs[KEY_LAST_UID] = uid
             prefs[KEY_SYNC_DIRTY] = false
@@ -309,17 +383,37 @@ class SyncRepository @Inject constructor(
         SyncWorker.cancel(context)
     }
 
+    private fun syncFailureMessage(error: Exception): String = when (error) {
+        is FirebaseFirestoreException -> when (error.code) {
+            FirebaseFirestoreException.Code.PERMISSION_DENIED ->
+                "Firebase denied the sync request. Deploy the latest firestore.rules and verify the signed-in account."
+            FirebaseFirestoreException.Code.UNAUTHENTICATED ->
+                "Your Firebase session expired. Sign in again to resume cloud sync."
+            FirebaseFirestoreException.Code.UNAVAILABLE,
+            FirebaseFirestoreException.Code.DEADLINE_EXCEEDED ->
+                "The sync service is temporarily unavailable. Check your connection and retry."
+            else -> "Cloud sync failed (${error.code.name}). Tap to retry."
+        }
+        else -> "Cloud sync failed. Check your connection and Firebase configuration, then tap to retry."
+    }
+
     // ---- Core operations ----
 
     suspend fun startSync(uid: String) {
         stopSync()
+        if (auth.currentUid() != uid) {
+            _syncState.value = SyncState.IDLE
+            return
+        }
         activeUid = uid
         if (!isNetworkConnected()) {
             _syncState.value = SyncState.OFFLINE
+            _syncError.value = null
             markLocalDirty()
             SyncWorker.enqueue(context)
             return
         }
+        _syncError.value = null
         _syncState.value = SyncState.SYNCING
         syncMutex.withLock {
             try {
@@ -345,7 +439,7 @@ class SyncRepository @Inject constructor(
                 dataStore.edit { it[KEY_LAST_UID] = uid }
                 lastPull = System.currentTimeMillis()
                 if (resolution.shouldPushToCloud) {
-                    writeNowLocked(uid)
+                    writeNowLocked(uid, cloudSessions = cloud?.sessions.orEmpty())
                 } else {
                     markSyncClean(uid, maxOf(lastPull, cloud?.updatedAt ?: 0L))
                     _syncState.value = SyncState.SAVED
@@ -357,8 +451,10 @@ class SyncRepository @Inject constructor(
                 activeUid = uid
                 if (!isNetworkConnected()) {
                     _syncState.value = SyncState.OFFLINE
+                    _syncError.value = null
                 } else {
                     _syncState.value = SyncState.ERROR
+                    _syncError.value = syncFailureMessage(e)
                 }
                 markLocalDirty()
                 SyncWorker.enqueue(context)
@@ -377,7 +473,7 @@ class SyncRepository @Inject constructor(
 
     fun schedulePush() {
         if (applying) return
-        val uid = activeUid ?: auth.user.value?.uid ?: return
+        val uid = auth.currentUid() ?: auth.user.value?.uid ?: activeUid ?: return
         activeUid = uid
         synchronized(jobLock) {
             pushJob?.cancel()
@@ -403,7 +499,7 @@ class SyncRepository @Inject constructor(
      */
     fun pushNow() {
         if (applying) return
-        val uid = activeUid ?: auth.user.value?.uid ?: return
+        val uid = auth.currentUid() ?: auth.user.value?.uid ?: activeUid ?: return
         activeUid = uid
         synchronized(jobLock) {
             pushJob?.cancel()
@@ -429,7 +525,7 @@ class SyncRepository @Inject constructor(
     /** Called by [SyncWorker] or connectivity callback when network connectivity returns. */
     suspend fun flushPendingSync(isBackgroundWorker: Boolean = false): Boolean = syncMutex.withLock {
         // Only attempt cloud sync when an authenticated user session is active
-        val uid = activeUid ?: auth.user.value?.uid ?: return@withLock true
+        val uid = auth.currentUid() ?: auth.user.value?.uid ?: return@withLock true
         activeUid = uid
         val prefs = dataStore.data.first()
         val isDirty = prefs[KEY_SYNC_DIRTY] == true
@@ -437,6 +533,7 @@ class SyncRepository @Inject constructor(
         val lastSyncedAt = prefs[KEY_LAST_SYNCED_AT] ?: 0L
 
         if (!isNetworkConnected()) {
+            _syncError.value = null
             if (!isBackgroundWorker) {
                 _syncState.value = SyncState.OFFLINE
             }
@@ -445,6 +542,8 @@ class SyncRepository @Inject constructor(
 
         if (!isDirty && localModifiedAt <= lastSyncedAt) {
             if (_syncState.value == SyncState.ERROR || _syncState.value == SyncState.OFFLINE) {
+                // A failed session upload is also represented by the dirty flag; this branch
+                // is only reached after the library and all pending session writes are clean.
                 _syncState.value = SyncState.SAVED
             }
             return@withLock true
@@ -462,7 +561,11 @@ class SyncRepository @Inject constructor(
                 lastSyncedAt = lastSyncedAt
             )
             resolution.dataToApply?.let { applyCloud(it) }
-            val writeSuccess = writeNowLocked(uid, showSyncingState = !isBackgroundWorker && _syncState.value != SyncState.ERROR)
+            val writeSuccess = writeNowLocked(
+                uid,
+                showSyncingState = !isBackgroundWorker && _syncState.value != SyncState.ERROR,
+                cloudSessions = cloud?.sessions.orEmpty()
+            )
             if (writeSuccess) {
                 _syncState.value = SyncState.SAVED
             }
@@ -473,8 +576,10 @@ class SyncRepository @Inject constructor(
             Timber.w(e, "SyncRepository: flushPendingSync failed for uid: $uid")
             if (!isNetworkConnected()) {
                 _syncState.value = SyncState.OFFLINE
-            } else if (!isBackgroundWorker) {
+                _syncError.value = null
+            } else {
                 _syncState.value = SyncState.ERROR
+                _syncError.value = syncFailureMessage(e)
             }
             false
         }
@@ -482,9 +587,10 @@ class SyncRepository @Inject constructor(
 
     /** Call on app foreground. */
     fun onForeground() {
-        val uid = activeUid ?: auth.user.value?.uid ?: return
+        val uid = auth.currentUid() ?: auth.user.value?.uid ?: return
         activeUid = uid
         if (!isNetworkConnected()) {
+            _syncError.value = null
             if (_syncState.value != SyncState.SAVED) {
                 _syncState.value = SyncState.OFFLINE
             }
@@ -513,22 +619,37 @@ class SyncRepository @Inject constructor(
                             lastSyncedAt = lastSyncedAt
                         )
                         resolution.dataToApply?.let { applyCloud(it) }
-                        writeNowLocked(uid)
+                        writeNowLocked(uid, cloudSessions = cloud?.sessions.orEmpty())
                     } else if (cloud != null) {
-                        applyCloud(cloud)
-                        markSyncClean(uid, maxOf(System.currentTimeMillis(), cloud.updatedAt))
-                        _syncState.value = SyncState.SAVED
+                        val local = snapshotLocalData()
+                        val resolution = resolveSyncData(
+                            local = local,
+                            cloud = cloud,
+                            firstTime = false,
+                            localDirty = false,
+                            localModifiedAt = localModifiedAt,
+                            lastSyncedAt = lastSyncedAt
+                        )
+                        resolution.dataToApply?.let { applyCloud(it) }
+                        if (resolution.shouldPushToCloud) {
+                            writeNowLocked(uid, cloudSessions = cloud.sessions)
+                        } else {
+                            markSyncClean(uid, maxOf(System.currentTimeMillis(), cloud.updatedAt))
+                            _syncState.value = SyncState.SAVED
+                        }
                     } else {
-                        _syncState.value = SyncState.SAVED
+                        // A missing cloud document is not proof that sync completed. Publish the
+                        // current local snapshot so newly-created accounts and recovered cloud
+                        // documents are backed up rather than reported as already saved.
+                        writeNowLocked(uid, cloudSessions = emptyList())
                     }
                     lastPull = System.currentTimeMillis()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
                     Timber.w(e, "SyncRepository: onForeground sync failed for uid: $uid")
-                    if (!isNetworkConnected()) {
-                        _syncState.value = SyncState.OFFLINE
-                    }
+                    _syncState.value = if (isNetworkConnected()) SyncState.ERROR else SyncState.OFFLINE
+                    _syncError.value = if (isNetworkConnected()) syncFailureMessage(e) else null
                 }
             }
         }
@@ -540,21 +661,23 @@ class SyncRepository @Inject constructor(
         SyncWorker.cancel(context)
         syncMutex.withLock {
             val userDoc = db.collection("users").document(uid)
-            runCatching {
-                val playlistDocs = userDoc.collection("playlists").get().await()
-                for (chunk in playlistDocs.documents.chunked(FIRESTORE_BATCH_LIMIT)) {
-                    val batch = db.batch()
-                    chunk.forEach { batch.delete(it.reference) }
-                    batch.commit().await()
-                }
+            val playlistDocs = userDoc.collection("playlists").get().await()
+            for (chunk in playlistDocs.documents.chunked(FIRESTORE_BATCH_LIMIT)) {
+                val batch = db.batch()
+                chunk.forEach { batch.delete(it.reference) }
+                batch.commit().await()
             }
-            runCatching {
-                val likedDocs = userDoc.collection("liked_chunks").get().await()
-                for (chunk in likedDocs.documents.chunked(FIRESTORE_BATCH_LIMIT)) {
-                    val batch = db.batch()
-                    chunk.forEach { batch.delete(it.reference) }
-                    batch.commit().await()
-                }
+            val likedDocs = userDoc.collection("liked_chunks").get().await()
+            for (chunk in likedDocs.documents.chunked(FIRESTORE_BATCH_LIMIT)) {
+                val batch = db.batch()
+                chunk.forEach { batch.delete(it.reference) }
+                batch.commit().await()
+            }
+            val sessionDocs = userDoc.collection("listening_sessions").get().await()
+            for (chunk in sessionDocs.documents.chunked(FIRESTORE_BATCH_LIMIT)) {
+                val batch = db.batch()
+                chunk.forEach { batch.delete(it.reference) }
+                batch.commit().await()
             }
             userDoc.delete().await()
         }
@@ -564,21 +687,62 @@ class SyncRepository @Inject constructor(
     suspend fun resumeSync(uid: String) = startSync(uid)
 
     suspend fun signOutAndClear() {
-        val uid = activeUid
+        val uid = auth.currentUid() ?: auth.user.value?.uid ?: activeUid
         synchronized(jobLock) {
             pushJob?.cancel()
             pushJob = null
         }
         if (uid != null) {
-            syncMutex.withLock {
-                runCatching { writeNowLocked(uid) }
+            val backupSucceeded = syncMutex.withLock {
+                // Reconcile first so signing out from a device with an older local snapshot cannot
+                // delete playlists or liked tracks that were added from another device.
+                val prefs = dataStore.data.first()
+                val cloud = pull(uid)
+                val local = snapshotLocalData()
+                val lastUid = prefs[KEY_LAST_UID]
+                val firstTime = lastUid != uid
+                val localDirty = prefs[KEY_SYNC_DIRTY] == true && !firstTime
+                val localModifiedAt = if (firstTime) 0L else (prefs[KEY_LOCAL_MODIFIED_AT] ?: 0L)
+                val lastSyncedAt = if (firstTime) 0L else (prefs[KEY_LAST_SYNCED_AT] ?: 0L)
+                val resolution = resolveSyncData(
+                    local = local,
+                    cloud = cloud,
+                    firstTime = firstTime,
+                    localDirty = localDirty,
+                    localModifiedAt = localModifiedAt,
+                    lastSyncedAt = lastSyncedAt
+                )
+                resolution.dataToApply?.let { applyCloud(it) }
+                if (resolution.shouldPushToCloud) {
+                    writeNowLocked(uid, showSyncingState = true, cloudSessions = cloud?.sessions.orEmpty())
+                } else {
+                    markSyncClean(uid, maxOf(System.currentTimeMillis(), cloud?.updatedAt ?: 0L))
+                    _syncState.value = SyncState.SAVED
+                    true
+                }
+            }
+            if (!backupSucceeded) {
+                throw IllegalStateException(
+                    "Geekify couldn't back up your latest library. You're still signed in and your data is safe on this device. Check your connection and retry."
+                )
             }
         }
+        clearLocalAndSignOut()
+    }
+
+    /** Used only after the account and its cloud data have already been successfully deleted. */
+    suspend fun clearAfterAccountDeletion() {
+        clearLocalAndSignOut()
+    }
+
+    private suspend fun clearLocalAndSignOut() {
         stopSync()
         SyncWorker.cancel(context)
         auth.signOut()
+        _syncError.value = null
         applyCloud(CloudData(emptyList(), emptyList(), emptyList(), emptyList()), wipeHistory = true)
         history.clearStats()
+        listeningStats.clear()
         dataStore.edit {
             it.remove(KEY_LAST_UID)
             it.remove(KEY_SYNC_DIRTY)
@@ -589,17 +753,49 @@ class SyncRepository @Inject constructor(
 
     /** Manually triggers synchronization for the currently active user session. */
     fun retrySync() {
-        val uid = activeUid ?: auth.user.value?.uid ?: return
+        val uid = auth.currentUid() ?: auth.user.value?.uid ?: activeUid ?: return
         if (_syncState.value == SyncState.SYNCING) return
         scope.launch {
             startSync(uid)
         }
     }
 
-    private suspend fun writeNowLocked(uid: String, showSyncingState: Boolean = true): Boolean {
+    /** Persists a finished listening session without rewriting the entire library. */
+    suspend fun pushSession(session: ListeningSessionEntity) = syncMutex.withLock {
+        val uid = auth.currentUid() ?: auth.user.value?.uid ?: activeUid ?: return@withLock
+        activeUid = uid
         if (!isNetworkConnected()) {
             markLocalDirty()
             _syncState.value = SyncState.OFFLINE
+            _syncError.value = null
+            SyncWorker.enqueue(context)
+            return@withLock
+        }
+        try {
+            db.collection("users").document(uid)
+                .collection("listening_sessions").document(session.sessionId)
+                .set(session.toMap())
+                .await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Timber.w(e, "SyncRepository: failed to upload listening session ${session.sessionId}")
+            markLocalDirty()
+            _syncState.value = if (isNetworkConnected()) SyncState.ERROR else SyncState.OFFLINE
+            _syncError.value = if (isNetworkConnected()) syncFailureMessage(e) else null
+            SyncWorker.enqueue(context)
+        }
+    }
+
+    private suspend fun writeNowLocked(
+        uid: String,
+        showSyncingState: Boolean = true,
+        cloudSessions: List<ListeningSessionEntity>? = null
+    ): Boolean {
+        if (!isNetworkConnected()) {
+            markLocalDirty()
+            _syncState.value = SyncState.OFFLINE
+            _syncError.value = null
             SyncWorker.enqueue(context)
             return false
         }
@@ -617,7 +813,7 @@ class SyncRepository @Inject constructor(
 
             // 1. Sync per-playlist documents in users/{uid}/playlists/{playlistId}
             val playlistsCol = userRef.collection("playlists")
-            val existingPlaylistDocs = runCatching { playlistsCol.get().await().documents }.getOrDefault(emptyList())
+            val existingPlaylistDocs = playlistsCol.get().await().documents
             val currentPlaylistIds = playlists.map { it.id }.toSet()
             val playlistOps = mutableListOf<(com.google.firebase.firestore.WriteBatch) -> Unit>()
             for (pl in playlists) {
@@ -638,7 +834,7 @@ class SyncRepository @Inject constructor(
 
             // 2. Sync liked tracks in chunked documents users/{uid}/liked_chunks/chunk_{i}
             val likedCol = userRef.collection("liked_chunks")
-            val existingLikedDocs = runCatching { likedCol.get().await().documents }.getOrDefault(emptyList())
+            val existingLikedDocs = likedCol.get().await().documents
             val likedChunks = likedTracks.chunked(LIKED_CHUNK_SIZE)
             val expectedChunkIds = likedChunks.indices.map { "chunk_$it" }.toSet()
             val likedOps = mutableListOf<(com.google.firebase.firestore.WriteBatch) -> Unit>()
@@ -660,6 +856,27 @@ class SyncRepository @Inject constructor(
                 val batch = db.batch()
                 chunk.forEach { it(batch) }
                 batch.commit().await()
+            }
+
+            // During reconciliation, upload only local sessions that are absent from the cloud
+            // or have a newer checkpoint. Routine library pushes avoid rewriting session history.
+            if (cloudSessions != null) {
+                val localSessions = listeningStats.latest(5_000)
+                val cloudById = cloudSessions.associateBy { it.sessionId }
+                val changedSessions = localSessions.filter { localSession ->
+                    val remote = cloudById[localSession.sessionId]
+                    remote == null || localSession.updatedAt > remote.updatedAt
+                }
+                for (chunk in changedSessions.chunked(FIRESTORE_BATCH_LIMIT)) {
+                    val batch = db.batch()
+                    chunk.forEach { session ->
+                        batch.set(
+                            userRef.collection("listening_sessions").document(session.sessionId),
+                            session.toMap()
+                        )
+                    }
+                    batch.commit().await()
+                }
             }
 
             // 3. Write root user document (keeps inline liked/playlists when under safe size for legacy compatibility)
@@ -691,8 +908,10 @@ class SyncRepository @Inject constructor(
             markLocalDirty()
             if (!isNetworkConnected()) {
                 _syncState.value = SyncState.OFFLINE
+                _syncError.value = null
             } else {
                 _syncState.value = SyncState.ERROR
+                _syncError.value = syncFailureMessage(e)
             }
             if (showSyncingState) {
                 SyncWorker.enqueue(context)
@@ -705,10 +924,17 @@ class SyncRepository @Inject constructor(
     private suspend fun pull(uid: String): CloudData? {
         val userRef = db.collection("users").document(uid)
         val snap = userRef.get().await()
-        val subPlaylistsSnap = runCatching { userRef.collection("playlists").get().await() }.getOrNull()
-        val subLikedSnap = runCatching { userRef.collection("liked_chunks").get().await() }.getOrNull()
+        // A failed subcollection read must fail the sync. Treating permission/network errors as
+        // empty data can otherwise make the device overwrite a valid cloud library with empties.
+        val subPlaylistsSnap = userRef.collection("playlists").get().await()
+        val subLikedSnap = userRef.collection("liked_chunks").get().await()
+        val subSessionsSnap = userRef.collection("listening_sessions")
+            .orderBy("startedAt", Query.Direction.DESCENDING)
+            .limit(5_000)
+            .get()
+            .await()
 
-        if (!snap.exists() && (subPlaylistsSnap == null || subPlaylistsSnap.isEmpty) && (subLikedSnap == null || subLikedSnap.isEmpty)) {
+        if (!snap.exists() && subPlaylistsSnap.isEmpty && subLikedSnap.isEmpty && subSessionsSnap.isEmpty) {
             return null
         }
 
@@ -716,20 +942,18 @@ class SyncRepository @Inject constructor(
         val updatedAt = (data["updatedAt"] as? Long) ?: 0L
 
         val legacyLiked = (data["liked"] as? List<Map<String, Any?>>)?.mapNotNull { it.toTrack() }.orEmpty()
-        val chunkedLiked = subLikedSnap?.documents
-            ?.sortedBy { (it.getLong("index") ?: 0L).toInt() }
-            ?.flatMap { doc ->
+        val chunkedLiked = subLikedSnap.documents
+            .sortedBy { (it.getLong("index") ?: 0L).toInt() }
+            .flatMap { doc ->
                 val rawList = doc.get("tracks") as? List<Map<String, Any?>>
                 rawList?.mapNotNull { it.toTrack() }.orEmpty()
             }
-            .orEmpty()
         val liked = if (chunkedLiked.isNotEmpty()) mergeTracks(chunkedLiked, legacyLiked) else legacyLiked
 
         val legacyPlaylists = (data["playlists"] as? List<Map<String, Any?>>)?.mapNotNull { it.toLocalPlaylist() }.orEmpty()
-        val subPlaylists = subPlaylistsSnap?.documents
-            ?.mapNotNull { doc -> doc.data?.toLocalPlaylist() }
-            ?.sortedByDescending { it.createdAt }
-            .orEmpty()
+        val subPlaylists = subPlaylistsSnap.documents
+            .mapNotNull { doc -> doc.data?.toLocalPlaylist() }
+            .sortedByDescending { it.createdAt }
         val pls = if (subPlaylists.isNotEmpty()) mergePlaylists(subPlaylists, legacyPlaylists) else legacyPlaylists
 
         val hist = (data["history"] as? List<Map<String, Any?>>)?.mapNotNull { row ->
@@ -738,7 +962,8 @@ class SyncRepository @Inject constructor(
 
         // null = this account's cloud copy predates the feature: keep whatever is saved on the phone.
         val saved = (data["savedCollections"] as? List<Map<String, Any?>>)?.mapNotNull { it.toSavedCollection() }
-        return CloudData(liked, pls, hist, saved, updatedAt)
+        val sessions = subSessionsSnap.documents.mapNotNull { it.data?.toListeningSession() }
+        return CloudData(liked, pls, hist, saved, sessions, updatedAt)
     }
 
     /**
@@ -753,6 +978,7 @@ class SyncRepository @Inject constructor(
             val mergedHistory = if (wipeHistory) cloud.history else mergeHistory(history.allTimed(), cloud.history)
             history.replaceAllTimed(mergedHistory.take(MAX_HISTORY))
             cloud.saved?.let { library.replaceAllSavedCollections(it) }
+            listeningStats.mergeSessions(cloud.sessions)
         } finally {
             applying = false
         }

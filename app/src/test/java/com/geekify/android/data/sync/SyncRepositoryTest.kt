@@ -1,6 +1,7 @@
 package com.geekify.android.data.sync
 
 import com.geekify.android.data.local.LocalPlaylist
+import com.geekify.android.data.local.ListeningSessionEntity
 import com.geekify.android.data.local.SavedCollection
 import com.geekify.android.data.model.Track
 import org.junit.Assert.assertEquals
@@ -106,6 +107,71 @@ class SyncRepositoryTest {
 
         assertTrue(resolution.shouldPushToCloud)
         assertEquals(null, resolution.dataToApply)
+    }
+
+    @Test
+    fun listeningSessionsMergeByIdAndKeepNewestCheckpoint() {
+        val earlier = ListeningSessionEntity(
+            sessionId = "session-1",
+            videoId = "vid_a",
+            title = "Song A",
+            artist = "Artist A",
+            listenedMs = 15_000L,
+            durationMs = 180_000L,
+            startedAt = 1_000L,
+            updatedAt = 2_000L
+        )
+        val newer = earlier.copy(
+            listenedMs = 30_000L,
+            updatedAt = 3_000L,
+            completed = true
+        )
+
+        val merged = SyncRepository.mergeSessions(listOf(earlier), listOf(newer))
+
+        assertEquals(1, merged.size)
+        assertEquals(30_000L, merged.single().listenedMs)
+        assertEquals(3_000L, merged.single().updatedAt)
+        assertTrue(merged.single().completed)
+    }
+
+    @Test
+    fun cleanLibraryStillPushesListeningSessionsMissingFromCloud() {
+        val localSession = ListeningSessionEntity(
+            sessionId = "local-session",
+            videoId = "vid_a",
+            title = "Song A",
+            artist = "Artist A",
+            listenedMs = 15_000L,
+            durationMs = 180_000L,
+            startedAt = 1_000L,
+            updatedAt = 2_000L
+        )
+        val local = SyncRepository.CloudData(
+            liked = emptyList(),
+            playlists = emptyList(),
+            history = emptyList(),
+            saved = emptyList(),
+            sessions = listOf(localSession)
+        )
+        val cloud = SyncRepository.CloudData(
+            liked = emptyList(),
+            playlists = emptyList(),
+            history = emptyList(),
+            saved = emptyList()
+        )
+
+        val resolution = SyncRepository.resolveSyncData(
+            local = local,
+            cloud = cloud,
+            firstTime = false,
+            localDirty = false,
+            localModifiedAt = 0L,
+            lastSyncedAt = 0L
+        )
+
+        assertTrue(resolution.shouldPushToCloud)
+        assertEquals("local-session", resolution.dataToApply?.sessions?.single()?.sessionId)
     }
 
     @Test

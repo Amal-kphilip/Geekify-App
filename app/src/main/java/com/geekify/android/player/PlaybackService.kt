@@ -1049,7 +1049,7 @@ class PlaybackService : MediaSessionService() {
         if (track != null && activeListeningMs > 0L) {
             val duration = player.duration.takeIf { it > 0L } ?: (track.durationSeconds?.toLong()?.times(1_000L) ?: 0L)
             val playThreshold = if (duration > 0L) minOf(30_000L, duration / 2L) else 30_000L
-            val meaningfulCompletion = completed && listenedMs >= playThreshold
+            val meaningfulCompletion = completed && activeListeningMs >= playThreshold
             val record = ListeningSessionEntity(
                 sessionId = sessionId,
                 videoId = track.videoId,
@@ -1064,7 +1064,17 @@ class PlaybackService : MediaSessionService() {
                 skipped = skipped && !meaningfulCompletion
             )
             if (!appSettings.state.value.pauseListenHistory) {
-                listeningPersistenceScope.launch { runCatching { listeningStatsRepository.save(record) } }
+                listeningPersistenceScope.launch {
+                    runCatching {
+                        listeningStatsRepository.save(record)
+                        // Push the completed session, not every 15-second local checkpoint.
+                        // If the process is killed before completion, the next startup sync merges
+                        // the latest durable Room checkpoint using its stable session ID.
+                        syncRepository.get().pushSession(record)
+                    }.onFailure { error ->
+                        timber.log.Timber.w(error, "Could not persist completed listening session")
+                    }
+                }
             }
         }
         activeListeningSessionId = null

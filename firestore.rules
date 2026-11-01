@@ -22,6 +22,10 @@ service cloud.firestore {
       match /liked_chunks/{chunkId} {
         allow read, write: if isSignedInOwner(userId);
       }
+
+      match /listening_sessions/{sessionId} {
+        allow read, write: if isSignedInOwner(userId);
+      }
     }
 
     // Deny all other paths by default

@@ -4,7 +4,7 @@ import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** Persists listening sessions locally. No listening-history data is uploaded by this repository. */
+/** Persists listening sessions locally; SyncRepository is responsible for cloud reconciliation. */
 @Singleton
 class ListeningStatsRepository @Inject constructor(
     private val dao: ListeningSessionDao
@@ -28,6 +28,12 @@ class ListeningStatsRepository @Inject constructor(
 
     suspend fun latest(limit: Int = 2_000): List<ListeningSessionEntity> =
         dao.latest(limit.coerceIn(1, 20_000))
+
+    /** Upserts cloud sessions by stable ID; Room keeps the newest updatedAt checkpoint. */
+    suspend fun mergeSessions(sessions: List<ListeningSessionEntity>) {
+        dao.upsertAll(sessions)
+        autoPruneIfStale()
+    }
 
     suspend fun pruneOlderThan(timestamp: Long) = dao.pruneBefore(timestamp)
 

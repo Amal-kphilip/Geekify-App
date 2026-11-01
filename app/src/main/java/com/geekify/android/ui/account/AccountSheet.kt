@@ -56,6 +56,7 @@ fun AccountSheet(
     onListeningStatsClick: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
+    var showSignOutConfirmation by remember { mutableStateOf(false) }
 
     GlassOverlayPortal(onDismiss = onDismiss, scrim = 0.45f, alignment = Alignment.TopStart, enter = OverlayEnter.None) {
         var panelVisible by remember { mutableStateOf(false) }
@@ -87,10 +88,46 @@ fun AccountSheet(
                     onListeningStatsClick = { onListeningStatsClick(); onDismiss() },
                     onRecentsClick = { onRecentsClick(); onDismiss() },
                     onSettingsClick = { onSettingsClick(); onDismiss() },
-                    onSignOut = { viewModel.signOut(); onDismiss() }
+                    onSignOut = { showSignOutConfirmation = true }
                 )
             }
         }
+    }
+
+    if (showSignOutConfirmation) {
+        AlertDialog(
+            onDismissRequest = { if (!state.isLoading) showSignOutConfirmation = false },
+            title = { Text("Sign out of Geekify?") },
+            text = {
+                Text(
+                    "Geekify will back up your library, recents and listening sessions before signing out. " +
+                        "If the backup fails, you'll remain signed in and your data will stay on this device."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !state.isLoading,
+                    onClick = {
+                        viewModel.signOut {
+                            showSignOutConfirmation = false
+                            onDismiss()
+                        }
+                    }
+                ) {
+                    if (state.isLoading) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("Sign out", color = ErrorRed)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !state.isLoading,
+                    onClick = { showSignOutConfirmation = false }
+                ) { Text("Cancel") }
+            }
+        )
     }
 }
 
@@ -227,6 +264,14 @@ private fun ProfileHub(
             )
             Spacer(Modifier.width(10.dp))
             Text(syncText, color = TextSecondary, fontSize = 13.sp)
+        }
+        (state.syncError ?: state.error)?.let { error ->
+            Text(
+                text = error,
+                color = ErrorRed,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 12.dp)
+            )
         }
     }
 }

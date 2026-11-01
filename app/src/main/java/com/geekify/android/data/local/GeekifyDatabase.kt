@@ -273,6 +273,11 @@ interface ListeningSessionDao {
         }
     }
 
+    @Transaction
+    suspend fun upsertAll(sessions: List<ListeningSessionEntity>) {
+        sessions.forEach { upsert(it) }
+    }
+
     @Query("SELECT * FROM listening_sessions ORDER BY startedAt DESC LIMIT :limit")
     fun observeAll(limit: Int = 5000): Flow<List<ListeningSessionEntity>>
 

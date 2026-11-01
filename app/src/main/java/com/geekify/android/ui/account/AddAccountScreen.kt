@@ -35,6 +35,7 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
+    var showSignOutConfirmation by remember { mutableStateOf(false) }
     val startedSignedIn = remember { state.user != null }
 
     LaunchedEffect(Unit) { viewModel.clearFeedback() }
@@ -74,9 +75,9 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
                 SignedInCard(
                     name = signedIn.name,
                     email = signedIn.email,
-                    onSignOut = {
-                        viewModel.signOut()
-                    }
+                    error = state.syncError ?: state.error,
+                    isLoading = state.isLoading,
+                    onSignOut = { showSignOutConfirmation = true }
                 )
             } else {
                 Text(
@@ -167,11 +168,48 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
                 }
             }
         }
+
+        if (showSignOutConfirmation) {
+            AlertDialog(
+                onDismissRequest = { if (!state.isLoading) showSignOutConfirmation = false },
+                title = { Text("Sign out of Geekify?") },
+                text = {
+                    Text(
+                        "Geekify will back up your library, recents and listening sessions before signing out. " +
+                            "If the backup fails, you'll remain signed in and your data will stay on this device."
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = !state.isLoading,
+                        onClick = { viewModel.signOut { showSignOutConfirmation = false } }
+                    ) {
+                        if (state.isLoading) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text("Sign out", color = ErrorRed)
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        enabled = !state.isLoading,
+                        onClick = { showSignOutConfirmation = false }
+                    ) { Text("Cancel") }
+                }
+            )
+        }
     }
 }
 
 @Composable
-private fun SignedInCard(name: String, email: String?, onSignOut: () -> Unit) {
+private fun SignedInCard(
+    name: String,
+    email: String?,
+    error: String?,
+    isLoading: Boolean,
+    onSignOut: () -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -193,6 +231,10 @@ private fun SignedInCard(name: String, email: String?, onSignOut: () -> Unit) {
             fontSize = 13.sp,
             lineHeight = 19.sp
         )
+        error?.let {
+            Spacer(Modifier.height(12.dp))
+            Text(it, color = ErrorRed, fontSize = 12.sp, lineHeight = 17.sp)
+        }
         Spacer(Modifier.height(20.dp))
         Box(
             modifier = Modifier
@@ -200,10 +242,11 @@ private fun SignedInCard(name: String, email: String?, onSignOut: () -> Unit) {
                 .height(52.dp)
                 .clip(CircleShape)
                 .background(ErrorRed.copy(alpha = 0.14f))
-                .bouncyClickable(pressedScale = 0.97f, onClick = onSignOut),
+                .then(if (!isLoading) Modifier.bouncyClickable(pressedScale = 0.97f, onClick = onSignOut) else Modifier),
             contentAlignment = Alignment.Center
         ) {
-            Text("Sign out", color = ErrorRed, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            if (isLoading) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            else Text("Sign out", color = ErrorRed, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }

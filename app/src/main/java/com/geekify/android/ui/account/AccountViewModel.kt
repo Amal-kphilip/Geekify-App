@@ -18,6 +18,7 @@ import javax.inject.Inject
 data class AccountUiState(
     val user: AccountUser? = null,
     val syncState: SyncState = SyncState.IDLE,
+    val syncError: String? = null,
     val isLoading: Boolean = false,
     val error: String? = null,
     val message: String? = null
@@ -52,11 +53,16 @@ class AccountViewModel @Inject constructor(
         sync.syncState.onEach { s ->
             _uiState.update { it.copy(syncState = s) }
         }.launchIn(viewModelScope)
+
+        sync.syncError.onEach { message ->
+            _uiState.update { it.copy(syncError = message) }
+        }.launchIn(viewModelScope)
     }
 
     fun retrySync() {
         if (_uiState.value.syncState == SyncState.SYNCING) return
-        val uid = auth.user.value?.uid ?: return
+        val uid = auth.currentUid() ?: auth.user.value?.uid ?: return
+        _uiState.update { it.copy(error = null, message = null) }
         viewModelScope.launch {
             sync.startSync(uid)
         }
@@ -174,25 +180,44 @@ class AccountViewModel @Inject constructor(
             try {
                 auth.reauthenticate(password, activityContext)
                 if (uid != null) {
-                    // Best effort: the account is still removed if the cloud copy can't be reached.
                     cloudWiped = runCatching { sync.deleteCloudData(uid) }.isSuccess
+                    if (!cloudWiped) {
+                        throw IllegalStateException(
+                            "Geekify couldn't remove your cloud data. Your account has not been deleted. Check your connection and try again."
+                        )
+                    }
                 }
                 auth.deleteAccount()
-                sync.signOutAndClear()
+                // The cloud copy was already wiped before deleting the Firebase identity.
+                // Do not attempt a normal sign-out backup against a deleted account.
+                sync.clearAfterAccountDeletion()
                 _uiState.update { it.copy(isLoading = false) }
                 onDeleted()
             } catch (e: AuthRepository.GoogleSignInCancelledException) {
                 _uiState.update { it.copy(isLoading = false) }
             } catch (e: Exception) {
-                if (uid != null && cloudWiped) runCatching { sync.resumeSync(uid) }
+                if (uid != null) runCatching { sync.resumeSync(uid) }
                 _uiState.update { it.copy(isLoading = false, error = auth.friendlyError(e)) }
             }
         }
     }
 
-    fun signOut() {
+    fun signOut(onSignedOut: () -> Unit = {}) {
+        if (_uiState.value.isLoading) return
         viewModelScope.launch {
-            sync.signOutAndClear()
+            _uiState.update { it.copy(isLoading = true, error = null, message = null) }
+            try {
+                sync.signOutAndClear()
+                _uiState.update { it.copy(isLoading = false) }
+                onSignedOut()
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = e.message ?: "Couldn't safely sign out. Your data has been kept on this device."
+                    )
+                }
+            }
         }
     }
 }
