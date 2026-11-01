@@ -46,8 +46,87 @@
             android:name=".launcher.IconDefault"
             android:targetActivity=".MainActivity"
             android:icon="@mipmap/ic_launcher"
+            android:roundIcon="@mipmap/ic_launcher_round"
             android:label="Geekify"
             android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.IconAmethyst"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_geekify_amethyst"
+            android:label="Geekify"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.IconCyberpunk"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_geekify_cyberpunk"
+            android:label="Geekify"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.IconForest"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_geekify_forest"
+            android:label="Geekify"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.IconIce"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_geekify_ice"
+            android:label="Geekify"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.IconMidnight"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_geekify_midnight"
+            android:label="Geekify"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.IconPixel"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_geekify_pixel"
+            android:label="Geekify"
+            android:enabled="false"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -69,9 +148,9 @@
         </activity-alias>
 
         <activity-alias
-            android:name=".launcher.IconBlueOrange"
+            android:name=".launcher.IconSpace"
             android:targetActivity=".MainActivity"
-            android:icon="@mipmap/ic_geekify_blue_orange"
+            android:icon="@mipmap/ic_geekify_space"
             android:label="Geekify"
             android:enabled="false"
             android:exported="true">
@@ -82,9 +161,9 @@
         </activity-alias>
 
         <activity-alias
-            android:name=".launcher.IconDark"
+            android:name=".launcher.IconSunset"
             android:targetActivity=".MainActivity"
-            android:icon="@mipmap/ic_geekify_dark"
+            android:icon="@mipmap/ic_geekify_sunset"
             android:label="Geekify"
             android:enabled="false"
             android:exported="true">
@@ -95,22 +174,9 @@
         </activity-alias>
 
         <activity-alias
-            android:name=".launcher.IconPremium"
+            android:name=".launcher.IconVinyl"
             android:targetActivity=".MainActivity"
-            android:icon="@mipmap/ic_geekify_premium"
-            android:label="Geekify"
-            android:enabled="false"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".launcher.IconMonochrome"
-            android:targetActivity=".MainActivity"
-            android:icon="@mipmap/ic_geekify_monochrome"
+            android:icon="@mipmap/ic_geekify_vinyl"
             android:label="Geekify"
             android:enabled="false"
             android:exported="true">

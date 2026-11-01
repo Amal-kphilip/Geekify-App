@@ -11,11 +11,16 @@ import android.content.pm.PackageManager
  */
 object AppIconManager {
     const val DEFAULT = "default"
+    const val AMETHYST = "amethyst"
+    const val CYBERPUNK = "cyberpunk"
+    const val FOREST = "forest"
+    const val ICE = "ice"
+    const val MIDNIGHT = "midnight"
+    const val PIXEL = "pixel"
     const val RETRO = "retro"
-    const val BLUE_ORANGE = "blue_orange"
-    const val DARK = "dark"
-    const val PREMIUM = "premium"
-    const val MONOCHROME = "monochrome"
+    const val SPACE = "space"
+    const val SUNSET = "sunset"
+    const val VINYL = "vinyl"
 
     private const val PREFS_NAME = "geekify_app_icon"
     private const val KEY_SELECTED = "selected_icon"
@@ -32,11 +37,16 @@ object AppIconManager {
     // to display safely in Compose without decoding multiple 1024px images at once.
     val options: List<IconOption> = listOf(
         IconOption(DEFAULT, "Default", com.geekify.android.R.drawable.ic_geekify_default_preview, DEFAULT_ALIAS),
+        IconOption(AMETHYST, "Amethyst", com.geekify.android.R.drawable.ic_geekify_amethyst_preview, "com.geekify.android.launcher.IconAmethyst"),
+        IconOption(CYBERPUNK, "Cyberpunk", com.geekify.android.R.drawable.ic_geekify_cyberpunk_preview, "com.geekify.android.launcher.IconCyberpunk"),
+        IconOption(FOREST, "Forest", com.geekify.android.R.drawable.ic_geekify_forest_preview, "com.geekify.android.launcher.IconForest"),
+        IconOption(ICE, "Ice", com.geekify.android.R.drawable.ic_geekify_ice_preview, "com.geekify.android.launcher.IconIce"),
+        IconOption(MIDNIGHT, "Midnight", com.geekify.android.R.drawable.ic_geekify_midnight_preview, "com.geekify.android.launcher.IconMidnight"),
+        IconOption(PIXEL, "Pixel", com.geekify.android.R.drawable.ic_geekify_pixel_preview, "com.geekify.android.launcher.IconPixel"),
         IconOption(RETRO, "Retro", com.geekify.android.R.drawable.ic_geekify_retro_preview, "com.geekify.android.launcher.IconRetro"),
-        IconOption(BLUE_ORANGE, "Blue & Orange", com.geekify.android.R.drawable.ic_geekify_blue_orange_preview, "com.geekify.android.launcher.IconBlueOrange"),
-        IconOption(DARK, "Dark", com.geekify.android.R.drawable.ic_geekify_dark_preview, "com.geekify.android.launcher.IconDark"),
-        IconOption(PREMIUM, "Premium", com.geekify.android.R.drawable.ic_geekify_premium_preview, "com.geekify.android.launcher.IconPremium"),
-        IconOption(MONOCHROME, "Monochrome", com.geekify.android.R.drawable.ic_geekify_monochrome_preview, "com.geekify.android.launcher.IconMonochrome"),
+        IconOption(SPACE, "Space", com.geekify.android.R.drawable.ic_geekify_space_preview, "com.geekify.android.launcher.IconSpace"),
+        IconOption(SUNSET, "Sunset", com.geekify.android.R.drawable.ic_geekify_sunset_preview, "com.geekify.android.launcher.IconSunset"),
+        IconOption(VINYL, "Vinyl", com.geekify.android.R.drawable.ic_geekify_vinyl_preview, "com.geekify.android.launcher.IconVinyl"),
     )
 
     fun currentIcon(context: Context): String {
