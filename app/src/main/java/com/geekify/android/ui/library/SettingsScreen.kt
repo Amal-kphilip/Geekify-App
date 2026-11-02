@@ -70,6 +70,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 private enum class SettingsSubPage(val title: String) {
     ROOT("Settings"),
@@ -152,6 +153,16 @@ fun SettingsScreen(
     val storageStats by settingsViewModel.storageStats.collectAsState()
     val statusMessage by settingsViewModel.statusMessage.collectAsState()
     val bottomInset = LocalBottomInset.current
+
+    // Settings feedback behaves like a toast: a newer message resets the timeout,
+    // and the user can still dismiss it immediately by tapping the banner.
+    LaunchedEffect(statusMessage) {
+        val message = statusMessage ?: return@LaunchedEffect
+        delay(3_500L)
+        if (settingsViewModel.statusMessage.value == message) {
+            settingsViewModel.clearStatusMessage()
+        }
+    }
 
     var currentPage by rememberSaveable { mutableStateOf(SettingsSubPage.ROOT) }
     var splitActivePage by rememberSaveable { mutableStateOf(SettingsSubPage.APPEARANCE) }
@@ -1435,6 +1446,24 @@ private fun PrivacySubPage(
 // ============================================================================
 // SUB-PAGE 6: STORAGE, CACHE & BACKUP
 // ============================================================================
+private enum class CacheClearTarget(
+    val title: String,
+    val message: String
+) {
+    AUDIO(
+        title = "Clear audio stream cache?",
+        message = "Temporary audio stream data will be removed. Geekify will rebuild this cache automatically as you stream. Your library and saved music are not affected."
+    ),
+    IMAGES(
+        title = "Clear artwork & image cache?",
+        message = "Cached album and artist artwork will be removed and downloaded again when needed. Your playlists and listening data are not affected."
+    ),
+    METADATA(
+        title = "Clear cached feed & metadata?",
+        message = "Cached Home shelves and catalog metadata will be removed. Geekify will fetch fresh data the next time it loads. Your library and listening history are not affected."
+    )
+}
+
 @Composable
 private fun StorageBackupSubPage(
     stats: com.geekify.android.settings.StorageStats,
@@ -1442,6 +1471,8 @@ private fun StorageBackupSubPage(
     onExportBackup: () -> Unit,
     onImportBackup: () -> Unit
 ) {
+    var pendingCacheClear by remember { mutableStateOf<CacheClearTarget?>(null) }
+
     LaunchedEffect(Unit) {
         viewModel.refreshStorageStats()
     }
@@ -1453,7 +1484,7 @@ private fun StorageBackupSubPage(
             title = "Clear Audio Stream Cache",
             value = formatBytes(stats.audioCacheBytes),
             subtitle = "300 MB automatic cache limit",
-            onClick = viewModel::clearAudioCache
+            onClick = { pendingCacheClear = CacheClearTarget.AUDIO }
         )
         IosSettingsDivider()
         IosSettingsRow(
@@ -1462,7 +1493,7 @@ private fun StorageBackupSubPage(
             title = "Clear Artwork & Image Cache",
             value = formatBytes(stats.imageCacheBytes),
             subtitle = "Cached album and artist covers",
-            onClick = viewModel::clearImageCache
+            onClick = { pendingCacheClear = CacheClearTarget.IMAGES }
         )
         IosSettingsDivider()
         IosSettingsRow(
@@ -1471,7 +1502,26 @@ private fun StorageBackupSubPage(
             title = "Prune Cached Feed & Metadata",
             value = formatBytes(stats.metadataBytes),
             subtitle = "Local database and catalog cache",
-            onClick = viewModel::clearMetadataCache
+            onClick = { pendingCacheClear = CacheClearTarget.METADATA }
+        )
+    }
+
+    pendingCacheClear?.let { target ->
+        ConfirmDialog(
+            title = target.title,
+            message = target.message,
+            confirmLabel = "Clear cache",
+            destructive = true,
+            icon = GeekifyIcons.Delete,
+            onDismiss = { pendingCacheClear = null },
+            onConfirm = {
+                when (target) {
+                    CacheClearTarget.AUDIO -> viewModel.clearAudioCache()
+                    CacheClearTarget.IMAGES -> viewModel.clearImageCache()
+                    CacheClearTarget.METADATA -> viewModel.clearMetadataCache()
+                }
+                pendingCacheClear = null
+            }
         )
     }
 

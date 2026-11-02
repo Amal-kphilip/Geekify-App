@@ -1,45 +1,47 @@
 package com.geekify.android.ui.library
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import dagger.hilt.android.lifecycle.HiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.geekify.android.data.local.ListeningStatsRepository
-import com.geekify.android.domain.listening.ArtistListeningTotal
 import com.geekify.android.domain.listening.DailyListeningTotal
 import com.geekify.android.domain.listening.DiscoveredArtist
 import com.geekify.android.domain.listening.ListeningStatsCalculator
 import com.geekify.android.domain.listening.ListeningStatsSnapshot
-import com.geekify.android.domain.listening.TrackListeningTotal
-import com.geekify.android.ui.components.*
-import com.geekify.android.ui.theme.GeekifyIcons
-import dagger.hilt.android.lifecycle.HiltViewModel
+import com.geekify.android.ui.components.LocalBottomInset
+import com.geekify.android.ui.components.IosSettingsPageScaffold
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
+import kotlin.math.roundToInt
 
 @HiltViewModel
 class ListeningStatsViewModel @Inject constructor(
@@ -54,14 +56,27 @@ class ListeningStatsViewModel @Inject constructor(
         )
 }
 
+private val statsChartColors = listOf(
+    Color(0xFF3985FF),
+    Color(0xFF36C5D8),
+    Color(0xFF53D69A),
+    Color(0xFF9B83F6),
+    Color(0xFFFFB454),
+    Color(0xFFFF6F91)
+)
+
 @Composable
 fun ListeningStatsScreen(
     onBack: () -> Unit,
     viewModel: ListeningStatsViewModel = hiltViewModel()
 ) {
     val stats by viewModel.stats.collectAsState()
-    val scrollState = rememberScrollState()
+    val scrollState = androidx.compose.foundation.rememberScrollState()
     val bottomInset = LocalBottomInset.current
+    var selectedPeriod by rememberSaveable { mutableStateOf(StatsPeriod.WEEK) }
+    val primaryDuration = if (selectedPeriod == StatsPeriod.WEEK) stats.last7DaysMs else stats.last30DaysMs
+    val periodTitle = if (selectedPeriod == StatsPeriod.WEEK) "Last 7 days" else "Last 30 days"
+    val activeDays = stats.dailyListening.count { it.listenedMs > 0L }
 
     IosSettingsPageScaffold(
         title = "Listening Stats",
@@ -69,140 +84,119 @@ fun ListeningStatsScreen(
         onBack = onBack,
         bottomPadding = bottomInset + 36.dp
     ) {
-        // 2x2 Summary Bento Grid
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            StatsSummaryTile(
-                icon = GeekifyIcons.Insights,
-                tileColor = IosPalette.systemCyan,
-                label = "Last 7 Days",
-                value = ListeningStatsCalculator.formatDuration(stats.last7DaysMs),
-                caption = "Weekly time",
-                modifier = Modifier.weight(1f)
+        Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            ListeningOverviewCard(
+                duration = primaryDuration,
+                periodTitle = periodTitle,
+                activeDays = activeDays,
+                selectedPeriod = selectedPeriod,
+                onPeriodSelected = { selectedPeriod = it }
             )
-            StatsSummaryTile(
-                icon = GeekifyIcons.CalendarToday,
-                tileColor = IosPalette.systemPurple,
-                label = "Last 30 Days",
-                value = ListeningStatsCalculator.formatDuration(stats.last30DaysMs),
-                caption = "Monthly time",
-                modifier = Modifier.weight(1f)
-            )
-        }
-        Spacer(Modifier.height(12.dp))
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            StatsSummaryTile(
-                icon = GeekifyIcons.Whatshot,
-                tileColor = IosPalette.systemOrange,
-                label = "Current Streak",
-                value = "${stats.currentStreakDays} ${if (stats.currentStreakDays == 1) "day" else "days"}",
-                caption = "10m+ daily goal",
-                modifier = Modifier.weight(1f)
-            )
-            StatsSummaryTile(
-                icon = GeekifyIcons.Verified,
-                tileColor = IosPalette.systemGreen,
-                label = "Best Streak",
-                value = "${stats.longestStreakDays} ${if (stats.longestStreakDays == 1) "day" else "days"}",
-                caption = "All-time record",
-                modifier = Modifier.weight(1f)
-            )
-        }
 
-        if (!stats.hasData) {
-            Spacer(Modifier.height(24.dp))
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = IosPalette.secondarySystemGroupedBackground,
-                shape = IosCardShape
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StreakMetricCard(
+                    title = "Current streak",
+                    value = "${stats.currentStreakDays} ${if (stats.currentStreakDays == 1) "day" else "days"}",
+                    supporting = "10 min daily goal",
+                    accent = Color(0xFF53D69A),
+                    modifier = Modifier.weight(1f)
+                )
+                StreakMetricCard(
+                    title = "Best streak",
+                    value = "${stats.longestStreakDays} ${if (stats.longestStreakDays == 1) "day" else "days"}",
+                    supporting = "Personal record",
+                    accent = Color(0xFF9B83F6),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            StatsSection(
+                title = "Listening activity",
+                subtitle = "Daily playback · Last 7 days"
             ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                WeeklyActivityChart(stats.dailyListening)
+            }
+
+            if (stats.languages.isNotEmpty()) {
+                StatsSection(
+                    title = "Listening languages",
+                    subtitle = "Estimated from the available track metadata"
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(IosPalette.systemPurple.copy(alpha = 0.16f)),
-                        contentAlignment = Alignment.Center
+                    LanguageBreakdown(stats.languages)
+                }
+            }
+
+            if (stats.topTracks.isNotEmpty()) {
+                StatsSection(
+                    title = "Top tracks",
+                    subtitle = "Most listened · Last 30 days"
+                ) {
+                    Column {
+                        stats.topTracks.forEachIndexed { index, track ->
+                            StatsRankingRow(
+                                rank = index + 1,
+                                title = track.title,
+                                subtitle = track.artist,
+                                duration = ListeningStatsCalculator.formatDuration(track.listenedMs),
+                                detail = "${track.sessions} ${if (track.sessions == 1) "play" else "plays"}"
+                            )
+                            if (index < stats.topTracks.lastIndex) StatsHairline()
+                        }
+                    }
+                }
+            }
+
+            if (stats.topArtists.isNotEmpty()) {
+                StatsSection(
+                    title = "Top artists",
+                    subtitle = "By listening time · Last 30 days"
+                ) {
+                    Column {
+                        stats.topArtists.forEachIndexed { index, artist ->
+                            StatsRankingRow(
+                                rank = index + 1,
+                                title = artist.name,
+                                subtitle = "${artist.sessions} ${if (artist.sessions == 1) "session" else "sessions"}",
+                                duration = ListeningStatsCalculator.formatDuration(artist.listenedMs)
+                            )
+                            if (index < stats.topArtists.lastIndex) StatsHairline()
+                        }
+                    }
+                }
+            }
+
+            if (stats.recentlyDiscoveredArtists.isNotEmpty()) {
+                StatsSection(
+                    title = "Recently discovered",
+                    subtitle = "Artists you started listening to in the last 30 days"
+                ) {
+                    Column {
+                        stats.recentlyDiscoveredArtists.forEachIndexed { index, artist ->
+                            DiscoveredArtistItem(artist)
+                            if (index < stats.recentlyDiscoveredArtists.lastIndex) StatsHairline()
+                        }
+                    }
+                }
+            }
+
+            if (!stats.hasData) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Color(0xFF17191D),
+                    shape = RoundedCornerShape(24.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 22.dp, vertical = 26.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Icon(
-                            imageVector = GeekifyIcons.GraphicEq,
-                            contentDescription = null,
-                            tint = IosPalette.systemPurple,
-                            modifier = Modifier.size(28.dp)
+                        Text("Your listening story starts here", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Listen to music for at least 10 seconds to start building your stats. Daily streaks count after 10 minutes of playback.",
+                            color = Color(0xFF9B9DA5),
+                            fontSize = 13.sp,
+                            lineHeight = 19.sp
                         )
-                    }
-                    Spacer(Modifier.height(14.dp))
-                    Text(
-                        text = "Your listening story starts here",
-                        color = IosPalette.label,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 18.sp
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = "Geekify tracks time while music is actively playing. Listen for at least 10 seconds to start building your insights.",
-                        color = IosPalette.secondaryLabel,
-                        fontSize = 13.5.sp,
-                        lineHeight = 19.sp,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-        } else {
-            Spacer(Modifier.height(24.dp))
-            IosSettingsSection(title = "Daily activity · Last 7 days") {
-                WeeklyListeningChart(stats.dailyListening)
-            }
-
-            Spacer(Modifier.height(24.dp))
-            IosSettingsSection(title = "Top tracks · Last 30 days") {
-                if (stats.topTracks.isEmpty()) {
-                    EmptySectionRow("No meaningful track listens recorded in this period yet.")
-                } else {
-                    stats.topTracks.forEachIndexed { index, track ->
-                        TrackTotalRow(rank = index + 1, track = track)
-                        if (index < stats.topTracks.lastIndex) {
-                            IosSettingsDivider(insetStart = 56.dp)
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(24.dp))
-            IosSettingsSection(title = "Top artists · Last 30 days") {
-                if (stats.topArtists.isEmpty()) {
-                    EmptySectionRow("Artist rankings will appear as you listen.")
-                } else {
-                    stats.topArtists.forEachIndexed { index, artist ->
-                        ArtistTotalRow(rank = index + 1, artist = artist)
-                        if (index < stats.topArtists.lastIndex) {
-                            IosSettingsDivider(insetStart = 56.dp)
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(24.dp))
-            IosSettingsSection(
-                title = "Recently discovered artists",
-                footer = "A listening day counts toward your streak after 10 minutes of playback. Sessions shorter than 10 seconds are excluded."
-            ) {
-                if (stats.recentlyDiscoveredArtists.isEmpty()) {
-                    EmptySectionRow("New-to-you artists from the last 30 days will appear here.")
-                } else {
-                    stats.recentlyDiscoveredArtists.forEachIndexed { index, artist ->
-                        DiscoveredArtistRow(artist)
-                        if (index < stats.recentlyDiscoveredArtists.lastIndex) {
-                            IosSettingsDivider(insetStart = 58.dp)
-                        }
                     }
                 }
             }
@@ -210,334 +204,319 @@ fun ListeningStatsScreen(
     }
 }
 
+private enum class StatsPeriod { WEEK, MONTH }
+
 @Composable
-private fun StatsSummaryTile(
-    icon: ImageVector,
-    tileColor: Color,
-    label: String,
+private fun ListeningOverviewCard(
+    duration: Long,
+    periodTitle: String,
+    activeDays: Int,
+    selectedPeriod: StatsPeriod,
+    onPeriodSelected: (StatsPeriod) -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = Color.Transparent,
+        shape = RoundedCornerShape(26.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .background(
+                    Brush.linearGradient(
+                        listOf(Color(0xFF202B3C), Color(0xFF191B22), Color(0xFF17191D))
+                    ),
+                    RoundedCornerShape(26.dp)
+                )
+                .padding(20.dp)
+        ) {
+            Column {
+                Text(
+                    "LISTENING OVERVIEW",
+                    color = Color(0xFF69C9E7),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.2.sp
+                )
+                Spacer(Modifier.height(14.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            ListeningStatsCalculator.formatDuration(duration),
+                            color = Color.White,
+                            fontSize = 34.sp,
+                            lineHeight = 40.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.8).sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(periodTitle, color = Color(0xFFB1B4BE), fontSize = 13.sp)
+                        Spacer(Modifier.height(16.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            PeriodPill("7 days", selectedPeriod == StatsPeriod.WEEK) { onPeriodSelected(StatsPeriod.WEEK) }
+                            PeriodPill("30 days", selectedPeriod == StatsPeriod.MONTH) { onPeriodSelected(StatsPeriod.MONTH) }
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    ActiveDaysRing(activeDays = activeDays)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PeriodPill(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(if (selected) Color(0xFF2E78E8) else Color.White.copy(alpha = 0.08f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 13.dp, vertical = 8.dp)
+    ) {
+        Text(label, color = Color.White, fontSize = 12.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun ActiveDaysRing(activeDays: Int) {
+    Box(modifier = Modifier.size(112.dp), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val ringWidth = 12.dp.toPx()
+            val inset = ringWidth / 2f
+            val arcSize = androidx.compose.ui.geometry.Size(size.width - ringWidth, size.height - ringWidth)
+            val topLeft = androidx.compose.ui.geometry.Offset(inset, inset)
+            drawArc(
+                color = Color.White.copy(alpha = 0.13f),
+                startAngle = -90f,
+                sweepAngle = 360f,
+                useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
+                style = Stroke(width = ringWidth, cap = StrokeCap.Round)
+            )
+            if (activeDays > 0) {
+                drawArc(
+                    brush = Brush.sweepGradient(listOf(Color(0xFF3985FF), Color(0xFF36C5D8), Color(0xFF53D69A), Color(0xFF3985FF))),
+                    startAngle = -90f,
+                    sweepAngle = 360f * activeDays.coerceIn(0, 7) / 7f,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = ringWidth, cap = StrokeCap.Round)
+                )
+            }
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("$activeDays/7", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+            Text("active days", color = Color(0xFF9B9DA5), fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
+private fun StreakMetricCard(
+    title: String,
     value: String,
-    caption: String,
+    supporting: String,
+    accent: Color,
     modifier: Modifier = Modifier
 ) {
     Surface(
         modifier = modifier,
-        color = IosPalette.secondarySystemGroupedBackground,
-        shape = IosCardShape
+        color = Color(0xFF1A1B1F),
+        shape = RoundedCornerShape(22.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                IosIconBadge(icon = icon, tint = tileColor)
-                Text(
-                    text = caption,
-                    color = IosPalette.tertiaryLabel,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 15.dp)) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(accent))
             Spacer(Modifier.height(12.dp))
-            Text(
-                text = value,
-                color = IosPalette.label,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.4).sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = label,
-                color = IosPalette.secondaryLabel,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Text(value, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Spacer(Modifier.height(3.dp))
+            Text(title, color = Color(0xFFD7D8DE), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(supporting, color = Color(0xFF858891), fontSize = 11.sp)
         }
     }
 }
 
 @Composable
-private fun WeeklyListeningChart(days: List<DailyListeningTotal>) {
-    val maximumMs = days.maxOfOrNull { it.listenedMs }?.coerceAtLeast(1L) ?: 1L
-    val activeDaysCount = days.count { it.listenedMs > 0L }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 16.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = "Daily breakdown",
-                color = IosPalette.label,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = "$activeDaysCount of 7 days active",
-                color = IosPalette.secondaryLabel,
-                fontSize = 12.5.sp
-            )
+private fun StatsSection(
+    title: String,
+    subtitle: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column {
+        Column(Modifier.padding(start = 3.dp, bottom = 9.dp)) {
+            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = Color(0xFF858891), fontSize = 12.sp)
         }
-
-        Spacer(Modifier.height(16.dp))
-
-        // Duration labels above bars
-        Row(
+        Surface(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            color = Color(0xFF191A1E),
+            shape = RoundedCornerShape(22.dp)
         ) {
-            days.forEach { day ->
-                Text(
-                    text = shortDuration(day.listenedMs),
-                    modifier = Modifier.weight(1f),
-                    color = if (day.listenedMs > 0L) IosPalette.label else IosPalette.tertiaryLabel,
-                    fontSize = 10.sp,
-                    fontWeight = if (day.listenedMs > 0L) FontWeight.SemiBold else FontWeight.Normal,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Clip,
-                    textAlign = TextAlign.Center
-                )
-            }
+            Column(content = content)
         }
+    }
+}
 
-        Spacer(Modifier.height(8.dp))
-
-        // Capsule bars with full-height background slots
+@Composable
+private fun WeeklyActivityChart(days: List<DailyListeningTotal>) {
+    val maxMs = days.maxOfOrNull { it.listenedMs }?.coerceAtLeast(1L) ?: 1L
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 17.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+            Text("Daily listening time", color = Color(0xFFE8E9ED), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text("${days.count { it.listenedMs > 0L }} active", color = Color(0xFF858891), fontSize = 11.sp)
+        }
+        Spacer(Modifier.height(18.dp))
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(104.dp),
+            modifier = Modifier.fillMaxWidth().height(142.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.Bottom
         ) {
-            days.forEach { day ->
-                val ratio = (day.listenedMs.toFloat() / maximumMs).coerceIn(0f, 1f)
-                val fillFraction = if (day.listenedMs > 0L) ratio.coerceAtLeast(0.08f) else 0f
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    contentAlignment = Alignment.BottomCenter
+            days.forEachIndexed { index, day ->
+                val ratio = (day.listenedMs.toFloat() / maxMs.toFloat()).coerceIn(0f, 1f)
+                Column(
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Bottom
                 ) {
+                    Text(
+                        shortStatsDuration(day.listenedMs),
+                        color = if (day.listenedMs > 0L) Color(0xFFDDE1EA) else Color(0xFF6E7179),
+                        fontSize = 9.sp,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                    Spacer(Modifier.height(7.dp))
                     Box(
-                        modifier = Modifier
-                            .width(22.dp)
-                            .fillMaxHeight()
-                            .clip(CircleShape)
-                            .background(IosPalette.tertiarySystemGroupedBackground),
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
                         contentAlignment = Alignment.BottomCenter
                     ) {
-                        if (fillFraction > 0f) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .fillMaxHeight(fillFraction)
-                                    .clip(CircleShape)
-                                    .background(
-                                        Brush.verticalGradient(
-                                            colors = listOf(
-                                                IosPalette.systemCyan,
-                                                IosPalette.systemBlue
-                                            )
-                                        )
-                                    )
-                            )
-                        }
+                        Box(
+                            modifier = Modifier
+                                .widthIn(max = 25.dp)
+                                .fillMaxWidth()
+                                .fillMaxHeight(if (day.listenedMs > 0L) ratio.coerceAtLeast(0.06f) else 0.025f)
+                                .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 3.dp, bottomEnd = 3.dp))
+                                .background(
+                                    if (day.listenedMs > 0L) Brush.verticalGradient(listOf(Color(0xFF55C9E7), Color(0xFF347CE8)))
+                                    else Brush.verticalGradient(listOf(Color(0xFF30333A), Color(0xFF30333A)))
+                                )
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(day.label, color = Color(0xFF8A8D96), fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LanguageBreakdown(languages: List<com.geekify.android.domain.listening.LanguageListeningTotal>) {
+    val total = languages.sumOf { it.listenedMs }.coerceAtLeast(1L)
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(17.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Canvas(Modifier.size(126.dp)) {
+            val stroke = 17.dp.toPx()
+            val topLeft = androidx.compose.ui.geometry.Offset(stroke / 2f, stroke / 2f)
+            val arcSize = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke)
+            var start = -90f
+            languages.take(statsChartColors.size).forEachIndexed { index, language ->
+                val sweep = (language.listenedMs.toFloat() / total.toFloat()) * 360f
+                if (sweep > 0f) {
+                    drawArc(
+                        color = statsChartColors[index],
+                        startAngle = start,
+                        sweepAngle = (sweep - 1.5f).coerceAtLeast(0.5f),
+                        useCenter = false,
+                        topLeft = topLeft,
+                        size = arcSize,
+                        style = Stroke(width = stroke, cap = StrokeCap.Round)
+                    )
+                }
+                start += sweep
+            }
+        }
+        Spacer(Modifier.width(18.dp))
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            languages.take(statsChartColors.size).forEachIndexed { index, language ->
+                val percent = (language.listenedMs.toDouble() / total.toDouble() * 100.0).roundToInt()
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(statsChartColors[index]))
+                    Spacer(Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(language.name, color = Color(0xFFE2E3E8), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${percent}% · ${ListeningStatsCalculator.formatDuration(language.listenedMs)}", color = Color(0xFF858891), fontSize = 10.sp)
                     }
                 }
             }
         }
-
-        Spacer(Modifier.height(8.dp))
-
-        // Weekday labels
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            days.forEach { day ->
-                Text(
-                    text = day.label,
-                    modifier = Modifier.weight(1f),
-                    color = IosPalette.secondaryLabel,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Clip,
-                    textAlign = TextAlign.Center
-                )
-            }
-        }
-    }
-}
-
-private fun shortDuration(durationMs: Long): String {
-    val safeDuration = durationMs.coerceAtLeast(0L)
-    val minutes = safeDuration / 60_000L
-    return when {
-        safeDuration == 0L -> "0m"
-        minutes == 0L -> "<1m"
-        minutes >= 60L -> "${minutes / 60}h"
-        else -> "${minutes}m"
     }
 }
 
 @Composable
-private fun TrackTotalRow(rank: Int, track: TrackListeningTotal) {
-    RankingRow(
-        rank = rank,
-        title = track.title,
-        subtitle = track.artist,
-        primaryValue = ListeningStatsCalculator.formatDuration(track.listenedMs),
-        secondaryValue = "${track.sessions} ${if (track.sessions == 1) "play" else "plays"}"
-    )
-}
-
-@Composable
-private fun ArtistTotalRow(rank: Int, artist: ArtistListeningTotal) {
-    RankingRow(
-        rank = rank,
-        title = artist.name,
-        subtitle = "${artist.sessions} meaningful ${if (artist.sessions == 1) "session" else "sessions"}",
-        primaryValue = ListeningStatsCalculator.formatDuration(artist.listenedMs),
-        secondaryValue = null
-    )
-}
-
-@Composable
-private fun DiscoveredArtistRow(artist: DiscoveredArtist) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        IosIconBadge(
-            icon = GeekifyIcons.AutoAwesome,
-            tint = IosPalette.systemPink
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = artist.name,
-                color = IosPalette.label,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = "First heard ${ListeningStatsCalculator.formatDate(artist.firstHeardAt)}",
-                color = IosPalette.secondaryLabel,
-                fontSize = 12.5.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun RankingRow(
+private fun StatsRankingRow(
     rank: Int,
     title: String,
     subtitle: String,
-    primaryValue: String,
-    secondaryValue: String?
+    duration: String,
+    detail: String? = null
 ) {
-    val badgeBg = when (rank) {
-        1 -> IosPalette.systemYellow.copy(alpha = 0.20f)
-        2 -> IosPalette.systemCyan.copy(alpha = 0.18f)
-        3 -> IosPalette.systemOrange.copy(alpha = 0.18f)
-        else -> IosPalette.tertiarySystemGroupedBackground
-    }
-    val badgeFg = when (rank) {
-        1 -> IosPalette.systemYellow
-        2 -> IosPalette.systemCyan
-        3 -> IosPalette.systemOrange
-        else -> IosPalette.secondaryLabel
-    }
-
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 11.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
-            modifier = Modifier
-                .size(28.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(badgeBg),
+            modifier = Modifier.size(34.dp).clip(RoundedCornerShape(11.dp))
+                .background(statsChartColors[(rank - 1).mod(statsChartColors.size)].copy(alpha = 0.18f)),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = rank.toString(),
-                color = badgeFg,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Text(rank.toString(), color = statsChartColors[(rank - 1).mod(statsChartColors.size)], fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                color = IosPalette.label,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = subtitle,
-                color = IosPalette.secondaryLabel,
-                fontSize = 12.5.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 1.dp)
-            )
+            Text(title, color = Color(0xFFF1F2F5), fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, color = Color(0xFF858891), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.width(10.dp))
         Column(horizontalAlignment = Alignment.End) {
-            Text(
-                text = primaryValue,
-                color = IosPalette.label,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            if (secondaryValue != null) {
-                Text(
-                    text = secondaryValue,
-                    color = IosPalette.tertiaryLabel,
-                    fontSize = 11.sp
-                )
-            }
+            Text(duration, color = Color(0xFFE6E8ED), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            if (detail != null) Text(detail, color = Color(0xFF858891), fontSize = 10.sp)
         }
     }
 }
 
 @Composable
-private fun EmptySectionRow(text: String) {
-    Text(
-        text = text,
-        color = IosPalette.secondaryLabel,
-        fontSize = 13.5.sp,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
-    )
+private fun DiscoveredArtistItem(artist: DiscoveredArtist) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(36.dp).clip(CircleShape).background(Color(0xFF3D78CE).copy(alpha = 0.2f)), contentAlignment = Alignment.Center) {
+            Text(artist.name.firstOrNull()?.uppercase() ?: "?", color = Color(0xFF71BDEB), fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(artist.name, color = Color(0xFFF1F2F5), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text("First heard ${ListeningStatsCalculator.formatDate(artist.firstHeardAt)}", color = Color(0xFF858891), fontSize = 11.sp)
+        }
+    }
+}
+
+@Composable
+private fun StatsHairline() {
+    Box(Modifier.fillMaxWidth().padding(start = 62.dp, end = 16.dp).height(0.5.dp).background(Color(0xFF34363C)))
+}
+
+private fun shortStatsDuration(durationMs: Long): String {
+    val minutes = durationMs.coerceAtLeast(0L) / 60_000L
+    return when {
+        durationMs <= 0L -> "0m"
+        minutes == 0L -> "<1m"
+        minutes >= 60L -> "${minutes / 60}h ${minutes % 60}m"
+        else -> "${minutes}m"
+    }
 }
