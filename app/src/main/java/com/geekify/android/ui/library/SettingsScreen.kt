@@ -501,67 +501,6 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun SettingsOverviewCard() {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(
-                Brush.linearGradient(
-                    listOf(
-                        SettingsVisuals.heroStart,
-                        SettingsVisuals.heroMiddle,
-                        SettingsVisuals.card
-                    )
-                )
-            )
-            .border(0.8.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(24.dp))
-            .padding(horizontal = 19.dp, vertical = 18.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "PERSONALIZE YOUR LISTENING SPACE",
-                color = SettingsVisuals.cyan,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.05.sp
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "Make Geekify yours",
-                color = IosPalette.label,
-                fontSize = 20.sp,
-                lineHeight = 25.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "Fine-tune how your music looks, sounds and works.",
-                color = SettingsVisuals.muted,
-                fontSize = 12.sp,
-                lineHeight = 17.sp
-            )
-        }
-        Spacer(Modifier.width(12.dp))
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(SettingsVisuals.cyan.copy(alpha = 0.14f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = GeekifyIcons.AutoAwesome,
-                contentDescription = null,
-                tint = SettingsVisuals.cyan,
-                modifier = Modifier.size(25.dp)
-            )
-        }
-    }
-}
-
-@Composable
 private fun RootListBody(
     searchQuery: String,
     onQueryChange: (String) -> Unit,
@@ -570,10 +509,6 @@ private fun RootListBody(
     selectedSubPage: SettingsSubPage?,
     onClearSearch: () -> Unit
 ) {
-    SettingsOverviewCard()
-
-    Spacer(Modifier.height(18.dp))
-
     // Keep settings search in the page's normal scroll flow. A docked overlay at the
     // bottom competed with the app-wide mini-player/navigation dock and covered rows.
     DockedSearchPill(
