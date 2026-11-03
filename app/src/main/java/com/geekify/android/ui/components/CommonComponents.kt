@@ -281,7 +281,7 @@ fun TrackRow(
                     )
                 }
                 Text(
-                    text = listOfNotNull(track.artist, track.duration).joinToString("  •  "),
+                    text = listOfNotNull(track.artist.takeIf { it.isNotBlank() }, track.album.takeIf { !it.isNullOrBlank() }, track.duration.takeIf { !it.isNullOrBlank() }).joinToString("  •  "),
                     color = TextSecondary,
                     fontSize = 14.sp,
                     maxLines = 1,

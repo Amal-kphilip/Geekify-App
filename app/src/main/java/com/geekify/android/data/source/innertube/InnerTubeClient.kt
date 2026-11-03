@@ -28,6 +28,8 @@ class InnerTubeClient @Inject constructor(
     @Volatile private var visitorData: String? = null
 
     suspend fun search(query: String, type: String?): JsonObject = innerTubeBackend.search(query, type)
+    suspend fun searchContinuation(continuation: String): JsonObject = innerTubeBackend.searchContinuation(continuation)
+    suspend fun searchSuggestions(query: String): List<String> = innerTubeBackend.searchSuggestions(query)
     suspend fun browse(id: String): JsonObject = innerTubeBackend.browse(id)
     suspend fun next(videoId: String, playlistId: String? = null): JsonObject = innerTubeBackend.next(videoId, playlistId)
 

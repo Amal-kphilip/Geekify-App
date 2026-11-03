@@ -64,4 +64,75 @@ class ParsersTest {
         )
         assertEquals(listOf("first123456", "second12345"), Parsers.tracks(raw).map { it.videoId })
     }
+
+    @Test fun `parseSearchResponseSinglePass extracts topResult didYouMean and continuation`() {
+        val raw = Json.parseToJsonElement(
+            """{
+              "contents": {
+                "tabbedSearchResultsRenderer": {
+                  "tabs": [{
+                    "tabRenderer": {
+                      "content": {
+                        "sectionListRenderer": {
+                          "contents": [
+                            {
+                              "musicCardShelfRenderer": {
+                                "title": { "runs": [{ "text": "Blinding Lights" }] },
+                                "subtitle": { "runs": [{ "text": "The Weeknd • After Hours • 2020" }] },
+                                "header": { "musicCardShelfHeaderBasicRenderer": { "title": { "runs": [{ "text": "Top result" }] } } },
+                                "onTap": { "watchEndpoint": { "videoId": "4NRXx6U8ABQ" } },
+                                "thumbnail": { "musicThumbnailRenderer": { "thumbnail": { "thumbnails": [{ "url": "https://img.yt.com/top.jpg", "width": 500 }] } } }
+                              }
+                            },
+                            {
+                              "showingResultsForRenderer": {
+                                "correctedQuery": { "runs": [{ "text": "the weeknd blinding lights" }] }
+                              }
+                            },
+                            {
+                              "musicShelfRenderer": {
+                                "title": { "runs": [{ "text": "Songs" }] },
+                                "contents": [
+                                  {
+                                    "musicResponsiveListItemRenderer": {
+                                      "playlistItemData": { "videoId": "4NRXx6U8ABQ" },
+                                      "flexColumns": [
+                                        { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": "Blinding Lights" }] } } },
+                                        { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": "The Weeknd" }, { "text": " • " }, { "text": "3:20" }] } } }
+                                      ]
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "continuationItemRenderer": {
+                                "continuationEndpoint": {
+                                  "continuation": "4wINGA..."
+                                },
+                                "nextContinuationData": {
+                                  "continuation": "token_abc_123"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }]
+                }
+              }
+            }"""
+        )
+
+        val response = Parsers.parseSearchResponseSinglePass(raw, "blnding lights", null)
+        assertEquals("blnding lights", response.query)
+        assertNotNull(response.topResult)
+        assertEquals("4NRXx6U8ABQ", response.topResult?.videoId)
+        assertEquals("Blinding Lights", response.topResult?.title)
+        assertEquals("the weeknd blinding lights", response.didYouMean)
+        assertEquals("token_abc_123", response.continuation)
+        assertEquals(1, response.songs.size)
+        assertEquals("4NRXx6U8ABQ", response.songs.first().videoId)
+    }
 }

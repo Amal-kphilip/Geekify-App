@@ -25,11 +25,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import coil3.compose.AsyncImage
+import com.geekify.android.R
 import com.geekify.android.data.auth.KnownAccount
 import com.geekify.android.ui.components.CircleIconButton
 import com.geekify.android.ui.components.LocalBottomInset
 import com.geekify.android.ui.components.bouncyClickable
+import com.geekify.android.ui.components.bouncyCombinedClickable
 import com.geekify.android.ui.theme.*
 
 /** Account manager. Firebase maintains a separate SDK-managed session for each saved identity. */
@@ -46,6 +54,7 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
     var name by remember { mutableStateOf("") }
     var showSignOutConfirmation by remember { mutableStateOf(false) }
     var signInWasRequested by remember { mutableStateOf(false) }
+    var accountPendingRemoval by remember { mutableStateOf<KnownAccount?>(null) }
 
     LaunchedEffect(Unit) { viewModel.clearFeedback() }
     LaunchedEffect(state.isRestoringAccounts, state.user?.uid, state.knownAccounts.size) {
@@ -73,29 +82,32 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
             .verticalScroll(rememberScrollState())
             .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 28.dp + LocalBottomInset.current)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             CircleIconButton(
                 icon = GeekifyIcons.ArrowBack,
-                contentDescription = "Back",
+                contentDescription = stringResource(R.string.accessibility_back),
                 onClick = onBack,
                 size = 48.dp
             )
+            Spacer(Modifier.width(12.dp))
             Text(
-                "Accounts",
+                text = stringResource(R.string.accounts_title),
                 color = TextPrimary,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )
             Spacer(Modifier.size(48.dp))
         }
 
-        Spacer(Modifier.height(22.dp))
-        AccountManagerHero(
-            activeName = state.user?.name,
-            activeEmail = state.user?.email,
-            accountCount = state.knownAccounts.size
-        )
+        Spacer(Modifier.height(16.dp))
 
         if (state.isRestoringAccounts) {
             Spacer(Modifier.height(16.dp))
@@ -169,6 +181,9 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
                                 isSignUp = false
                                 showAuthForm = true
                             }
+                        },
+                        onLongClick = {
+                            accountPendingRemoval = account
                         }
                     )
                     if (index < otherAccounts.lastIndex) {
@@ -297,38 +312,33 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
             }
         )
     }
-}
 
-@Composable
-private fun AccountManagerHero(activeName: String?, activeEmail: String?, accountCount: Int) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(28.dp))
-            .background(
-                Brush.linearGradient(listOf(Color(0xFF1E3442), Color(0xFF1C1D28), Color(0xFF191A1E)))
-            )
-            .padding(22.dp)
-    ) {
-        Text("YOUR GEEKIFY ACCOUNTS", color = Color(0xFF69C9E7), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
-        Spacer(Modifier.height(10.dp))
-        Text(
-            if (activeName != null) "Switch accounts without signing in again" else "Keep your music lives separate",
-            color = TextPrimary,
-            fontSize = 23.sp,
-            lineHeight = 28.sp,
-            fontWeight = FontWeight.Bold
+    accountPendingRemoval?.let { account ->
+        AlertDialog(
+            onDismissRequest = { accountPendingRemoval = null },
+            title = {
+                Text(stringResource(R.string.remove_account_title, account.name))
+            },
+            text = {
+                Text(stringResource(R.string.remove_account_message, account.name))
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val uid = account.uid
+                        accountPendingRemoval = null
+                        viewModel.forgetAccount(uid)
+                    }
+                ) {
+                    Text(stringResource(R.string.action_remove), color = ErrorRed)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { accountPendingRemoval = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
         )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            if (activeName != null) "Active: ${activeEmail ?: activeName}. Saved accounts keep separate Firebase sessions, libraries, histories and recommendations."
-            else "Add an account or sign back in once to enable quick switching and restore its own library, history and recommendations.",
-            color = TextSecondary,
-            fontSize = 13.sp,
-            lineHeight = 19.sp
-        )
-        Spacer(Modifier.height(12.dp))
-        Text("$accountCount account${if (accountCount == 1) "" else "s"} saved on this device", color = Color(0xFF9DDCF0), fontSize = 12.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -346,14 +356,44 @@ private fun KnownAccountCard(
     active: Boolean,
     compact: Boolean = false,
     enabled: Boolean = true,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null
 ) {
+    val haptics = LocalHapticFeedback.current
+    val removeLabel = stringResource(R.string.accessibility_remove_account)
+    val cardClickModifier = if (!active && enabled) {
+        Modifier
+            .bouncyCombinedClickable(
+                pressedScale = 0.98f,
+                onLongClick = onLongClick?.let { action ->
+                    {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        action()
+                    }
+                },
+                onClick = onClick
+            )
+            .then(
+                if (onLongClick != null) {
+                    Modifier.semantics {
+                        customActions = listOf(
+                            CustomAccessibilityAction(removeLabel) {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onLongClick()
+                                true
+                            }
+                        )
+                    }
+                } else Modifier
+            )
+    } else Modifier
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(if (compact) 18.dp else 24.dp))
             .background(if (compact) Color.Transparent else InkPanel)
-            .then(if (!active && enabled) Modifier.bouncyClickable(pressedScale = 0.98f, onClick = onClick) else Modifier)
+            .then(cardClickModifier)
             .padding(horizontal = if (compact) 4.dp else 16.dp, vertical = if (compact) 12.dp else 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -421,8 +461,19 @@ private fun PrimaryAccountAction(title: String, subtitle: String, enabled: Boole
         shape = RoundedCornerShape(24.dp)
     ) {
         Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(46.dp).clip(CircleShape).background(Color(0xFF69C9E7).copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
-                Text("+", color = Color(0xFF69C9E7), fontSize = 30.sp, fontWeight = FontWeight.Light)
+            Box(
+                Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF69C9E7).copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = GeekifyIcons.PersonAdd,
+                    contentDescription = stringResource(R.string.add_account),
+                    tint = Color(0xFF69C9E7),
+                    modifier = Modifier.size(24.dp)
+                )
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {

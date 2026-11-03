@@ -161,6 +161,15 @@ data class PlaylistEntity(
 )
 
 @Entity(
+    tableName = "recent_searches",
+    indices = [Index(value = ["timestamp"])]
+)
+data class RecentSearchEntity(
+    @PrimaryKey val query: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+@Entity(
     tableName = "playlist_tracks",
     primaryKeys = ["playlistId", "videoId"],
     foreignKeys = [
@@ -212,6 +221,8 @@ interface LikedDao {
     @Delete suspend fun delete(e: LikedTrackEntity)
     @Query("DELETE FROM liked_tracks") suspend fun clear()
     @Query("SELECT * FROM liked_tracks ORDER BY addedAt DESC, rowid DESC") suspend fun allOnce(): List<LikedTrackEntity>
+    @Query("SELECT * FROM liked_tracks WHERE title LIKE '%' || :query || '%' OR artist LIKE '%' || :query || '%' OR album LIKE '%' || :query || '%' LIMIT :limit")
+    suspend fun searchLiked(query: String, limit: Int = 20): List<LikedTrackEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAll(list: List<LikedTrackEntity>)
 
     @Transaction
@@ -229,6 +240,8 @@ interface HistoryDao {
     @Query("DELETE FROM history_tracks WHERE videoId NOT IN (SELECT videoId FROM history_tracks ORDER BY playedAt DESC LIMIT 40)") suspend fun trim()
     @Query("DELETE FROM history_tracks") suspend fun clear()
     @Query("SELECT * FROM history_tracks ORDER BY playedAt DESC LIMIT 40") suspend fun allOnce(): List<HistoryTrackEntity>
+    @Query("SELECT * FROM history_tracks WHERE title LIKE '%' || :query || '%' OR artist LIKE '%' || :query || '%' OR album LIKE '%' || :query || '%' LIMIT :limit")
+    suspend fun searchHistory(query: String, limit: Int = 20): List<HistoryTrackEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAll(list: List<HistoryTrackEntity>)
 
     @Transaction
@@ -332,6 +345,8 @@ interface PlaylistDao {
     @Query("DELETE FROM playlist_tracks WHERE playlistId=:id") suspend fun clearTracks(id: String)
     @Query("DELETE FROM playlist_tracks") suspend fun clearAllTracks()
     @Query("SELECT * FROM playlists ORDER BY createdAt DESC") suspend fun allPlaylistsOnce(): List<PlaylistEntity>
+    @Query("SELECT * FROM playlists WHERE name LIKE '%' || :query || '%' LIMIT :limit")
+    suspend fun searchPlaylists(query: String, limit: Int = 20): List<PlaylistEntity>
     @Query("SELECT * FROM playlist_tracks WHERE playlistId=:id ORDER BY position ASC") suspend fun tracksOnce(id: String): List<PlaylistTrackEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAll(list: List<PlaylistEntity>)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAllTracks(list: List<PlaylistTrackEntity>)
@@ -360,14 +375,45 @@ interface PlaylistDao {
     }
 }
 
+@Dao
+interface RecentSearchDao {
+    @Query("SELECT * FROM recent_searches ORDER BY timestamp DESC LIMIT :limit")
+    fun observeRecent(limit: Int = 30): Flow<List<RecentSearchEntity>>
+
+    @Query("SELECT * FROM recent_searches ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentOnce(limit: Int = 30): List<RecentSearchEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(entity: RecentSearchEntity)
+
+    @Query("DELETE FROM recent_searches WHERE query = :query")
+    suspend fun delete(query: String)
+
+    @Query("DELETE FROM recent_searches")
+    suspend fun clearAll()
+
+    @Query("DELETE FROM recent_searches WHERE query NOT IN (SELECT query FROM recent_searches ORDER BY timestamp DESC LIMIT 30)")
+    suspend fun pruneOld()
+
+    @Transaction
+    suspend fun addSearch(query: String) {
+        val clean = query.trim()
+        if (clean.isBlank()) return
+        insert(RecentSearchEntity(query = clean, timestamp = System.currentTimeMillis()))
+        pruneOld()
+    }
+}
+
 // ---- Database ----
 
 @Database(
-    entities = [LikedTrackEntity::class, HistoryTrackEntity::class, PlaylistEntity::class, PlaylistTrackEntity::class, PlayStatEntity::class,
-        TrackEntity::class, AlbumEntity::class, ArtistEntity::class, CachedShelfEntity::class, ListeningSessionEntity::class
+    entities = [
+        LikedTrackEntity::class, HistoryTrackEntity::class, PlaylistEntity::class, PlaylistTrackEntity::class, PlayStatEntity::class,
+        TrackEntity::class, AlbumEntity::class, ArtistEntity::class, CachedShelfEntity::class, ListeningSessionEntity::class,
+        RecentSearchEntity::class
     ],
-    version = 6,
-    exportSchema = false
+    version = 7,
+    exportSchema = true
 )
 @TypeConverters(Converters::class)
 abstract class GeekifyDatabase : RoomDatabase() {
@@ -378,6 +424,7 @@ abstract class GeekifyDatabase : RoomDatabase() {
     abstract fun listeningSessionDao(): ListeningSessionDao
     abstract fun catalogDao(): CatalogDao
     abstract fun shelfCacheDao(): ShelfCacheDao
+    abstract fun recentSearchDao(): RecentSearchDao
 }
 
 /** v2 -> v3: adds the offline catalog (tracks, albums, artists) and the cached home shelves. Nothing is dropped. */
@@ -472,5 +519,15 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_artists_cachedAt` ON `artists` (`cachedAt`)")
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_cached_shelves_cachedAt` ON `cached_shelves` (`cachedAt`)")
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_playlist_tracks_playlistId_position` ON `playlist_tracks` (`playlistId`, `position`)")
+    }
+}
+
+/** v6 -> v7: adds recent_searches table with timestamp index. */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `recent_searches` (`query` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, PRIMARY KEY(`query`))"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_recent_searches_timestamp` ON `recent_searches` (`timestamp`)")
     }
 }

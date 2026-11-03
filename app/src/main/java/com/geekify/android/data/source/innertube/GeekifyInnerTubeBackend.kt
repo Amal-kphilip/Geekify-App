@@ -48,6 +48,23 @@ class GeekifyInnerTubeBackend @Inject constructor(
         )
     }
 
+    suspend fun searchContinuation(continuation: String): JsonObject = execute("searchContinuation") { innerTube ->
+        innerTube.search(
+            client = YouTubeClient.WEB_REMIX,
+            continuation = continuation
+        )
+    }
+
+    suspend fun searchSuggestions(query: String): List<String> {
+        val q = query.trim()
+        if (q.isBlank()) return emptyList()
+        return try {
+            YouTube.searchSuggestions(q).getOrNull()?.queries.orEmpty()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     suspend fun browse(id: String): JsonObject = execute("browse") { innerTube ->
         innerTube.browse(client = YouTubeClient.WEB_REMIX, browseId = id)
     }
@@ -143,6 +160,7 @@ class GeekifyInnerTubeBackend @Inject constructor(
         const val MAX_ATTEMPTS = 3
         val SEARCH_PARAMS = mapOf(
             "song" to "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D",
+            "video" to "EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D",
             "album" to "EgWKAQIYAWoKEAkQChAFEAMQBA%3D%3D",
             "artist" to "EgWKAQIgAWoKEAkQChAFEAMQBA%3D%3D",
             "playlist" to "EgWKAQJQAWoKEAkQChAFEAMQBA%3D%3D"

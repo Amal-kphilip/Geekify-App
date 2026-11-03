@@ -28,9 +28,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.geekify.android.R
 import com.geekify.android.data.auth.SyncState
 import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.glass.GlassOverlayPortal
@@ -212,7 +214,7 @@ private fun ProfileHub(
                 .padding(vertical = 8.dp)
         ) {
             if (user != null) {
-                DrawerRow(GeekifyIcons.PersonAdd, "Add or switch account", onAccountClick)
+                DrawerRow(GeekifyIcons.SwitchAccount, stringResource(R.string.add_or_switch_account), onAccountClick)
             }
             DrawerRow(GeekifyIcons.Groups, "Listen together", onListenTogetherClick)
             DrawerRow(GeekifyIcons.History, "Recents", onRecentsClick)
@@ -309,12 +311,12 @@ private fun DrawerRow(icon: ImageVector, title: String, onClick: () -> Unit, des
     ) {
         Box(
             modifier = Modifier
-                .size(46.dp)
+                .size(48.dp)
                 .clip(CircleShape)
                 .background(if (destructive) ErrorRed.copy(alpha = 0.14f) else InkElevated),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, null, tint = tint, modifier = Modifier.size(22.dp))
+            Icon(icon, null, tint = tint, modifier = Modifier.size(24.dp))
         }
         Spacer(Modifier.width(16.dp))
         Text(title, color = tint, fontSize = 17.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))

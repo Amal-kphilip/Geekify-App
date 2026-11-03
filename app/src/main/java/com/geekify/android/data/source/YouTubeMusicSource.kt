@@ -2,8 +2,12 @@ package com.geekify.android.data.source
 
 import com.geekify.android.data.cache.TtlLruCache
 import com.geekify.android.data.local.CatalogRepository
+import com.geekify.android.di.DefaultDispatcher
+import com.geekify.android.di.IoDispatcher
 import com.geekify.android.settings.AppSettingsRepository
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -21,6 +25,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import java.text.Normalizer
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.random.Random
@@ -31,15 +37,21 @@ class YouTubeMusicSource @Inject constructor(
     private val innerTube: InnerTubeClient,
     private val cache: TtlLruCache,
     private val catalog: CatalogRepository,
-    private val appSettings: AppSettingsRepository
+    private val appSettings: AppSettingsRepository,
+    @DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : MusicSource {
     /** Write-through to the offline catalog never blocks (or fails) the request that triggered it. */
-    private val cacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val cacheScope = CoroutineScope(SupervisorJob() + ioDispatcher)
+    private val inFlightSearches = ConcurrentHashMap<String, Deferred<SearchResponse>>()
 
     private fun localeSuffix(): String {
         val s = appSettings.state.value
         return "${s.contentCountry}:${s.contentLanguage}"
     }
+
+    private fun normalizeQuery(q: String): String =
+        Normalizer.normalize(q.trim().replace(Regex("\\s+"), " "), Normalizer.Form.NFKC)
 
     private fun List<Track>.filterExplicitIfNeeded(): List<Track> =
         if (appSettings.state.value.hideExplicit) filterNot { it.explicit } else this
@@ -49,16 +61,57 @@ class YouTubeMusicSource @Inject constructor(
 
     override suspend fun search(query: String, type: SearchType?): MusicResult<SearchResponse> = guarded {
         require(query.isNotBlank()) { "Enter a search term." }
-        val normalizedQuery = query.trim().replace(Regex("\\s+"), " ")
+        val normalizedQuery = normalizeQuery(query)
         val kind = type?.name?.lowercase(Locale.ROOT)
         val key = "search:${normalizedQuery.lowercase(Locale.ROOT)}:$kind:${localeSuffix()}"
-        val res = cache.get<SearchResponse>(key) ?: searchAndParse(normalizedQuery, kind).also {
-            cache.put(key, it, FIFTEEN_MINUTES)
-            cacheScope.launch { catalog.cacheTracks(it.songs) }
+
+        val cached = cache.get<SearchResponse>(key)
+        val res = if (cached != null) {
+            cached
+        } else {
+            val deferred = inFlightSearches.computeIfAbsent(key) {
+                cacheScope.async(defaultDispatcher) {
+                    val result = searchAndParse(normalizedQuery, kind)
+                    cache.put(key, result, FIFTEEN_MINUTES)
+                    catalog.cacheTracks(result.songs)
+                    result
+                }
+            }
+            try {
+                deferred.await()
+            } finally {
+                inFlightSearches.remove(key, deferred)
+            }
         }
+
         res.copy(
             songs = res.songs.filterExplicitIfNeeded(),
             shelves = res.shelves.mapNotNull { shelf ->
+                shelf.items.filterExplicitItemsIfNeeded().takeIf { it.isNotEmpty() }?.let { shelf.copy(items = it) }
+            }
+        )
+    }
+
+    override suspend fun searchSuggestions(query: String): List<String> {
+        val q = query.trim()
+        if (q.isBlank()) return emptyList()
+        val normalized = normalizeQuery(q).lowercase(Locale.ROOT)
+        val key = "suggestions:$normalized"
+        val cached = cache.get<List<String>>(key)
+        if (cached != null) return cached
+        val fetched = innerTube.searchSuggestions(q)
+        if (fetched.isNotEmpty()) {
+            cache.put(key, fetched, FIFTEEN_MINUTES)
+        }
+        return fetched
+    }
+
+    override suspend fun searchContinuation(continuation: String): MusicResult<SearchResponse> = guarded {
+        val raw = withContext(ioDispatcher) { innerTube.searchContinuation(continuation) }
+        val parsed = withContext(defaultDispatcher) { Parsers.parseSearchResponseSinglePass(raw, "", null) }
+        parsed.copy(
+            songs = parsed.songs.filterExplicitIfNeeded(),
+            shelves = parsed.shelves.mapNotNull { shelf ->
                 shelf.items.filterExplicitItemsIfNeeded().takeIf { it.isNotEmpty() }?.let { shelf.copy(items = it) }
             }
         )
@@ -199,6 +252,8 @@ class YouTubeMusicSource @Inject constructor(
             SearchType.ALBUM -> result.albums.take(16).map(::ShelfCard) +
                 result.songs.take(6).map(::ShelfTrack)
             SearchType.ARTIST -> result.artists.take(16).map(::ShelfCard)
+            SearchType.VIDEO -> result.songs.take(16).map(::ShelfTrack) +
+                result.playlists.take(4).map(::ShelfCard)
             null -> result.songs.take(12).map(::ShelfTrack) +
                 result.playlists.take(6).map(::ShelfCard) +
                 result.albums.take(6).map(::ShelfCard)
@@ -306,11 +361,11 @@ class YouTubeMusicSource @Inject constructor(
     }
 
     /** A filtered tab that comes back empty falls back to the unfiltered response. */
-    private suspend fun searchAndParse(query: String, kind: String?): SearchResponse = withContext(Dispatchers.IO) {
+    private suspend fun searchAndParse(query: String, kind: String?): SearchResponse = withContext(ioDispatcher) {
         val raw = innerTube.search(query, kind)
-        val parsed = withContext(Dispatchers.Default) { parseSearch(raw, query, kind) }
+        val parsed = withContext(defaultDispatcher) { parseSearch(raw, query, kind) }
         val empty = when (kind) {
-            "song" -> parsed.songs.isEmpty()
+            "song", "video" -> parsed.songs.isEmpty()
             "album" -> parsed.albums.isEmpty()
             "artist" -> parsed.artists.isEmpty()
             "playlist" -> parsed.playlists.isEmpty()
@@ -319,7 +374,7 @@ class YouTubeMusicSource @Inject constructor(
         if (empty) {
             runCatching {
                 val fallbackRaw = innerTube.search(query, null)
-                withContext(Dispatchers.Default) { parseSearch(fallbackRaw, query, null) }
+                withContext(defaultDispatcher) { parseSearch(fallbackRaw, query, null) }
             }.getOrDefault(parsed)
         } else parsed
     }
@@ -369,36 +424,8 @@ class YouTubeMusicSource @Inject constructor(
             if (s >= 3600) "%d:%02d:%02d".format(s / 3600, (s % 3600) / 60, s % 60)
             else "%d:%02d".format(s / 60, s % 60)
 
-        internal fun parseSearch(raw: JsonObject, query: String, type: String?): SearchResponse {
-            val shelves = Parsers.shelves(raw).mapNotNull { (title, block) ->
-                val tracks = Parsers.tracks(block)
-                val cards = Parsers.cards(block)
-                // A search shelf can contain song rows and entity cards together. Keep both;
-                // dropping one side caused incomplete and inconsistent All-tab results.
-                val items = (tracks.map(::ShelfTrack) + cards.map(::ShelfCard)).distinctBy { it.id }
-                items.takeIf { it.isNotEmpty() }?.let { Shelf(title, it) }
-            }
-            val allTracks = shelves
-                .flatMap { it.items }
-                .filterIsInstance<ShelfTrack>()
-                .map { it.value }
-                .distinctBy { it.videoId }
-                .ifEmpty { Parsers.tracks(raw) }
-
-            val entityFilter = type?.takeIf { it == "album" || it == "artist" || it == "playlist" }
-            val allCards = (Parsers.searchEntities(raw, entityFilter, limit = 300) + Parsers.cards(raw, entityFilter, limit = 300))
-                .distinctBy { it.id }
-            val byKind = allCards.groupBy { it.type }
-
-            return SearchResponse(
-                query = query,
-                songs = allTracks,
-                albums = byKind["album"].orEmpty(),
-                artists = byKind["artist"].orEmpty(),
-                playlists = byKind["playlist"].orEmpty(),
-                shelves = shelves
-            )
-        }
+        internal fun parseSearch(raw: JsonObject, query: String, type: String?): SearchResponse =
+            Parsers.parseSearchResponseSinglePass(raw, query, type)
 
         internal fun parseTrackDetails(raw: JsonObject, fallbackVideoId: String): Track {
             val details = raw["videoDetails"] as? JsonObject ?: error("Track metadata is unavailable.")

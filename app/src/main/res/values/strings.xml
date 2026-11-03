@@ -6,4 +6,14 @@
     <string name="notif_action_whats_new">What\'s new</string>
     <string name="notif_action_update">Update</string>
     <string name="notif_action_later">Later</string>
+    <string name="accounts_title">Accounts</string>
+    <string name="remove_account_title">Remove %1$s from this device?</string>
+    <string name="remove_account_message">This removes the saved account from this device only. Your music and cloud account will not be deleted.</string>
+    <string name="action_remove">Remove</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="accessibility_remove_account">Remove account</string>
+    <string name="accessibility_back">Back</string>
+    <string name="add_account">Add account</string>
+    <string name="switch_account">Switch account</string>
+    <string name="add_or_switch_account">Add or switch account</string>
 </resources>

@@ -365,6 +365,13 @@ object GeekifyIcons {
         )
     }
 
+    val NorthWest: ImageVector by lazy {
+        filledVector(
+            name = "NorthWest",
+            pathData = "M5 15h2V8.41L18.59 20 20 18.59 8.41 7H15V5H5v10z"
+        )
+    }
+
     val ChevronRight: ImageVector by lazy {
         strokedVector(
             name = "ChevronRight",
@@ -474,6 +481,13 @@ object GeekifyIcons {
         filledVector(
             name = "PersonAdd",
             pathData = "M10.5 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM1.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 9 21.75c-2.676 0-5.216-.584-7.499-1.632ZM19.5 7.5a.75.75 0 0 1 .75.75v2.25h2.25a.75.75 0 0 1 0 1.5h-2.25v2.25a.75.75 0 0 1-1.5 0v-2.25H16.5a.75.75 0 0 1 0-1.5h2.25V8.25a.75.75 0 0 1 .75-.75Z"
+        )
+    }
+
+    val SwitchAccount: ImageVector by lazy {
+        filledVector(
+            name = "SwitchAccount",
+            pathData = "M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z"
         )
     }
 

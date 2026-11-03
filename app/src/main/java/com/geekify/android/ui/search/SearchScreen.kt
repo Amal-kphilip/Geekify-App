@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -43,9 +44,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.geekify.android.data.model.Card
+import com.geekify.android.data.model.SearchTopResult
 import com.geekify.android.data.model.Track
 import com.geekify.android.ui.components.*
 import com.geekify.android.ui.theme.*
+import java.util.Locale
 
 private val BrowseTileGradients = listOf(
     listOf(Color(0xFFFF375F), Color(0xFFBF5AF2)),
@@ -73,11 +76,26 @@ fun SearchScreen(
     onCardClick: (Card) -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
-    val tabs = listOf("All", "Songs", "Albums", "Artists", "Playlists")
+    val tabs = listOf("All", "Songs", "Videos", "Albums", "Artists", "Playlists")
     val searching = state.query.isNotBlank()
     val focusManager = LocalFocusManager.current
     var searchFocused by remember { mutableStateOf(false) }
     val showCancel = searchFocused || searching
+    val listState = rememberLazyListState()
+
+    val shouldLoadMore by remember {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val total = layoutInfo.totalItemsCount
+            val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            total > 0 && lastVisible >= total - 3
+        }
+    }
+    LaunchedEffect(shouldLoadMore) {
+        if (shouldLoadMore && state.response?.continuation != null && !state.isLoadingMore) {
+            viewModel.loadMore()
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -175,7 +193,10 @@ fun SearchScreen(
                             cursorBrush = SolidColor(IosPalette.systemBlue),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                             keyboardActions = KeyboardActions(
-                                onSearch = { focusManager.clearFocus() }
+                                onSearch = {
+                                    focusManager.clearFocus()
+                                    viewModel.onSubmit(state.query)
+                                }
                             ),
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -266,6 +287,50 @@ fun SearchScreen(
 
             Box(modifier = Modifier.fillMaxSize()) {
                 when {
+                    state.suggestions.isNotEmpty() && state.response == null -> {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
+                        ) {
+                            items(state.suggestions) { suggestion ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 48.dp)
+                                        .bouncyClickable(pressedScale = 0.98f) {
+                                            focusManager.clearFocus()
+                                            viewModel.onSuggestionClick(suggestion)
+                                        }
+                                        .padding(vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = GeekifyIcons.Search,
+                                        contentDescription = null,
+                                        tint = IosPalette.tertiaryLabel,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(14.dp))
+                                    Text(
+                                        text = suggestion,
+                                        color = IosPalette.label,
+                                        fontSize = 16.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Icon(
+                                        imageVector = GeekifyIcons.NorthWest,
+                                        contentDescription = "Select suggestion",
+                                        tint = IosPalette.tertiaryLabel,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                IosSettingsDivider(insetStart = 32.dp)
+                            }
+                        }
+                    }
+
                     !searching -> {
                         LazyVerticalGrid(
                             columns = GridCells.Adaptive(minSize = 156.dp),
@@ -279,6 +344,90 @@ fun SearchScreen(
                             ),
                             modifier = Modifier.fillMaxSize()
                         ) {
+                            if (state.recentSearches.isNotEmpty()) {
+                                item(span = { GridItemSpan(maxLineSpan) }) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(bottom = 6.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Recent Searches",
+                                            color = IosPalette.label,
+                                            fontSize = 20.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = (-0.4).sp
+                                        )
+                                        TextButton(
+                                            onClick = viewModel::clearAllRecentSearches,
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                            modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                                        ) {
+                                            Text(
+                                                text = "Clear all",
+                                                color = IosPalette.systemBlue,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                }
+
+                                items(
+                                    count = state.recentSearches.size,
+                                    key = { "recent_${state.recentSearches[it]}" },
+                                    span = { GridItemSpan(maxLineSpan) }
+                                ) { idx ->
+                                    val queryItem = state.recentSearches[idx]
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(min = 44.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(IosPalette.secondarySystemGroupedBackground)
+                                            .clickable {
+                                                focusManager.clearFocus()
+                                                viewModel.onSuggestionClick(queryItem)
+                                            }
+                                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = GeekifyIcons.History,
+                                            contentDescription = null,
+                                            tint = IosPalette.tertiaryLabel,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(Modifier.width(12.dp))
+                                        Text(
+                                            text = queryItem,
+                                            color = IosPalette.label,
+                                            fontSize = 15.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        IconButton(
+                                            onClick = { viewModel.deleteRecentSearch(queryItem) },
+                                            modifier = Modifier.size(48.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = GeekifyIcons.Close,
+                                                contentDescription = "Remove search",
+                                                tint = IosPalette.tertiaryLabel,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                item(span = { GridItemSpan(maxLineSpan) }) {
+                                    Spacer(Modifier.height(10.dp))
+                                }
+                            }
+
                             item(span = { GridItemSpan(maxLineSpan) }) {
                                 Text(
                                     text = "Browse Categories",
@@ -308,11 +457,23 @@ fun SearchScreen(
                         }
                     }
 
-                    state.isLoading -> Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(color = Lime)
+                    state.isLoading && state.response == null -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 20.dp, vertical = 12.dp)
+                        ) {
+                            repeat(6) {
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(64.dp)
+                                        .padding(vertical = 4.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = IosPalette.secondarySystemGroupedBackground.copy(alpha = 0.5f)
+                                ) {}
+                            }
+                        }
                     }
 
                     state.error != null -> Box(
@@ -352,7 +513,9 @@ fun SearchScreen(
                             val isEmptyResult = response.songs.isEmpty() &&
                                 response.albums.isEmpty() &&
                                 response.artists.isEmpty() &&
-                                response.playlists.isEmpty()
+                                response.playlists.isEmpty() &&
+                                state.libraryTracks.isEmpty() &&
+                                state.libraryPlaylists.isEmpty()
 
                             if (isEmptyResult) {
                                 Box(
@@ -385,38 +548,176 @@ fun SearchScreen(
                                 }
                             } else {
                                 LazyColumn(
+                                    state = listState,
                                     modifier = Modifier.fillMaxSize(),
                                     contentPadding = PaddingValues(bottom = 28.dp + LocalBottomInset.current)
                                 ) {
-                                    // Top Result Spotlight Card on "All" tab
-                                    val topSong = response.songs.firstOrNull()
-                                    if (state.selectedTab == "All" && topSong != null) {
-                                        item(key = "top_result_${topSong.videoId}") {
-                                            Column(
+                                    // Did You Mean Banner
+                                    response.didYouMean?.let { corrected ->
+                                        item(key = "did_you_mean_banner") {
+                                            Surface(
+                                                color = IosPalette.secondarySystemGroupedBackground,
+                                                shape = RoundedCornerShape(16.dp),
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .padding(horizontal = 20.dp, vertical = 10.dp)
+                                                    .padding(horizontal = 20.dp, vertical = 6.dp)
                                             ) {
-                                                Text(
-                                                    text = "Top Result",
-                                                    color = IosPalette.label,
-                                                    fontSize = 20.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    letterSpacing = (-0.4).sp,
-                                                    modifier = Modifier.padding(bottom = 10.dp)
-                                                )
-                                                TopResultSongCard(
-                                                    track = topSong,
-                                                    onClick = { onTrackClick(topSong, response.songs) },
-                                                    onMoreClick = { onTrackActions(topSong) }
-                                                )
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        imageVector = GeekifyIcons.Search,
+                                                        contentDescription = null,
+                                                        tint = Lime,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                    Spacer(Modifier.width(12.dp))
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Row(
+                                                            modifier = Modifier.clickable {
+                                                                viewModel.onSuggestionClick(corrected)
+                                                            }
+                                                        ) {
+                                                            Text("Showing results for ", color = IosPalette.secondaryLabel, fontSize = 14.sp)
+                                                            Text(corrected, color = Lime, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                                        }
+                                                        Spacer(Modifier.height(2.dp))
+                                                        Row(
+                                                            modifier = Modifier.clickable {
+                                                                viewModel.onSubmit(state.query)
+                                                            }
+                                                        ) {
+                                                            Text("Search instead for ", color = IosPalette.tertiaryLabel, fontSize = 12.sp)
+                                                            Text(state.query, color = IosPalette.secondaryLabel, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
 
-                                    if (response.songs.isNotEmpty() && (state.selectedTab == "All" || state.selectedTab == "Songs")) {
+                                    // Top Result Spotlight Card on "All" tab
+                                    val topResult = response.topResult
+                                    if (state.selectedTab == "All") {
+                                        if (topResult != null) {
+                                            item(key = "top_result_${topResult.id}") {
+                                                Column(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(horizontal = 20.dp, vertical = 10.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "Top Result",
+                                                        color = IosPalette.label,
+                                                        fontSize = 20.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        letterSpacing = (-0.4).sp,
+                                                        modifier = Modifier.padding(bottom = 10.dp)
+                                                    )
+                                                    TopResultCard(
+                                                        topResult = topResult,
+                                                        onClick = {
+                                                            if (topResult.kind == "song" || topResult.kind == "video") {
+                                                                val track = response.songs.firstOrNull { it.videoId == topResult.videoId }
+                                                                    ?: Track(
+                                                                        videoId = topResult.videoId ?: topResult.id,
+                                                                        title = topResult.title,
+                                                                        artist = topResult.subtitle ?: "Unknown",
+                                                                        thumbnails = topResult.thumbnails,
+                                                                        explicit = topResult.explicit
+                                                                    )
+                                                                onTrackClick(track, response.songs.ifEmpty { listOf(track) })
+                                                            } else {
+                                                                onCardClick(
+                                                                    Card(
+                                                                        id = topResult.id,
+                                                                        title = topResult.title,
+                                                                        subtitle = topResult.subtitle,
+                                                                        thumbnails = topResult.thumbnails,
+                                                                        type = topResult.kind,
+                                                                        videoId = topResult.videoId,
+                                                                        playlistId = topResult.playlistId,
+                                                                        browseId = topResult.browseId
+                                                                    )
+                                                                )
+                                                            }
+                                                        },
+                                                        onMoreClick = {
+                                                            val track = response.songs.firstOrNull { it.videoId == topResult.videoId }
+                                                            if (track != null) onTrackActions(track)
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        } else {
+                                            val topSong = response.songs.firstOrNull()
+                                            if (topSong != null) {
+                                                item(key = "top_result_${topSong.videoId}") {
+                                                    Column(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(horizontal = 20.dp, vertical = 10.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "Top Result",
+                                                            color = IosPalette.label,
+                                                            fontSize = 20.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            letterSpacing = (-0.4).sp,
+                                                            modifier = Modifier.padding(bottom = 10.dp)
+                                                        )
+                                                        TopResultSongCard(
+                                                            track = topSong,
+                                                            onClick = { onTrackClick(topSong, response.songs) },
+                                                            onMoreClick = { onTrackActions(topSong) }
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // In Your Library section
+                                    if (state.libraryTracks.isNotEmpty() && (state.selectedTab == "All" || state.selectedTab == "Songs")) {
+                                        item(key = "library_tracks_header") { SectionTitle("From Your Library") }
+                                        item(key = "library_tracks_card") {
+                                            Surface(
+                                                color = IosPalette.secondarySystemGroupedBackground,
+                                                shape = IosCardShape,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 20.dp)
+                                            ) {
+                                                Column(modifier = Modifier.fillMaxWidth()) {
+                                                    state.libraryTracks.forEachIndexed { idx, song ->
+                                                        TrackRow(
+                                                            track = song,
+                                                            onClick = { onTrackClick(song, state.libraryTracks) },
+                                                            onLongClick = { onTrackActions(song) },
+                                                            onMoreClick = { onTrackActions(song) }
+                                                        )
+                                                        if (idx < state.libraryTracks.lastIndex) {
+                                                            IosSettingsDivider(insetStart = 88.dp)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if (state.libraryPlaylists.isNotEmpty() && (state.selectedTab == "All" || state.selectedTab == "Playlists")) {
+                                        item(key = "library_playlists_header") { SectionTitle("Playlists in Your Library") }
+                                        item(key = "library_playlists_row") { CardsRow(state.libraryPlaylists, onCardClick) }
+                                    }
+
+                                    // Web Results: Songs / Videos
+                                    if (response.songs.isNotEmpty() && (state.selectedTab == "All" || state.selectedTab == "Songs" || state.selectedTab == "Videos")) {
+                                        val displaySongs = if (state.selectedTab == "All") response.songs.take(10) else response.songs
                                         item(key = "songs_header") {
-                                            SectionTitle("Songs")
+                                            SectionTitle(if (state.selectedTab == "Videos") "Videos" else "Songs")
                                         }
                                         item(key = "songs_grouped_card") {
                                             Surface(
@@ -427,14 +728,14 @@ fun SearchScreen(
                                                     .padding(horizontal = 20.dp)
                                             ) {
                                                 Column(modifier = Modifier.fillMaxWidth()) {
-                                                    response.songs.forEachIndexed { idx, song ->
+                                                    displaySongs.forEachIndexed { idx, song ->
                                                         TrackRow(
                                                             track = song,
                                                             onClick = { onTrackClick(song, response.songs) },
                                                             onLongClick = { onTrackActions(song) },
                                                             onMoreClick = { onTrackActions(song) }
                                                         )
-                                                        if (idx < response.songs.lastIndex) {
+                                                        if (idx < displaySongs.lastIndex) {
                                                             IosSettingsDivider(insetStart = 88.dp)
                                                         }
                                                     }
@@ -457,11 +758,153 @@ fun SearchScreen(
                                         item(key = "playlists_header") { SectionTitle("Playlists") }
                                         item(key = "playlists_row") { CardsRow(response.playlists, onCardClick) }
                                     }
+
+                                    if (state.isLoadingMore) {
+                                        item(key = "loading_more") {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(16.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(24.dp),
+                                                    color = Lime,
+                                                    strokeWidth = 2.dp
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun TopResultCard(
+    topResult: SearchTopResult,
+    onClick: () -> Unit,
+    onMoreClick: () -> Unit
+) {
+    Surface(
+        color = IosPalette.secondarySystemGroupedBackground,
+        shape = IosCardShape,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(IosCardShape)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onMoreClick
+            )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val isArtist = topResult.kind == "artist"
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(if (isArtist) CircleShape else RoundedCornerShape(16.dp))
+                    .background(IosPalette.tertiarySystemGroupedBackground),
+                contentAlignment = Alignment.Center
+            ) {
+                val art = topResult.thumbnails.bestArtworkUrl(360)
+                if (art != null) {
+                    AsyncImage(
+                        model = art,
+                        contentDescription = topResult.title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(
+                        imageVector = if (isArtist) GeekifyIcons.Person else GeekifyIcons.MusicNote,
+                        contentDescription = null,
+                        tint = IosPalette.secondaryLabel,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Lime.copy(alpha = 0.16f))
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = topResult.kind.uppercase(Locale.ROOT),
+                        color = Lime,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.6.sp
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = topResult.title,
+                        color = IosPalette.label,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (topResult.explicit) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            imageVector = GeekifyIcons.Explicit,
+                            contentDescription = "Explicit",
+                            tint = IosPalette.tertiaryLabel,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+                if (!topResult.subtitle.isNullOrBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = topResult.subtitle,
+                        color = IosPalette.secondaryLabel,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(Lime)
+                    .bouncyClickable(pressedScale = 0.92f, onClick = onClick),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = GeekifyIcons.Play,
+                    contentDescription = "Play",
+                    tint = OnAccent,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Spacer(Modifier.width(4.dp))
+            IconButton(onClick = onMoreClick) {
+                Icon(
+                    imageVector = GeekifyIcons.MoreHoriz,
+                    contentDescription = "More options",
+                    tint = IosPalette.secondaryLabel
+                )
             }
         }
     }

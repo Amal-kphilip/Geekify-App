@@ -169,7 +169,6 @@ object Parsers {
             }
             val id = when (kind) {
                 "song" -> vid ?: bid ?: playlist ?: title
-                "playlist" -> bid ?: playlist ?: vid ?: title
                 else -> bid ?: playlist ?: vid ?: title
             }
             val card = Card(id, title, text(o["subtitle"]).ifBlank { null }, findThumbnails(o), kind, vid, playlist, bid)
@@ -232,6 +231,201 @@ object Parsers {
             ?.let { text(it).trim() }?.ifBlank { null }
         CollectionHeader(text(h["title"]).trim().ifBlank { null }, creator, description, year)
     }.getOrDefault(CollectionHeader(null, null, null, null))
+
+    fun parseTopResult(o: JsonObject): SearchTopResult? {
+        val renderer = objectOrNull(o["musicCardShelfRenderer"]) ?: return null
+        val title = text(renderer["title"]).ifBlank { return null }
+        val subtitle = text(renderer["subtitle"]).ifBlank { null }
+        val onTap = objectOrNull(renderer["onTap"])
+        val watchEndpoint = objectOrNull(onTap?.get("watchEndpoint"))
+        val browseEndpoint = objectOrNull(onTap?.get("browseEndpoint"))
+        val vid = watchEndpoint?.str("videoId") ?: videoId(renderer)
+        val bid = browseEndpoint?.str("browseId")
+        val page = objectOrNull(objectOrNull(browseEndpoint?.get("browseEndpointContextSupportedConfigs"))?.get("browseEndpointContextMusicConfig"))?.str("pageType")
+
+        val kind = when {
+            page == "MUSIC_PAGE_TYPE_ARTIST" || bid?.startsWith("UC") == true -> "artist"
+            page == "MUSIC_PAGE_TYPE_ALBUM" || bid?.startsWith("MPRE") == true -> "album"
+            page == "MUSIC_PAGE_TYPE_PLAYLIST" || bid?.startsWith("VL") == true -> "playlist"
+            vid != null -> "song"
+            subtitle?.contains("Artist", ignoreCase = true) == true -> "artist"
+            subtitle?.contains("Album", ignoreCase = true) == true -> "album"
+            subtitle?.contains("Playlist", ignoreCase = true) == true -> "playlist"
+            else -> "song"
+        }
+
+        val id = when (kind) {
+            "artist" -> bid ?: title
+            "album" -> bid ?: title
+            "playlist" -> bid?.removePrefix("VL") ?: title
+            else -> vid ?: bid ?: title
+        }
+
+        val explicit = renderer["subtitleBadges"]?.toString()?.contains("EXPLICIT") == true ||
+            renderer["badges"]?.toString()?.contains("EXPLICIT") == true
+
+        return SearchTopResult(
+            id = id,
+            title = title,
+            subtitle = subtitle,
+            kind = kind,
+            thumbnails = findThumbnails(renderer),
+            videoId = vid,
+            playlistId = if (kind == "playlist") bid?.removePrefix("VL") else null,
+            browseId = bid,
+            explicit = explicit
+        )
+    }
+
+    fun parseDidYouMean(o: JsonObject): String? {
+        val dym = objectOrNull(o["didYouMeanRenderer"])
+            ?: objectOrNull(o["showingResultsForRenderer"])
+            ?: return null
+        return text(dym["correctedQuery"]).takeIf { it.isNotBlank() }
+    }
+
+    fun parseContinuation(o: JsonObject): String? {
+        val contItem = objectOrNull(o["continuationItemRenderer"]) ?: return null
+        val nextContData = objectOrNull(contItem["nextContinuationData"])
+            ?: objectOrNull(contItem["nextRadioContinuationData"])
+        return nextContData?.str("continuation")
+    }
+
+    /**
+     * Single-pass DFS over a YouTube Music search response JSON.
+     * Extracts shelves, tracks, cards, top result, did-you-mean, and continuation in one iteration,
+     * avoiding repeated full-tree allocations and traversals.
+     */
+    fun parseSearchResponseSinglePass(data: JsonElement, query: String, type: String?): SearchResponse {
+        var topResult: SearchTopResult? = null
+        var didYouMean: String? = null
+        var continuation: String? = null
+        val rawShelves = mutableListOf<Pair<String, JsonObject>>()
+        val allTracks = mutableListOf<Track>()
+        val seenTrackIds = mutableSetOf<String>()
+        val allCards = mutableListOf<Card>()
+        val seenCardIds = mutableSetOf<String>()
+
+        val entityFilter = type?.takeIf { it == "album" || it == "artist" || it == "playlist" || it == "video" }
+
+        val stack = ArrayDeque<JsonElement>()
+        stack.add(data)
+        while (stack.isNotEmpty()) {
+            when (val curr = stack.removeLast()) {
+                is JsonObject -> {
+                    if (topResult == null && curr.containsKey("musicCardShelfRenderer")) {
+                        topResult = parseTopResult(curr)
+                    }
+                    if (didYouMean == null && (curr.containsKey("didYouMeanRenderer") || curr.containsKey("showingResultsForRenderer"))) {
+                        didYouMean = parseDidYouMean(curr)
+                    }
+                    if (continuation == null && curr.containsKey("continuationItemRenderer")) {
+                        continuation = parseContinuation(curr)
+                    }
+                    listOf("musicShelfRenderer", "musicCarouselShelfRenderer", "musicPlaylistShelfRenderer").forEach { key ->
+                        objectOrNull(curr[key])?.let { block ->
+                            val header = objectOrNull(block["header"])
+                            val title = text(block["title"]).ifBlank {
+                                text(objectOrNull(header?.get("musicCarouselShelfBasicHeaderRenderer"))?.get("title"))
+                            }.ifBlank { "More" }
+                            rawShelves.add(title to block)
+                        }
+                    }
+                    objectOrNull(curr["musicResponsiveListItemRenderer"])?.let { resp ->
+                        val tr = responsive(resp)
+                        if (tr != null && seenTrackIds.add(tr.videoId) && allTracks.size < 300) {
+                            allTracks.add(tr)
+                        }
+                        val endpoint = objectOrNull(objectOrNull(resp["navigationEndpoint"])?.get("browseEndpoint"))
+                        val bid = endpoint?.str("browseId")
+                        if (bid != null) {
+                            val page = objectOrNull(objectOrNull(endpoint["browseEndpointContextSupportedConfigs"])?.get("browseEndpointContextMusicConfig"))?.str("pageType")
+                            val kind = when {
+                                page == "MUSIC_PAGE_TYPE_ARTIST" || bid.startsWith("UC") -> "artist"
+                                page == "MUSIC_PAGE_TYPE_PLAYLIST" || bid.startsWith("VL") -> "playlist"
+                                page == "MUSIC_PAGE_TYPE_ALBUM" || bid.startsWith("MPRE") -> "album"
+                                else -> null
+                            }
+                            if (kind != null && (entityFilter == null || entityFilter == kind)) {
+                                val columns = (resp["flexColumns"] as? JsonArray).orEmpty().map { c ->
+                                    val col = objectOrNull(c)
+                                    objectOrNull(col?.get("musicResponsiveListItemFlexColumnRenderer")) ?: objectOrNull(col?.values?.firstOrNull())
+                                }
+                                val title = text(columns.firstOrNull()?.get("text")).trim()
+                                if (title.isNotBlank()) {
+                                    val subtitle = columns.drop(1).joinToString(" • ") { text(it?.get("text")).trim() }.trim().ifBlank { null }
+                                    val card = Card(bid, title, subtitle, findThumbnails(resp), kind, null, if (kind == "playlist") bid.removePrefix("VL") else null, bid)
+                                    if (seenCardIds.add(card.id) && allCards.size < 300) {
+                                        allCards.add(card)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    objectOrNull(curr["musicTwoRowItemRenderer"])?.let { twoRow ->
+                        val title = text(twoRow["title"])
+                        if (title.isNotBlank()) {
+                            val navigation = objectOrNull(twoRow["navigationEndpoint"])
+                            val directBrowse = objectOrNull(navigation?.get("browseEndpoint"))
+                            val fallbackBrowse = if (navigation == null) browse(twoRow) else Pair(null, null)
+                            val bid = directBrowse?.str("browseId") ?: fallbackBrowse.first
+                            val page = objectOrNull(objectOrNull(directBrowse?.get("browseEndpointContextSupportedConfigs"))?.get("browseEndpointContextMusicConfig"))
+                                ?.str("pageType") ?: fallbackBrowse.second
+                            val vid = videoId(twoRow)
+                            val playlist = walk(twoRow).firstNotNullOfOrNull { x -> objectOrNull(x["watchEndpoint"])?.str("playlistId") }
+                            val kind = when {
+                                page == "MUSIC_PAGE_TYPE_ARTIST" || bid?.startsWith("UC") == true -> "artist"
+                                page == "MUSIC_PAGE_TYPE_ALBUM" || bid?.startsWith("MPRE") == true -> "album"
+                                page == "MUSIC_PAGE_TYPE_PLAYLIST" -> "playlist"
+                                vid != null -> "song"
+                                playlist != null -> "playlist"
+                                else -> "album"
+                            }
+                            val id = when (kind) {
+                                "song" -> vid ?: bid ?: playlist ?: title
+                                else -> bid ?: playlist ?: vid ?: title
+                            }
+                            val card = Card(id, title, text(twoRow["subtitle"]).ifBlank { null }, findThumbnails(twoRow), kind, vid, playlist, bid)
+                            if ((entityFilter == null || entityFilter == kind) && seenCardIds.add(card.id) && allCards.size < 300) {
+                                allCards.add(card)
+                            }
+                        }
+                    }
+
+                    for (v in curr.values.toList().asReversed()) {
+                        if (v is JsonObject || v is JsonArray) stack.add(v)
+                    }
+                }
+                is JsonArray -> {
+                    for (item in curr.asReversed()) {
+                        if (item is JsonObject || item is JsonArray) stack.add(item)
+                    }
+                }
+                else -> Unit
+            }
+        }
+
+        val shelves = rawShelves.mapNotNull { (title, block) ->
+            val tracks = tracks(block)
+            val cards = cards(block)
+            val items = (tracks.map(::ShelfTrack) + cards.map(::ShelfCard)).distinctBy { it.id }
+            items.takeIf { it.isNotEmpty() }?.let { Shelf(title, it) }
+        }
+
+        val byKind = allCards.groupBy { it.type }
+
+        return SearchResponse(
+            query = query,
+            songs = allTracks,
+            albums = byKind["album"].orEmpty(),
+            artists = byKind["artist"].orEmpty(),
+            playlists = byKind["playlist"].orEmpty(),
+            shelves = shelves,
+            topResult = topResult,
+            didYouMean = didYouMean,
+            continuation = continuation
+        )
+    }
 
     fun seconds(value: String?): Int? { val parts = value?.trim()?.split(":") ?: return null; if (parts.size !in 2..3 || parts.any { it.toIntOrNull() == null }) return null; return parts.map(String::toInt).let { if (it.size == 2) it[0] * 60 + it[1] else it[0] * 3600 + it[1] * 60 + it[2] } }
 }

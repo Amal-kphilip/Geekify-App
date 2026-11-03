@@ -1,5 +1,6 @@
 package com.geekify.android.ui.home
 
+import android.provider.Settings
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -27,6 +28,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -38,6 +40,8 @@ import com.geekify.android.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
+
+private const val DISCOVER_LOOP_FACTOR = 10_000
 
 /** One card in the "Curated & trending" carousel. [lead] is the song the heart / queue / more buttons act on. */
 private data class DiscoverItem(
@@ -110,30 +114,50 @@ fun HomeScreen(
         )
     }).take(10)
 
+    val isLooping = discover.size > 1
+    val initialDiscoverIndex = if (isLooping) (DISCOVER_LOOP_FACTOR / 2) * discover.size else 0
     val discoverListState = rememberLazyListState()
     val discoverSnapFling = rememberSnapFlingBehavior(lazyListState = discoverListState)
-    // Use stable item identities rather than only the non-empty flag. The feed can first
-    // render cached/partial content and then replace it with the current curated cards.
-    // In that case the carousel must start at its first card again.
+    val context = LocalContext.current
+    val reduceMotion = remember(context) {
+        runCatching {
+            Settings.Global.getFloat(
+                context.contentResolver,
+                Settings.Global.ANIMATOR_DURATION_SCALE,
+                1f
+            ) == 0f
+        }.getOrDefault(false)
+    }
+
+    // Use stable item identities rather than only the non-empty flag.
     val discoverKeys = discover.map { it.key }
     LaunchedEffect(discoverKeys) {
-        if (discoverKeys.isNotEmpty()) {
+        if (discoverKeys.size > 1) {
+            discoverListState.scrollToItem(initialDiscoverIndex)
+        } else if (discoverKeys.isNotEmpty()) {
             discoverListState.scrollToItem(0)
         }
     }
-    // Do not key this effect on isScrollInProgress: animateScrollToItem itself toggles
-    // that state, and using it as an effect key cancels the animation before it completes.
-    // User scrolling simply skips the current interval; automatic scrolling resumes on
-    // the next interval without fighting the gesture.
-    LaunchedEffect(discoverKeys) {
-        if (discoverKeys.size > 1) {
+
+    // Auto-advance always moves forward, pauses while dragging, resumes ~4s after stopping,
+    // and respects reduce-motion.
+    LaunchedEffect(discoverKeys, reduceMotion) {
+        if (discoverKeys.size > 1 && !reduceMotion) {
             while (true) {
-                delay(4_200L)
+                while (discoverListState.isScrollInProgress) {
+                    delay(100L)
+                }
+                var idlePassedMs = 0L
+                while (idlePassedMs < 4_000L) {
+                    delay(200L)
+                    if (discoverListState.isScrollInProgress) {
+                        idlePassedMs = 0L
+                    } else {
+                        idlePassedMs += 200L
+                    }
+                }
                 if (!discoverListState.isScrollInProgress) {
-                    val current = discoverListState.firstVisibleItemIndex
-                    val next = if (current >= discoverKeys.lastIndex) 0 else current + 1
-                    // Isolate the animation job so a user drag can interrupt it without
-                    // cancelling the long-lived auto-scroll ticker itself.
+                    val next = discoverListState.firstVisibleItemIndex + 1
                     supervisorScope {
                         launch { discoverListState.animateScrollToItem(next) }.join()
                     }
@@ -315,16 +339,17 @@ fun HomeScreen(
                     item {
                         val activeDiscoverIndex by remember(discover.size) {
                             derivedStateOf {
-                                if (!discoverListState.canScrollForward && discover.isNotEmpty()) {
-                                    discover.lastIndex
-                                } else {
-                                    discoverListState.firstVisibleItemIndex.coerceIn(0, (discover.size - 1).coerceAtLeast(0))
+                                if (discover.isEmpty()) 0
+                                else {
+                                    val raw = discoverListState.firstVisibleItemIndex % discover.size
+                                    if (raw < 0) raw + discover.size else raw
                                 }
                             }
                         }
                         Column(modifier = Modifier.padding(top = 32.dp)) {
                             SectionTitle("Curated & trending")
                             Spacer(Modifier.height(6.dp))
+                            val discoverItemCount = if (isLooping) discover.size * DISCOVER_LOOP_FACTOR else discover.size
                             LazyRow(
                                 state = discoverListState,
                                 flingBehavior = discoverSnapFling,
@@ -332,15 +357,20 @@ fun HomeScreen(
                                 horizontalArrangement = Arrangement.spacedBy(14.dp)
                             ) {
                                 items(
-                                    count = discover.size,
-                                    key = { discover[it].key },
+                                    count = discoverItemCount,
+                                    key = { index ->
+                                        val realIdx = index % discover.size
+                                        val cycle = index / discover.size
+                                        "${discover[realIdx].key}:$cycle"
+                                    },
                                     contentType = { "discover_card" }
                                 ) { index ->
-                                    val card = discover[index]
+                                    val realIdx = index % discover.size
+                                    val card = discover[realIdx]
                                     val lead = card.lead
                                     DiscoverCard(
                                         item = card,
-                                        color = DiscoverColors[index % DiscoverColors.size],
+                                        color = DiscoverColors[realIdx % DiscoverColors.size],
                                         liked = lead != null && lead.videoId in likedIds,
                                         onToggleLike = { lead?.let(onToggleLike) },
                                         onAddToQueue = { lead?.let(onAddToQueue) },

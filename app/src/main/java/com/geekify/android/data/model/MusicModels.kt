@@ -32,12 +32,34 @@ import kotlinx.serialization.Serializable
 @Immutable @Serializable sealed interface ShelfItem { val id: String; val title: String }
 @Immutable @Serializable data class ShelfTrack(val value: Track) : ShelfItem { override val id get() = value.videoId; override val title get() = value.title }
 @Immutable @Serializable data class ShelfCard(val value: Card) : ShelfItem { override val id get() = value.id; override val title get() = value.title }
-@Immutable @Serializable data class SearchResponse(val query: String, val songs: List<Track> = emptyList(), val albums: List<Card> = emptyList(), val artists: List<Card> = emptyList(), val playlists: List<Card> = emptyList(), val shelves: List<Shelf> = emptyList())
+@Immutable @Serializable data class SearchTopResult(
+    val id: String,
+    val title: String,
+    val subtitle: String? = null,
+    val kind: String = "song", // "song", "video", "artist", "album", "playlist"
+    val thumbnails: List<Thumbnail> = emptyList(),
+    val videoId: String? = null,
+    val playlistId: String? = null,
+    val browseId: String? = null,
+    val explicit: Boolean = false
+)
+
+@Immutable @Serializable data class SearchResponse(
+    val query: String,
+    val songs: List<Track> = emptyList(),
+    val albums: List<Card> = emptyList(),
+    val artists: List<Card> = emptyList(),
+    val playlists: List<Card> = emptyList(),
+    val shelves: List<Shelf> = emptyList(),
+    val topResult: SearchTopResult? = null,
+    val didYouMean: String? = null,
+    val continuation: String? = null
+)
 @Immutable @Serializable data class HomeResponse(val shelves: List<Shelf>)
 @Immutable @Serializable data class ArtistPage(val id: String, val name: String, val description: String? = null, val thumbnails: List<Thumbnail> = emptyList(), val songs: List<Track> = emptyList(), val albums: List<Card> = emptyList(), val singles: List<Card> = emptyList(), val related: List<Card> = emptyList())
 @Immutable @Serializable data class CollectionPage(val id: String, val title: String, val subtitle: String? = null, val description: String? = null, val type: String = "playlist", val year: String? = null, val thumbnails: List<Thumbnail> = emptyList(), val tracks: List<Track> = emptyList(), val artist: String? = null, val artistId: String? = null)
 @Immutable @Serializable data class Mix(val id: String, val title: String, val subtitle: String, val tracks: List<Track> = emptyList())
 @Immutable @Serializable data class MixResponse(val mixes: List<Mix>, val seeds: List<String>)
 
-enum class SearchType { SONG, ALBUM, ARTIST, PLAYLIST }
+enum class SearchType { SONG, VIDEO, ALBUM, ARTIST, PLAYLIST }
 enum class CollectionKind { ALBUM, PLAYLIST }

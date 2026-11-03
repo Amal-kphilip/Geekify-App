@@ -9,6 +9,8 @@ sealed interface MusicResult<out T> {
 
 interface MusicSource {
     suspend fun search(query: String, type: SearchType? = null): MusicResult<SearchResponse>
+    suspend fun searchSuggestions(query: String): List<String> = emptyList()
+    suspend fun searchContinuation(continuation: String): MusicResult<SearchResponse> = MusicResult.Failure("Continuation not supported")
     suspend fun track(videoId: String): MusicResult<Track>
     suspend fun related(videoId: String): MusicResult<List<Track>>
     suspend fun artist(channelId: String): MusicResult<ArtistPage>

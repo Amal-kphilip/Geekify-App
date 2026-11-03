@@ -11,8 +11,10 @@ import com.geekify.android.data.local.ListeningStatsRepository
 import com.geekify.android.data.model.*
 import com.geekify.android.data.source.MusicResult
 import com.geekify.android.data.source.MusicSource
+import com.geekify.android.domain.recommend.DailyPicksSampler
 import com.geekify.android.domain.recommend.RecommendationMemory
 import com.geekify.android.domain.recommend.Recommender
+import kotlin.random.Random
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -75,6 +77,8 @@ class HomeViewModel @Inject constructor(
     @Volatile private var lastMixBuildHadNoPersonalData = true
     private var liveFeedLoaded = false
     @Volatile private var recommendationAccountId: String? = auth.user.value?.uid
+    private var dailyPicksSeed: Long = System.currentTimeMillis()
+    private val recentlyShownTopIds = ArrayDeque<String>()
 
     init {
         updateGreeting()
@@ -208,6 +212,9 @@ class HomeViewModel @Inject constructor(
     }
 
     fun loadHome(forceRefresh: Boolean = false) {
+        if (forceRefresh) {
+            dailyPicksSeed = Random.nextLong()
+        }
         viewModelScope.launch {
             val requestedAccountId = recommendationAccountId
             _uiState.update { it.copy(isLoading = true, error = null) }
@@ -523,32 +530,52 @@ class HomeViewModel @Inject constructor(
         val forYou = mixes.firstOrNull { it.id == "for-you" }?.tracks.orEmpty()
         val regionalShelfItems = allShelves.flatMap { it.items }
 
+        val preferredArtists = forYou
+            .flatMap { t ->
+                buildList {
+                    add(t.artist)
+                    addAll(t.artists.map { it.name })
+                }
+            }
+            .map { it.trim().lowercase() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .take(20)
+
         val regionalSongs: List<ShelfTrack> = regionalShelfItems
             .filterIsInstance<ShelfTrack>()
             .distinctBy { it.value.videoId }
-            .take(15)
 
         val personalSongs: List<ShelfTrack> = forYou
             .distinctBy { it.videoId }
-            .take(15)
             .map(::ShelfTrack)
 
-        // Interleave regional songs and personal recommendations so both are immediately visible
-        val songs: List<ShelfItem> = buildList {
-            val max = maxOf(regionalSongs.size, personalSongs.size)
-            for (i in 0 until max) {
-                regionalSongs.getOrNull(i)?.let(::add)
-                personalSongs.getOrNull(i)?.let(::add)
-            }
-        }.distinctBy { it.id }.take(20)
+        val songCandidates = (personalSongs + regionalSongs).distinctBy { it.id }
+        if (songCandidates.isEmpty() && regionalShelfItems.isEmpty()) return
 
-        if (songs.isEmpty() && regionalShelfItems.isEmpty()) return
+        val recentTopSet = recentlyShownTopIds.toSet()
+        val seed = dailyPicksSeed
+
+        val forYouIds = forYou.map { it.videoId }.toSet()
+        val songs = DailyPicksSampler.sample(
+            candidates = songCandidates,
+            weights = { item ->
+                val track = (item as? ShelfTrack)?.value
+                var score = if (track?.videoId in forYouIds) 10.0 else 5.0
+                if (track != null && preferredArtists.any { track.artist.contains(it, ignoreCase = true) }) {
+                    score += 4.0
+                }
+                score
+            },
+            recentlyShownTopIds = recentTopSet,
+            random = Random(seed),
+            limit = 20
+        )
 
         val personalAlbums: List<ShelfCard> = forYou
             .asSequence()
             .filter { !it.albumId.isNullOrBlank() && !it.album.isNullOrBlank() }
             .distinctBy { it.albumId }
-            .take(12)
             .map { track ->
                 ShelfCard(
                     Card(
@@ -567,15 +594,23 @@ class HomeViewModel @Inject constructor(
             .filterIsInstance<ShelfCard>()
             .filter { it.value.type == "album" }
             .distinctBy { it.value.id }
-            .take(12)
 
-        val albums: List<ShelfItem> = buildList {
-            val max = maxOf(regionalAlbums.size, personalAlbums.size)
-            for (i in 0 until max) {
-                regionalAlbums.getOrNull(i)?.let(::add)
-                personalAlbums.getOrNull(i)?.let(::add)
-            }
-        }.distinctBy { it.id }.take(20)
+        val personalAlbumIds = personalAlbums.map { it.id }.toSet()
+        val albumCandidates = (personalAlbums + regionalAlbums).distinctBy { it.id }
+        val albums = DailyPicksSampler.sample(
+            candidates = albumCandidates,
+            weights = { item ->
+                val card = (item as? ShelfCard)?.value
+                var score = if (item.id in personalAlbumIds) 10.0 else 5.0
+                if (card?.subtitle != null && preferredArtists.any { card.subtitle.contains(it, ignoreCase = true) }) {
+                    score += 3.0
+                }
+                score
+            },
+            recentlyShownTopIds = recentTopSet,
+            random = Random(seed + 1),
+            limit = 20
+        )
 
         val personalArtists: List<ShelfCard> = forYou
             .asSequence()
@@ -585,7 +620,6 @@ class HomeViewModel @Inject constructor(
             }
             .filter { !it.id.isNullOrBlank() && it.name.isNotBlank() }
             .distinctBy { it.id }
-            .take(14)
             .map { artist ->
                 val artTrack = forYou.firstOrNull { t ->
                     t.artists.any { a -> a.id == artist.id } || t.artist.equals(artist.name, ignoreCase = true)
@@ -607,23 +641,18 @@ class HomeViewModel @Inject constructor(
             .filterIsInstance<ShelfCard>()
             .filter { it.value.type == "artist" }
             .distinctBy { it.value.id }
-            .take(10)
 
-        val artists: List<ShelfItem> = (regionalArtists + personalArtists).distinctBy { it.id }.take(20)
+        val personalArtistIds = personalArtists.map { it.id }.toSet()
+        val artistCandidates = (personalArtists + regionalArtists).distinctBy { it.id }
+        val artists = DailyPicksSampler.sample(
+            candidates = artistCandidates,
+            weights = { item -> if (item.id in personalArtistIds) 10.0 else 5.0 },
+            recentlyShownTopIds = recentTopSet,
+            random = Random(seed + 2),
+            limit = 20
+        )
 
-        val preferredArtists = forYou
-            .flatMap { t ->
-                buildList {
-                    add(t.artist)
-                    addAll(t.artists.map { it.name })
-                }
-            }
-            .map { it.trim().lowercase() }
-            .filter { it.isNotEmpty() }
-            .distinct()
-            .take(20)
-
-        val playlists: List<ShelfItem> = allShelves
+        val rawPlaylists = allShelves
             .asSequence()
             .flatMapIndexed { shelfIdx, shelf ->
                 shelf.items.asSequence()
@@ -639,14 +668,20 @@ class HomeViewModel @Inject constructor(
                     append(item.value.subtitle.orEmpty().lowercase())
                 }
                 val artistMatchScore = preferredArtists.count { artist -> text.contains(artist) } * 2
-                // Keep top regional shelves prominent while still rewarding artist affinity
                 val regionalPriorityBonus = if (shelfIdx < 3) 3 else 0
-                (artistMatchScore + regionalPriorityBonus) to item
+                item to (artistMatchScore + regionalPriorityBonus).toDouble().coerceAtLeast(1.0)
             }
-            .sortedByDescending { it.first }
-            .map { it.second }
-            .take(20)
             .toList()
+
+        val playlistCandidates = rawPlaylists.map { it.first }
+        val playlistWeightMap = rawPlaylists.associate { it.first.id to it.second }
+        val playlists = DailyPicksSampler.sample(
+            candidates = playlistCandidates,
+            weights = { playlistWeightMap[it.id] ?: 1.0 },
+            recentlyShownTopIds = recentTopSet,
+            random = Random(seed + 3),
+            limit = 20
+        )
 
         val everything = buildList {
             val max = maxOf(songs.size, albums.size, artists.size, playlists.size)
@@ -657,6 +692,15 @@ class HomeViewModel @Inject constructor(
                 artists.getOrNull(index)?.let(::add)
             }
         }.distinctBy { it.id }.take(20)
+
+        val topId = everything.firstOrNull()?.id ?: songs.firstOrNull()?.id
+        if (topId != null) {
+            recentlyShownTopIds.remove(topId)
+            recentlyShownTopIds.addLast(topId)
+            while (recentlyShownTopIds.size > 30) {
+                recentlyShownTopIds.removeFirst()
+            }
+        }
 
         _uiState.update {
             it.copy(
