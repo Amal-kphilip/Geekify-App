@@ -47,11 +47,16 @@ fun AppIconSettingsScreen(onBack: () -> Unit) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            if (selected) SettingsVisuals.blue.copy(alpha = 0.09f)
+                            else Color.Transparent
+                        )
                         .clickable {
                             AppIconManager.setIcon(context, option.id)
                             selectedId = option.id
                         }
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(horizontal = 16.dp, vertical = 13.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Image(
@@ -59,12 +64,12 @@ fun AppIconSettingsScreen(onBack: () -> Unit) {
                         contentDescription = option.label,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
-                            .size(56.dp)
-                            .clip(RoundedCornerShape(14.dp))
+                            .size(60.dp)
+                            .clip(RoundedCornerShape(16.dp))
                             .border(
                                 width = 0.5.dp,
                                 color = Color.White.copy(alpha = 0.14f),
-                                shape = RoundedCornerShape(14.dp)
+                                shape = RoundedCornerShape(16.dp)
                             )
                     )
                     Spacer(Modifier.width(14.dp))
@@ -72,13 +77,13 @@ fun AppIconSettingsScreen(onBack: () -> Unit) {
                         Text(
                             text = option.label,
                             color = IosPalette.label,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Medium
+                            fontSize = 15.5.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                         Text(
                             text = if (selected) "Active icon" else "Tap to apply",
-                            color = if (selected) IosPalette.systemBlue else IosPalette.secondaryLabel,
-                            fontSize = 13.sp,
+                            color = if (selected) SettingsVisuals.cyan else SettingsVisuals.muted,
+                            fontSize = 12.sp,
                             modifier = Modifier.padding(top = 2.dp)
                         )
                     }
@@ -87,7 +92,7 @@ fun AppIconSettingsScreen(onBack: () -> Unit) {
                             modifier = Modifier
                                 .size(26.dp)
                                 .clip(CircleShape)
-                                .background(IosPalette.systemBlue),
+                                .background(SettingsVisuals.blue),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -100,7 +105,7 @@ fun AppIconSettingsScreen(onBack: () -> Unit) {
                     }
                 }
                 if (idx < AppIconManager.options.lastIndex) {
-                    IosSettingsDivider(insetStart = 86.dp)
+                    IosSettingsDivider(insetStart = 92.dp)
                 }
             }
         }

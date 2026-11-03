@@ -41,7 +41,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
-import kotlin.math.roundToInt
 
 @HiltViewModel
 class ListeningStatsViewModel @Inject constructor(
@@ -115,15 +114,6 @@ fun ListeningStatsScreen(
                 subtitle = "Daily playback · Last 7 days"
             ) {
                 WeeklyActivityChart(stats.dailyListening)
-            }
-
-            if (stats.languages.isNotEmpty()) {
-                StatsSection(
-                    title = "Listening languages",
-                    subtitle = "Estimated from the available track metadata"
-                ) {
-                    LanguageBreakdown(stats.languages)
-                }
             }
 
             if (stats.topTracks.isNotEmpty()) {
@@ -406,51 +396,6 @@ private fun WeeklyActivityChart(days: List<DailyListeningTotal>) {
                     }
                     Spacer(Modifier.height(8.dp))
                     Text(day.label, color = Color(0xFF8A8D96), fontSize = 10.sp, fontWeight = FontWeight.Medium)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LanguageBreakdown(languages: List<com.geekify.android.domain.listening.LanguageListeningTotal>) {
-    val total = languages.sumOf { it.listenedMs }.coerceAtLeast(1L)
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(17.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Canvas(Modifier.size(126.dp)) {
-            val stroke = 17.dp.toPx()
-            val topLeft = androidx.compose.ui.geometry.Offset(stroke / 2f, stroke / 2f)
-            val arcSize = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke)
-            var start = -90f
-            languages.take(statsChartColors.size).forEachIndexed { index, language ->
-                val sweep = (language.listenedMs.toFloat() / total.toFloat()) * 360f
-                if (sweep > 0f) {
-                    drawArc(
-                        color = statsChartColors[index],
-                        startAngle = start,
-                        sweepAngle = (sweep - 1.5f).coerceAtLeast(0.5f),
-                        useCenter = false,
-                        topLeft = topLeft,
-                        size = arcSize,
-                        style = Stroke(width = stroke, cap = StrokeCap.Round)
-                    )
-                }
-                start += sweep
-            }
-        }
-        Spacer(Modifier.width(18.dp))
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(11.dp)) {
-            languages.take(statsChartColors.size).forEachIndexed { index, language ->
-                val percent = (language.listenedMs.toDouble() / total.toDouble() * 100.0).roundToInt()
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(8.dp).clip(CircleShape).background(statsChartColors[index]))
-                    Spacer(Modifier.width(8.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(language.name, color = Color(0xFFE2E3E8), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("${percent}% · ${ListeningStatsCalculator.formatDuration(language.listenedMs)}", color = Color(0xFF858891), fontSize = 10.sp)
-                    }
                 }
             }
         }

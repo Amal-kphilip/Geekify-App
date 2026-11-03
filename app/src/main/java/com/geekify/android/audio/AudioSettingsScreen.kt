@@ -101,8 +101,8 @@ private fun Content(s: AudioSettings, vm: AudioSettingsViewModel) {
                     modifier = Modifier
                         .clip(CircleShape)
                         .background(
-                            if (selected) IosPalette.systemBlue
-                            else IosPalette.tertiarySystemGroupedBackground
+                            if (selected) SettingsVisuals.blue
+                            else SettingsVisuals.cardRaised
                         )
                         .clickable { vm.selectPreset(name) }
                         .padding(horizontal = 14.dp, vertical = 7.dp),
@@ -152,8 +152,8 @@ private fun Content(s: AudioSettings, vm: AudioSettingsViewModel) {
                         .weight(1f)
                         .clip(CircleShape)
                         .background(
-                            if (selected) IosPalette.systemBlue
-                            else IosPalette.tertiarySystemGroupedBackground
+                            if (selected) SettingsVisuals.blue
+                            else SettingsVisuals.cardRaised
                         )
                         .clickable { vm.setSpeed(rate) }
                         .padding(vertical = 7.dp),

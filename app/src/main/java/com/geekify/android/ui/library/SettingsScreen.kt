@@ -501,6 +501,67 @@ fun SettingsScreen(
 }
 
 @Composable
+private fun SettingsOverviewCard() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        SettingsVisuals.heroStart,
+                        SettingsVisuals.heroMiddle,
+                        SettingsVisuals.card
+                    )
+                )
+            )
+            .border(0.8.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(24.dp))
+            .padding(horizontal = 19.dp, vertical = 18.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "PERSONALIZE YOUR LISTENING SPACE",
+                color = SettingsVisuals.cyan,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.05.sp
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "Make Geekify yours",
+                color = IosPalette.label,
+                fontSize = 20.sp,
+                lineHeight = 25.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Fine-tune how your music looks, sounds and works.",
+                color = SettingsVisuals.muted,
+                fontSize = 12.sp,
+                lineHeight = 17.sp
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(SettingsVisuals.cyan.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = GeekifyIcons.AutoAwesome,
+                contentDescription = null,
+                tint = SettingsVisuals.cyan,
+                modifier = Modifier.size(25.dp)
+            )
+        }
+    }
+}
+
+@Composable
 private fun RootListBody(
     searchQuery: String,
     onQueryChange: (String) -> Unit,
@@ -509,6 +570,10 @@ private fun RootListBody(
     selectedSubPage: SettingsSubPage?,
     onClearSearch: () -> Unit
 ) {
+    SettingsOverviewCard()
+
+    Spacer(Modifier.height(18.dp))
+
     // Keep settings search in the page's normal scroll flow. A docked overlay at the
     // bottom competed with the app-wide mini-player/navigation dock and covered rows.
     DockedSearchPill(
@@ -519,8 +584,14 @@ private fun RootListBody(
 
     val trimmedQuery = searchQuery.trim()
     if (trimmedQuery.isEmpty()) {
+        val groupTitles = listOf(
+            "PERSONALIZATION & PLAYBACK",
+            "CONTENT & NOTIFICATIONS",
+            "PRIVACY & STORAGE",
+            "DIAGNOSTICS & ABOUT"
+        )
         rootGroups.forEachIndexed { groupIdx, group ->
-            IosSettingsSection {
+            IosSettingsSection(title = groupTitles.getOrNull(groupIdx)) {
                 group.forEachIndexed { idx, item ->
                     IosSettingsRow(
                         title = item.title,
@@ -537,7 +608,7 @@ private fun RootListBody(
                 }
             }
             if (groupIdx < rootGroups.lastIndex) {
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(22.dp))
             }
         }
     } else {
@@ -620,17 +691,17 @@ private fun DockedSearchPill(
                 modifier = Modifier
                     .weight(1f)
                     .height(48.dp)
-                    .shadow(elevation = 10.dp, shape = CircleShape, clip = false)
+                    .shadow(elevation = 3.dp, shape = CircleShape, clip = false)
                     .clip(CircleShape)
-                    .background(IosPalette.secondarySystemGroupedBackground)
-                    .border(0.5.dp, Color.White.copy(alpha = 0.12f), CircleShape)
+                    .background(SettingsVisuals.card)
+                    .border(0.8.dp, SettingsVisuals.cardBorder, CircleShape)
                     .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = GeekifyIcons.Search,
                     contentDescription = "Search",
-                    tint = IosPalette.secondaryLabel,
+                    tint = SettingsVisuals.cyan,
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(Modifier.width(10.dp))
@@ -654,7 +725,7 @@ private fun DockedSearchPill(
                             color = IosPalette.label,
                             fontSize = 16.sp
                         ),
-                        cursorBrush = SolidColor(IosPalette.systemBlue),
+                        cursorBrush = SolidColor(SettingsVisuals.blue),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
                         modifier = Modifier
@@ -691,8 +762,8 @@ private fun DockedSearchPill(
             ) {
                 Text(
                     text = "Cancel",
-                    color = IosPalette.systemBlue,
-                    fontSize = 17.sp,
+                    color = SettingsVisuals.blue,
+                    fontSize = 15.sp,
                     modifier = Modifier
                         .padding(start = 12.dp)
                         .clickable(
@@ -715,12 +786,12 @@ private fun IosStatusBanner(
     onDismiss: () -> Unit
 ) {
     Surface(
-        color = IosPalette.secondarySystemGroupedBackground,
-        shape = RoundedCornerShape(16.dp),
+        color = SettingsVisuals.card,
+        shape = RoundedCornerShape(18.dp),
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 16.dp)
-            .border(0.5.dp, IosPalette.systemGreen.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
+            .border(0.8.dp, SettingsVisuals.green.copy(alpha = 0.38f), RoundedCornerShape(18.dp))
             .clickable(onClick = onDismiss)
     ) {
         Row(
@@ -1566,9 +1637,11 @@ private fun AboutAndUpdateSubPage(
     }
 
     Surface(
-        color = IosPalette.secondarySystemGroupedBackground,
+        color = SettingsVisuals.card,
         shape = IosCardShape,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(0.8.dp, SettingsVisuals.cardBorder, IosCardShape)
     ) {
         Column(
             modifier = Modifier
@@ -1608,7 +1681,7 @@ private fun AboutAndUpdateSubPage(
             )
             Spacer(Modifier.height(12.dp))
             Surface(
-                color = IosPalette.tertiarySystemGroupedBackground,
+                color = SettingsVisuals.cardRaised,
                 shape = CircleShape
             ) {
                 Text(
@@ -1815,12 +1888,12 @@ private fun <T> OptionPickerDialog(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
                         .background(
-                            if (isSelected) IosPalette.systemBlue.copy(alpha = 0.18f)
-                            else IosPalette.tertiarySystemGroupedBackground
+                            if (isSelected) SettingsVisuals.blue.copy(alpha = 0.14f)
+                            else SettingsVisuals.cardRaised
                         )
                         .border(
                             width = 1.dp,
-                            color = if (isSelected) IosPalette.systemBlue.copy(alpha = 0.65f) else Color.Transparent,
+                            color = if (isSelected) SettingsVisuals.blue.copy(alpha = 0.72f) else SettingsVisuals.cardBorder,
                             shape = RoundedCornerShape(14.dp)
                         )
                         .clickable { onSelect(value) }
@@ -1830,7 +1903,7 @@ private fun <T> OptionPickerDialog(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = labels.first,
-                            color = if (isSelected) IosPalette.systemBlue else IosPalette.label,
+                            color = if (isSelected) SettingsVisuals.blue else IosPalette.label,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -1844,7 +1917,7 @@ private fun <T> OptionPickerDialog(
                         Icon(
                             imageVector = GeekifyIcons.Check,
                             contentDescription = null,
-                            tint = IosPalette.systemBlue,
+                            tint = SettingsVisuals.blue,
                             modifier = Modifier.size(20.dp)
                         )
                     }
