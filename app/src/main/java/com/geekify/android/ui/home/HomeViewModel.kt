@@ -71,7 +71,10 @@ class HomeViewModel @Inject constructor(
 
     private var mixJob: Job? = null
     private var lastMixBuild = 0L
+    /** True when the last build had no account taste data yet (commonly during cloud restore). */
+    @Volatile private var lastMixBuildHadNoPersonalData = true
     private var liveFeedLoaded = false
+    @Volatile private var recommendationAccountId: String? = auth.user.value?.uid
 
     init {
         updateGreeting()
@@ -128,7 +131,12 @@ class HomeViewModel @Inject constructor(
             .drop(1)
             .debounce(5_000)
             .onEach {
-                if (System.currentTimeMillis() - lastMixBuild >= MIN_REBUILD_INTERVAL_MS) startMixBuild()
+                // A newly switched account can briefly have an empty local Room snapshot while
+                // its cloud library is restoring. Rebuild immediately when that data arrives,
+                // even inside the normal recommendation cooldown window.
+                if (lastMixBuildHadNoPersonalData || System.currentTimeMillis() - lastMixBuild >= MIN_REBUILD_INTERVAL_MS) {
+                    startMixBuild()
+                }
             }
             .launchIn(viewModelScope)
     }
@@ -150,9 +158,27 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun observeAuth() {
-        auth.user.onEach { user ->
-            _uiState.update { it.copy(userName = user?.name?.split(" ")?.firstOrNull()) }
-        }.launchIn(viewModelScope)
+        auth.user
+            .map { user -> user?.let { it.uid to it.name.split(" ").firstOrNull() } }
+            .distinctUntilChanged()
+            .onEach { account ->
+                val nextUid = account?.first
+                val previousUid = recommendationAccountId
+                _uiState.update { it.copy(userName = account?.second) }
+                if (nextUid != previousUid) {
+                    recommendationAccountId = nextUid
+                    mixJob?.cancel()
+                    lastMixBuild = 0L
+                    // A safe account handoff clears the local library before the next account
+                    // syncs. Clear account-derived UI immediately to prevent recommendation
+                    // cards from the previous listener remaining visible during that handoff.
+                    _uiState.update { it.copy(mixes = emptyList(), dailyRecommendations = emptyMap()) }
+                    // Wait for this UID's local library to be restored before constructing mixes.
+                    // The taste observer forces a rebuild as soon as the new account data arrives.
+                    lastMixBuildHadNoPersonalData = true
+                }
+            }
+            .launchIn(viewModelScope)
     }
 
     private fun observeContentSettings() {
@@ -288,6 +314,7 @@ class HomeViewModel @Inject constructor(
 
     /** Does the heavy lifting on a background dispatcher so the UI thread never waits for it. */
     private suspend fun buildMixes() = withContext(Dispatchers.Default) {
+        val accountId = recommendationAccountId
         lastMixBuild = System.currentTimeMillis()
         val now = lastMixBuild
         val sevenDaysAgo = now - 7L * 24 * 60 * 60_000L
@@ -326,7 +353,11 @@ class HomeViewModel @Inject constructor(
         val recent = recentTracks.take(30).map(::signal)
         val playlist = playlistTracks.take(60).map(::signal)
 
-        if (liked.isEmpty() && recent.isEmpty() && frequent.isEmpty() && playlist.isEmpty()) return@withContext
+        if (liked.isEmpty() && recent.isEmpty() && frequent.isEmpty() && playlist.isEmpty()) {
+            lastMixBuildHadNoPersonalData = true
+            return@withContext
+        }
+        lastMixBuildHadNoPersonalData = false
 
         val settings = appSettings.state.value
         val preferredContentLanguage = LANGUAGE_TO_RECOMMENDER_TAG[settings.contentLanguage.lowercase()]
@@ -349,7 +380,7 @@ class HomeViewModel @Inject constructor(
             seeds.map { seed -> async { seed to musicSource.related(seed) } }.awaitAll()
         }.mapNotNull { (seed, res) -> (res as? MusicResult.Success)?.value?.let { seed to it } }.toMap()
         // Offline or rate limited: keep whatever mixes are already on screen.
-        if (relatedMap.isEmpty()) return@withContext
+        if (relatedMap.isEmpty() || accountId != recommendationAccountId) return@withContext
 
         val exclude = (likedTracks + recentTracks + playlistTracks).map { it.videoId }.toMutableSet().apply {
             addAll(frequent.map { it.videoId })
@@ -372,7 +403,7 @@ class HomeViewModel @Inject constructor(
             playlist = playlist,
             savedArtists = savedArtists,
             exclude = exclude,
-            shown = memory.snapshot(),
+            shown = memory.snapshot(accountId),
             seeds = seeds,
             sessions = sessionSignals,
             hourOfDay = hourOfDay,
@@ -459,8 +490,8 @@ class HomeViewModel @Inject constructor(
             mixes.add(insertIdx, regionalMix)
         }
 
-        if (mixes.isEmpty()) return@withContext
-        memory.remember(mixes.filter { it.id != "on-repeat" && it.id != "repeat-rewind" }.flatMap { mix -> mix.tracks.take(10).map { it.videoId } })
+        if (mixes.isEmpty() || accountId != recommendationAccountId) return@withContext
+        memory.remember(accountId, mixes.filter { it.id != "on-repeat" && it.id != "repeat-rewind" }.flatMap { mix -> mix.tracks.take(10).map { it.videoId } })
         _uiState.update { it.copy(mixes = mixes) }
         rebuildDailyRecommendations(mixes)
     }

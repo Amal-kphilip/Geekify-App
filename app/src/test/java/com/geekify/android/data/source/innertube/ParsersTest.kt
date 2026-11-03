@@ -54,4 +54,14 @@ class ParsersTest {
         val parsed = Parsers.tracks(malformedRenderer)
         assertEquals(0, parsed.size)
     }
+
+    @Test fun `iterative walk preserves source result order`() {
+        val raw = Json.parseToJsonElement(
+            """{"contents":[
+              {"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"first123456"},"flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"simpleText":"First result"}}}]}},
+              {"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"second12345"},"flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"simpleText":"Second result"}}}]}}
+            ]}"""
+        )
+        assertEquals(listOf("first123456", "second12345"), Parsers.tracks(raw).map { it.videoId })
+    }
 }

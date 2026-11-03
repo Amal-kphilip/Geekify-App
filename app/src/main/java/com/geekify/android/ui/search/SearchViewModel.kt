@@ -33,6 +33,7 @@ class SearchViewModel @Inject constructor(
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
 
     private var searchJob: Job? = null
+    private var requestGeneration = 0L
 
     val genreTags = listOf(
         "Malayalam hits", "Tamil hits", "Hindi hits", "Telugu hits",
@@ -41,9 +42,10 @@ class SearchViewModel @Inject constructor(
     )
 
     fun onQueryChange(newQuery: String) {
+        requestGeneration++
+        searchJob?.cancel()
         _uiState.update { it.copy(query = newQuery) }
         if (newQuery.isBlank()) {
-            searchJob?.cancel()
             _uiState.update { it.copy(response = null, isLoading = false, error = null) }
             return
         }
@@ -51,6 +53,7 @@ class SearchViewModel @Inject constructor(
     }
 
     fun onTabSelected(tab: String) {
+        if (_uiState.value.selectedTab == tab) return
         _uiState.update { it.copy(selectedTab = tab) }
         if (_uiState.value.query.isNotBlank()) {
             startSearch(_uiState.value.query)
@@ -66,14 +69,16 @@ class SearchViewModel @Inject constructor(
         val q = query.trim()
         if (q.isBlank()) return
 
+        val generation = ++requestGeneration
+        val requestedTab = _uiState.value.selectedTab
         searchJob?.cancel()
+        _uiState.update { it.copy(response = null, isLoading = true, error = null) }
         searchJob = viewModelScope.launch {
             if (debounce) delay(400)
-            // A later keystroke may have replaced this request while it was waiting.
-            if (_uiState.value.query.trim() != q) return@launch
-            _uiState.update { it.copy(isLoading = true, error = null) }
+            // A later keystroke or tab change may have replaced this request.
+            if (generation != requestGeneration || _uiState.value.query.trim() != q || _uiState.value.selectedTab != requestedTab) return@launch
 
-            val type = when (_uiState.value.selectedTab) {
+            val type = when (requestedTab) {
                 "Songs" -> SearchType.SONG
                 "Albums" -> SearchType.ALBUM
                 "Artists" -> SearchType.ARTIST
@@ -84,14 +89,28 @@ class SearchViewModel @Inject constructor(
             try {
                 when (val result = musicSource.search(q, type)) {
                     is MusicResult.Success -> {
-                        _uiState.update { it.copy(response = result.value, isLoading = false) }
+                        if (generation == requestGeneration && _uiState.value.query.trim() == q && _uiState.value.selectedTab == requestedTab) {
+                            val response = result.value.copy(
+                                songs = SearchRelevance.rankTracks(q, result.value.songs),
+                                albums = SearchRelevance.rankCards(q, result.value.albums),
+                                artists = SearchRelevance.rankCards(q, result.value.artists),
+                                playlists = SearchRelevance.rankCards(q, result.value.playlists)
+                            )
+                            _uiState.update { it.copy(response = response, isLoading = false, error = null) }
+                        }
                     }
                     is MusicResult.Failure -> {
-                        _uiState.update { it.copy(error = result.message, isLoading = false) }
+                        if (generation == requestGeneration) {
+                            _uiState.update { it.copy(error = result.message, isLoading = false) }
+                        }
                     }
                 }
             } catch (_: CancellationException) {
                 // A newer query superseded this one; it is not an error to show the user.
+            } catch (error: Exception) {
+                if (generation == requestGeneration) {
+                    _uiState.update { it.copy(error = error.message ?: "Search failed. Please try again.", isLoading = false) }
+                }
             }
         }
     }

@@ -14,12 +14,16 @@ object Parsers {
             when (val curr = stack.removeLast()) {
                 is JsonObject -> {
                     yield(curr)
-                    for (v in curr.values) {
+                    // ArrayDeque is a stack. Push children in reverse so the resulting DFS
+                    // preserves the response's original left-to-right / top-to-bottom order.
+                    // Search uses renderer order as YouTube Music's relevance order; reversing
+                    // it made the least relevant result appear first in Geekify.
+                    for (v in curr.values.toList().asReversed()) {
                         if (v is JsonObject || v is JsonArray) stack.add(v)
                     }
                 }
                 is JsonArray -> {
-                    for (item in curr) {
+                    for (item in curr.asReversed()) {
                         if (item is JsonObject || item is JsonArray) stack.add(item)
                     }
                 }

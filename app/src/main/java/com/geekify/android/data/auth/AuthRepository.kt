@@ -18,12 +18,16 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.ktx.auth
+import com.google.firebase.FirebaseApp
 import com.google.firebase.ktx.Firebase
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
+import java.util.concurrent.atomic.AtomicLong
+import org.json.JSONArray
+import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +55,16 @@ data class AccountUser(
     val emailVerified: Boolean = true
 )
 
+/** Non-secret account metadata shown in the account switcher. Passwords and tokens are never stored. */
+data class KnownAccount(
+    val uid: String,
+    val email: String?,
+    val name: String,
+    val photoUrl: String?,
+    val hasPassword: Boolean,
+    val lastUsedAt: Long
+)
+
 enum class SyncState { IDLE, SYNCING, SAVED, OFFLINE, ERROR }
 
 /** Mirrors useAuthStore.ts + friendlyAuthError. */
@@ -64,11 +78,17 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
     val user: StateFlow<AccountUser?> = _user.asStateFlow()
 
     private val profilePrefs = context.getSharedPreferences("geekify_profile", Context.MODE_PRIVATE)
+    private val accountPrefs = context.getSharedPreferences("geekify_known_accounts", Context.MODE_PRIVATE)
+    private val validationAppCounter = AtomicLong()
+    private val _knownAccounts = MutableStateFlow(readKnownAccounts())
+    val knownAccounts: StateFlow<List<KnownAccount>> = _knownAccounts.asStateFlow()
 
     /** Synchronous Firebase session UID, available to WorkManager before the auth Flow listener emits. */
     fun currentUid(): String? = auth.currentUser?.uid
 
     companion object {
+        private const val KEY_KNOWN_ACCOUNTS = "known_accounts_v1"
+        private const val MAX_KNOWN_ACCOUNTS = 8
         private val secureRandom = SecureRandom()
         private val jwtJson = Json { ignoreUnknownKeys = true }
 
@@ -115,19 +135,127 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
 
     /** Rebuilds [user] from Firebase plus the on-device profile picture. Also called after profile edits. */
     private fun publishUser() {
-        _user.value = auth.currentUser?.let { u ->
-            val fallback = u.email?.substringBefore("@") ?: "Listener"
-            val local = localAvatar(u.uid)
-            val isPasswordAccount = u.providerData.any { it.providerId == "password" }
-            AccountUser(
-                uid = u.uid,
-                email = u.email,
-                name = u.displayName?.trim()?.ifBlank { fallback } ?: fallback,
-                photoUrl = local?.let { android.net.Uri.fromFile(it).toString() } ?: u.photoUrl?.toString(),
-                hasPassword = isPasswordAccount,
-                hasCustomPhoto = local != null,
-                emailVerified = !isPasswordAccount || u.isEmailVerified
+        val current = auth.currentUser?.let(::mapAccountUser)
+        _user.value = current
+        current?.takeIf { it.emailVerified }?.let(::rememberAccount)
+    }
+
+    private fun mapAccountUser(u: com.google.firebase.auth.FirebaseUser): AccountUser {
+        val fallback = u.email?.substringBefore("@") ?: "Listener"
+        val local = localAvatar(u.uid)
+        val isPasswordAccount = u.providerData.any { it.providerId == "password" }
+        return AccountUser(
+            uid = u.uid,
+            email = u.email,
+            name = u.displayName?.trim()?.ifBlank { fallback } ?: fallback,
+            photoUrl = local?.let { android.net.Uri.fromFile(it).toString() } ?: u.photoUrl?.toString(),
+            hasPassword = isPasswordAccount,
+            hasCustomPhoto = local != null,
+            emailVerified = !isPasswordAccount || u.isEmailVerified
+        )
+    }
+
+    private fun readKnownAccounts(): List<KnownAccount> = runCatching {
+        val array = JSONArray(accountPrefs.getString(KEY_KNOWN_ACCOUNTS, "[]"))
+        (0 until array.length()).mapNotNull { index ->
+            val item = array.optJSONObject(index) ?: return@mapNotNull null
+            val uid = item.optString("uid").takeIf(String::isNotBlank) ?: return@mapNotNull null
+            KnownAccount(
+                uid = uid,
+                email = item.optString("email").takeIf(String::isNotBlank),
+                name = item.optString("name", "Listener").ifBlank { "Listener" },
+                photoUrl = item.optString("photoUrl").takeIf(String::isNotBlank),
+                hasPassword = item.optBoolean("hasPassword", false),
+                lastUsedAt = item.optLong("lastUsedAt", 0L)
             )
+        }.sortedByDescending { it.lastUsedAt }
+    }.getOrDefault(emptyList())
+
+    private fun rememberAccount(user: AccountUser) {
+        val now = System.currentTimeMillis()
+        val updated = (listOf(
+            KnownAccount(user.uid, user.email, user.name, user.photoUrl, user.hasPassword, now)
+        ) + _knownAccounts.value.filterNot { it.uid == user.uid })
+            .take(MAX_KNOWN_ACCOUNTS)
+        _knownAccounts.value = updated
+        val json = JSONArray()
+        updated.forEach { account ->
+            json.put(
+                JSONObject()
+                    .put("uid", account.uid)
+                    .put("email", account.email ?: "")
+                    .put("name", account.name)
+                    .put("photoUrl", account.photoUrl ?: "")
+                    .put("hasPassword", account.hasPassword)
+                    .put("lastUsedAt", account.lastUsedAt)
+            )
+        }
+        accountPrefs.edit().putString(KEY_KNOWN_ACCOUNTS, json.toString()).apply()
+    }
+
+    /** Removes an account only from this device's switcher; it does not delete the Firebase account. */
+    fun forgetKnownAccount(uid: String) {
+        val updated = _knownAccounts.value.filterNot { it.uid == uid }
+        _knownAccounts.value = updated
+        val json = JSONArray()
+        updated.forEach { account ->
+            json.put(JSONObject()
+                .put("uid", account.uid)
+                .put("email", account.email ?: "")
+                .put("name", account.name)
+                .put("photoUrl", account.photoUrl ?: "")
+                .put("hasPassword", account.hasPassword)
+                .put("lastUsedAt", account.lastUsedAt))
+        }
+        accountPrefs.edit().putString(KEY_KNOWN_ACCOUNTS, json.toString()).apply()
+    }
+
+    private fun validationAuth(): Pair<FirebaseApp, FirebaseAuth> {
+        val name = "GeekifyValidation-${validationAppCounter.incrementAndGet()}"
+        val app = FirebaseApp.initializeApp(context, FirebaseApp.getInstance().options, name)
+            ?: throw IllegalStateException("Couldn't prepare a secure account switch. Please try again.")
+        return app to FirebaseAuth.getInstance(app)
+    }
+
+    /** Creates an email credential without changing the currently active Firebase session. */
+    fun emailCredential(email: String, password: String): AuthCredential =
+        EmailAuthProvider.getCredential(email.trim(), password)
+
+    /**
+     * Validates an account in a short-lived secondary Firebase app. This lets Geekify confirm the
+     * next identity before backing up and clearing the current account's local library.
+     */
+    suspend fun validateCredentialWithoutChangingCurrent(credential: AuthCredential): AccountUser {
+        val (validationApp, validationAuth) = validationAuth()
+        try {
+            val signedUser = validationAuth.signInWithCredential(credential).await().user
+                ?: throw IllegalStateException("Firebase didn't return an account.")
+            signedUser.reload().await()
+            val passwordAccount = signedUser.providerData.any { it.providerId == "password" }
+            if (passwordAccount && !signedUser.isEmailVerified) {
+                runCatching { signedUser.sendEmailVerification().await() }
+                throw EmailVerificationRequiredException(
+                    "Please verify ${signedUser.email ?: "your email address"} before switching to this account."
+                )
+            }
+            return mapAccountUser(signedUser)
+        } finally {
+            runCatching { validationAuth.signOut() }
+            runCatching { validationApp.delete() }
+        }
+    }
+
+    /** Adds an email account from the current session without replacing the currently signed-in account. */
+    suspend fun createEmailAccountForAddition(name: String, email: String, password: String) {
+        val (validationApp, validationAuth) = validationAuth()
+        try {
+            val created = validationAuth.createUserWithEmailAndPassword(email.trim(), password).await().user
+                ?: throw IllegalStateException("Firebase didn't create the account.")
+            created.updateProfile(com.google.firebase.auth.userProfileChangeRequest { displayName = name.trim() }).await()
+            runCatching { created.sendEmailVerification().await() }
+        } finally {
+            runCatching { validationAuth.signOut() }
+            runCatching { validationApp.delete() }
         }
     }
 
@@ -228,6 +356,24 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
         auth.signInWithCredential(fetchGoogleCredential(activityContext)).await()
     }
 
+    suspend fun prepareGoogleCredential(activityContext: Context): AuthCredential =
+        fetchGoogleCredential(activityContext)
+
+    suspend fun signInWithCredential(credential: AuthCredential) {
+        val signedUser = auth.signInWithCredential(credential).await().user
+            ?: throw IllegalStateException("Firebase didn't return an account.")
+        signedUser.reload().await()
+        val passwordAccount = signedUser.providerData.any { it.providerId == "password" }
+        if (passwordAccount && !signedUser.isEmailVerified) {
+            runCatching { signedUser.sendEmailVerification().await() }
+            auth.signOut()
+            throw EmailVerificationRequiredException(
+                "Please verify ${signedUser.email ?: "your email address"} before signing in."
+            )
+        }
+        publishUser()
+    }
+
     private suspend fun fetchGoogleCredential(activityContext: Context): AuthCredential {
         val rawNonce = generateRawNonce()
         val hashedNonce = sha256Hex(rawNonce)
@@ -290,4 +436,5 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
             else -> "Something went wrong. Please try again."
         }
     }
+
 }

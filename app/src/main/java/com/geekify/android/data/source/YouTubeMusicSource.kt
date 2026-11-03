@@ -24,6 +24,7 @@ import kotlinx.serialization.json.contentOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.random.Random
+import java.util.Locale
 
 @Singleton
 class YouTubeMusicSource @Inject constructor(
@@ -48,8 +49,10 @@ class YouTubeMusicSource @Inject constructor(
 
     override suspend fun search(query: String, type: SearchType?): MusicResult<SearchResponse> = guarded {
         require(query.isNotBlank()) { "Enter a search term." }
-        val kind = type?.name?.lowercase(); val key = "search:$query:$kind:${localeSuffix()}"
-        val res = cache.get<SearchResponse>(key) ?: searchAndParse(query, kind).also {
+        val normalizedQuery = query.trim().replace(Regex("\\s+"), " ")
+        val kind = type?.name?.lowercase(Locale.ROOT)
+        val key = "search:${normalizedQuery.lowercase(Locale.ROOT)}:$kind:${localeSuffix()}"
+        val res = cache.get<SearchResponse>(key) ?: searchAndParse(normalizedQuery, kind).also {
             cache.put(key, it, FIFTEEN_MINUTES)
             cacheScope.launch { catalog.cacheTracks(it.songs) }
         }
@@ -302,11 +305,12 @@ class YouTubeMusicSource @Inject constructor(
         return primary + regionalPool + globalGenres
     }
 
-    /** A filtered tab (albums / artists / playlists) that comes back empty falls back to the unfiltered results, which list those too. */
+    /** A filtered tab that comes back empty falls back to the unfiltered response. */
     private suspend fun searchAndParse(query: String, kind: String?): SearchResponse = withContext(Dispatchers.IO) {
         val raw = innerTube.search(query, kind)
         val parsed = withContext(Dispatchers.Default) { parseSearch(raw, query, kind) }
         val empty = when (kind) {
+            "song" -> parsed.songs.isEmpty()
             "album" -> parsed.albums.isEmpty()
             "artist" -> parsed.artists.isEmpty()
             "playlist" -> parsed.playlists.isEmpty()
@@ -369,11 +373,9 @@ class YouTubeMusicSource @Inject constructor(
             val shelves = Parsers.shelves(raw).mapNotNull { (title, block) ->
                 val tracks = Parsers.tracks(block)
                 val cards = Parsers.cards(block)
-                val items = if (tracks.isNotEmpty() && cards.isEmpty()) {
-                    tracks.map(::ShelfTrack)
-                } else {
-                    cards.map(::ShelfCard)
-                }
+                // A search shelf can contain song rows and entity cards together. Keep both;
+                // dropping one side caused incomplete and inconsistent All-tab results.
+                val items = (tracks.map(::ShelfTrack) + cards.map(::ShelfCard)).distinctBy { it.id }
                 items.takeIf { it.isNotEmpty() }?.let { Shelf(title, it) }
             }
             val allTracks = shelves
