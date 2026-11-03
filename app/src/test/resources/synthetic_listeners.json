@@ -1,0 +1,483 @@
+[
+  {
+    "id": "user_01_malayalam_pure",
+    "persona": "Monolingual Malayalam",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "ml_t1", "title": "മലരേ", "artist": "വിജയ് യേശുദാസ്", "language": "Malayalam" }, "timestamp": 1700010000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "ml_t2", "title": "ആരോ വിരൽ നീട്ടി", "artist": "യേശുദാസ്", "language": "Malayalam" }, "timestamp": 1700020000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "ml_t3", "title": "പവിഴ മഴയേ", "artist": "ഹരിശങ്കർ", "language": "Malayalam" }, "timestamp": 1700030000000, "completed": true, "isLiked": false },
+      { "track": { "videoId": "ml_t1", "title": "മലരേ", "artist": "വിജയ് യേശുദാസ്", "language": "Malayalam" }, "timestamp": 1700040000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "ml_t4", "title": "ചെമ്പകപ്പൂ", "artist": "യേശുദാസ്", "language": "Malayalam" }, "timestamp": 1700060000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "ml_t5", "title": "എന്റെ ഉള്ളിൽ നീ", "artist": "ഹരിശങ്കർ", "language": "Malayalam" }, "timestamp": 1700070000000, "completed": true, "isLiked": false }
+    ],
+    "candidatePool": {
+      "ml_t1": [
+        { "videoId": "ml_t4", "title": "ചെമ്പകപ്പൂ", "artist": "യേശുദാസ്", "language": "Malayalam" },
+        { "videoId": "ml_t5", "title": "എന്റെ ഉള്ളിൽ നീ", "artist": "ഹരിശങ്കർ", "language": "Malayalam" },
+        { "videoId": "ml_c1", "title": "കുട്ടനാടൻ പുഞ്ചയിലെ", "artist": "വിജയ് യേശുദാസ്", "language": "Malayalam" },
+        { "videoId": "ml_c2", "title": "ആലിപ്പഴം", "artist": "സുജാത മോഹൻ", "language": "Malayalam" },
+        { "videoId": "ml_c3", "title": "കണ്ണാംതുമ്പി", "artist": "യേശുദാസ്", "language": "Malayalam" },
+        { "videoId": "ml_c4", "title": "സൂര്യകിരീടം", "artist": "എം. ജി. ശ്രീകുമാർ", "language": "Malayalam" },
+        { "videoId": "ml_c5", "title": "നീലാകാശ", "artist": "വിജയ് യേശുദാസ്", "language": "Malayalam" },
+        { "videoId": "ml_c6", "title": "ഉണരുമീ ഗാനം", "artist": "യേശുദാസ്", "language": "Malayalam" },
+        { "videoId": "ml_c7", "title": "രാപ്പാടി പക്ഷി", "artist": "ചിത്ര", "language": "Malayalam" },
+        { "videoId": "en_c1", "title": "Blinding Lights", "artist": "The Weeknd", "language": null }
+      ]
+    }
+  },
+  {
+    "id": "user_02_hindi_pure",
+    "persona": "Monolingual Hindi",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "hi_t1", "title": "तुम ही हो", "artist": "अरिजीत सिंह", "language": "Hindi" }, "timestamp": 1700010000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "hi_t2", "title": "केसरिया", "artist": "अरिजीत सिंह", "language": "Hindi" }, "timestamp": 1700020000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "hi_t3", "title": "अपना बना ले", "artist": "अरिजीत सिंह", "language": "Hindi" }, "timestamp": 1700030000000, "completed": true, "isLiked": false },
+      { "track": { "videoId": "hi_t4", "title": "रातां लंबियां", "artist": "जुबिन नौटियाल", "language": "Hindi" }, "timestamp": 1700060000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "hi_t5", "title": "तेरा चेहरा", "artist": "अरिजीत सिंह", "language": "Hindi" }, "timestamp": 1700070000000, "completed": true, "isLiked": false }
+    ],
+    "candidatePool": {
+      "hi_t1": [
+        { "videoId": "hi_t4", "title": "रातां लंबियां", "artist": "जुबिन नौटियाल", "language": "Hindi" },
+        { "videoId": "hi_t5", "title": "तेरा चेहरा", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "hi_c1", "title": "हवाएं", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "hi_c2", "title": "चन्ना मेरेया", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "hi_c3", "title": "गेरुआ", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "hi_c4", "title": "कल हो ना हो", "artist": "सोनू निगम", "language": "Hindi" },
+        { "videoId": "hi_c5", "title": "तेरे वास्ते", "artist": "वरुण जैन", "language": "Hindi" },
+        { "videoId": "hi_c6", "title": "शायद", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "hi_c7", "title": "तुझे कितना चाहने लगे", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "en_c2", "title": "Shape of You", "artist": "Ed Sheeran", "language": null }
+      ]
+    }
+  },
+  {
+    "id": "user_03_tamil_pure",
+    "persona": "Monolingual Tamil",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "ta_t1", "title": "கண்ணான கண்ணே", "artist": "டி. இமான்", "language": "Tamil" }, "timestamp": 1700010000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "ta_t2", "title": "வாத்தி கமிங்", "artist": "அனிருத் ரவிச்சந்தர்", "language": "Tamil" }, "timestamp": 1700020000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "ta_t3", "title": "மறுவார்த்தை", "artist": "சித் ஸ்ரீராம்", "language": "Tamil" }, "timestamp": 1700030000000, "completed": true, "isLiked": false },
+      { "track": { "videoId": "ta_t4", "title": "ஹுகும்", "artist": "அனிருத் ரவிச்சந்தர்", "language": "Tamil" }, "timestamp": 1700060000000, "completed": true, "isLiked": true }
+    ],
+    "candidatePool": {
+      "ta_t1": [
+        { "videoId": "ta_t4", "title": "ஹுகும்", "artist": "அனிருத் ரவிச்சந்தர்", "language": "Tamil" },
+        { "videoId": "ta_c1", "title": "ரோஜா பூந்தோட்டம்", "artist": "எஸ். பி. பாலசுப்பிரமணியம்", "language": "Tamil" },
+        { "videoId": "ta_c2", "title": "அரபிக் குத்து", "artist": "அனிருத் ரவிச்சந்தர்", "language": "Tamil" },
+        { "videoId": "ta_c3", "title": "நெஞ்சமே", "artist": "அனிருத் ரவிச்சந்தர்", "language": "Tamil" },
+        { "videoId": "ta_c4", "title": "இன்பமே சுகமா", "artist": "சித் ஸ்ரீராம்", "language": "Tamil" },
+        { "videoId": "ta_c5", "title": "காதலே காதலே", "artist": "கோவிந்த் வசந்தா", "language": "Tamil" },
+        { "videoId": "ta_c6", "title": "ஊ சொல்றியா", "artist": "தேவி ஸ்ரீ பிரசாத்", "language": "Tamil" },
+        { "videoId": "ta_c7", "title": "வேலையில்லா பட்டதாரி", "artist": "அனிருத் ரவிச்சந்தர்", "language": "Tamil" },
+        { "videoId": "ml_c1", "title": "കുട്ടനാടൻ പുഞ്ചയിലെ", "artist": "വിജയ് യേശുദാസ്", "language": "Malayalam" }
+      ]
+    }
+  },
+  {
+    "id": "user_04_korean_kpop",
+    "persona": "Monolingual K-Pop",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "kp_t1", "title": "봄날", "artist": "방탄소년단", "language": "K-pop" }, "timestamp": 1700010000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "kp_t2", "title": "작은 것들을 위한 시", "artist": "방탄소년단", "language": "K-pop" }, "timestamp": 1700020000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "kp_t3", "title": "피 땀 눈물", "artist": "방탄소년단", "language": "K-pop" }, "timestamp": 1700060000000, "completed": true, "isLiked": true }
+    ],
+    "candidatePool": {
+      "kp_t1": [
+        { "videoId": "kp_t3", "title": "피 땀 눈물", "artist": "방탄소년단", "language": "K-pop" },
+        { "videoId": "kp_c1", "title": "불타오르네", "artist": "방탄소년단", "language": "K-pop" },
+        { "videoId": "kp_c2", "title": "다이너마이트", "artist": "방탄소년단", "language": "K-pop" },
+        { "videoId": "kp_c3", "title": "버터", "artist": "방탄소년단", "language": "K-pop" },
+        { "videoId": "kp_c4", "title": "라이프 고즈 온", "artist": "방탄소년단", "language": "K-pop" },
+        { "videoId": "kp_c5", "title": "아이돌", "artist": "방탄소년단", "language": "K-pop" },
+        { "videoId": "kp_c6", "title": "런", "artist": "방탄소년단", "language": "K-pop" },
+        { "videoId": "kp_c7", "title": "마이크 드롭", "artist": "방탄소년단", "language": "K-pop" },
+        { "videoId": "en_c1", "title": "Blinding Lights", "artist": "The Weeknd", "language": null }
+      ]
+    }
+  },
+  {
+    "id": "user_05_punjabi_pure",
+    "persona": "Monolingual Punjabi",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "pa_t1", "title": "ਲਹਿੰਗਾ", "artist": "ਜਸ ਮਾਣਕ", "language": "Punjabi" }, "timestamp": 1700010000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "pa_t2", "title": "ਪ੍ਰਾੜਾ", "artist": "ਜਸ ਮਾਣਕ", "language": "Punjabi" }, "timestamp": 1700020000000, "completed": true, "isLiked": false },
+      { "track": { "videoId": "pa_t3", "title": "ਸੂਟ ਪੰਜਾਬੀ", "artist": "ਜਸ ਮਾਣਕ", "language": "Punjabi" }, "timestamp": 1700060000000, "completed": true, "isLiked": true }
+    ],
+    "candidatePool": {
+      "pa_t1": [
+        { "videoId": "pa_t3", "title": "ਸੂਟ ਪੰਜਾਬੀ", "artist": "ਜਸ ਮਾਣਕ", "language": "Punjabi" },
+        { "videoId": "pa_c1", "title": "ਤਿੱਖੇ ਤਿਵਾਰ", "artist": "ਕਰਨ ਔਜਲਾ", "language": "Punjabi" },
+        { "videoId": "pa_c2", "title": "ਬ੍ਰਾਊਨ ਮੁੰਡੇ", "artist": "ਏਪੀ ਢਿੱਲੋਂ", "language": "Punjabi" },
+        { "videoId": "pa_c3", "title": "ਇਨਸਾਨੇ", "artist": "ਏਪੀ ਢਿੱਲੋਂ", "language": "Punjabi" },
+        { "videoId": "pa_c4", "title": "ਚੇਕ ਇਟ ਆਉਟ", "artist": "ਕਰਨ ਔਜਲਾ", "language": "Punjabi" },
+        { "videoId": "pa_c5", "title": "ਸਾਫਟਲੀ", "artist": "ਕਰਨ ਔਜਲਾ", "language": "Punjabi" },
+        { "videoId": "pa_c6", "title": "ਜੀ ਜਨਾਬ", "artist": "ਜਸ ਮਾਣਕ", "language": "Punjabi" },
+        { "videoId": "pa_c7", "title": "ਤਾਰਾ", "artist": "ਜਸ ਮਾਣਕ", "language": "Punjabi" },
+        { "videoId": "hi_t1", "title": "तुम ही हो", "artist": "अरिजीत सिंह", "language": "Hindi" }
+      ]
+    }
+  },
+  {
+    "id": "user_06_malayalam_tamil",
+    "persona": "Multilingual Malayalam + Tamil",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "ml_t1", "title": "മലരേ", "artist": "വിജയ് യേശുദാസ്", "language": "Malayalam" }, "timestamp": 1700010000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "ta_t1", "title": "கண்ணான கண்ணே", "artist": "டி. இமான்", "language": "Tamil" }, "timestamp": 1700020000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "ml_t2", "title": "ആരോ വിരൽ നീട്ടി", "artist": "യേശുദാസ്", "language": "Malayalam" }, "timestamp": 1700030000000, "completed": true, "isLiked": false },
+      { "track": { "videoId": "ta_t2", "title": "வாத்தி கமிங்", "artist": "அனிருத் ரவிச்சந்தர்", "language": "Tamil" }, "timestamp": 1700060000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "ml_t4", "title": "ചെമ്പകപ്പൂ", "artist": "യേശുദാസ്", "language": "Malayalam" }, "timestamp": 1700070000000, "completed": true, "isLiked": true }
+    ],
+    "candidatePool": {
+      "ml_t1": [
+        { "videoId": "ta_t2", "title": "வாத்தி கமிங்", "artist": "அனிருத் ரவிச்சந்தர்", "language": "Tamil" },
+        { "videoId": "ml_t4", "title": "ചെമ്പകപ്പൂ", "artist": "യേശുദാസ്", "language": "Malayalam" },
+        { "videoId": "ml_c1", "title": "കുട്ടനാടൻ പുഞ്ചയിലെ", "artist": "വിജയ് യേശുദാസ്", "language": "Malayalam" },
+        { "videoId": "ta_c2", "title": "அரபிக் குத்து", "artist": "அனிருத் ரவிச்சந்தர்", "language": "Tamil" },
+        { "videoId": "ml_c2", "title": "ആലിപ്പഴം", "artist": "സുജാത മോഹൻ", "language": "Malayalam" },
+        { "videoId": "ta_c3", "title": "நெஞ்சமே", "artist": "அனிருத் ரவிச்சந்தர்", "language": "Tamil" },
+        { "videoId": "ml_c3", "title": "കണ്ണാംതുമ്പി", "artist": "യേശുദാസ്", "language": "Malayalam" },
+        { "videoId": "ta_c4", "title": "இன்பமே சுகமா", "artist": "சித் ஸ்ரீராம்", "language": "Tamil" },
+        { "videoId": "ml_c4", "title": "സൂര്യകിരീടം", "artist": "എം. ജി. ശ്രീകുമാർ", "language": "Malayalam" }
+      ]
+    }
+  },
+  {
+    "id": "user_07_hindi_punjabi",
+    "persona": "Multilingual Hindi + Punjabi",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "hi_t1", "title": "तुम ही हो", "artist": "अरिजीत सिंह", "language": "Hindi" }, "timestamp": 1700010000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "pa_t1", "title": "ਲਹਿੰਗਾ", "artist": "ਜਸ ਮਾਣਕ", "language": "Punjabi" }, "timestamp": 1700020000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "hi_t2", "title": "केसरिया", "artist": "अरिजीत सिंह", "language": "Hindi" }, "timestamp": 1700030000000, "completed": true, "isLiked": false },
+      { "track": { "videoId": "pa_t3", "title": "ਸੂਟ ਪੰਜਾਬੀ", "artist": "ਜਸ ਮਾਣਕ", "language": "Punjabi" }, "timestamp": 1700060000000, "completed": true, "isLiked": true }
+    ],
+    "candidatePool": {
+      "hi_t1": [
+        { "videoId": "pa_t3", "title": "ਸੂਟ ਪੰਜਾਬੀ", "artist": "ਜਸ ਮਾਣਕ", "language": "Punjabi" },
+        { "videoId": "hi_t4", "title": "रातां लंबियां", "artist": "जुबिन नौटियाल", "language": "Hindi" },
+        { "videoId": "hi_c1", "title": "हवाएं", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "pa_c1", "title": "ਤਿੱਖੇ ਤਿਵਾਰ", "artist": "ਕਰਨ ਔਜਲਾ", "language": "Punjabi" },
+        { "videoId": "hi_c2", "title": "चन्ना मेरेया", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "pa_c2", "title": "ਬ੍ਰਾਊਨ ਮੁੰਡੇ", "artist": "ਏਪੀ ਢਿੱਲੋਂ", "language": "Punjabi" },
+        { "videoId": "hi_c3", "title": "गेरुआ", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "pa_c3", "title": "ਇਨਸਾਨੇ", "artist": "ਏਪੀ ਢਿੱਲੋਂ", "language": "Punjabi" },
+        { "videoId": "hi_c4", "title": "कल हो ना हो", "artist": "सोनू निगम", "language": "Hindi" }
+      ]
+    }
+  },
+  {
+    "id": "user_08_south_indian_mix",
+    "persona": "Multilingual South Indian Mix",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "ml_t1", "title": "മലരേ", "artist": "വിജയ് യേശുദാസ്", "language": "Malayalam" }, "timestamp": 1700010000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "ta_t1", "title": "கண்ணான கண்ணே", "artist": "டி. இமான்", "language": "Tamil" }, "timestamp": 1700020000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "te_t1", "title": "నాటు నాటు", "artist": "రాహుల్", "language": "Telugu" }, "timestamp": 1700030000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "te_t2", "title": "సామి సామి", "artist": "మౌనిక యాదవ్", "language": "Telugu" }, "timestamp": 1700060000000, "completed": true, "isLiked": true }
+    ],
+    "candidatePool": {
+      "ml_t1": [
+        { "videoId": "te_t2", "title": "సామి సామి", "artist": "మౌనిక యాదవ్", "language": "Telugu" },
+        { "videoId": "ml_t4", "title": "ചെമ്പകപ്പൂ", "artist": "യേശുദാസ്", "language": "Malayalam" },
+        { "videoId": "ta_t4", "title": "ஹுகும்", "artist": "அனிருத் ரவிச்சந்தர்", "language": "Tamil" },
+        { "videoId": "te_c1", "title": "శ్రీవల్లి", "artist": "సిద్ శ్రీరామ్", "language": "Telugu" },
+        { "videoId": "ml_c1", "title": "കുട്ടനാടൻ പുഞ്ചയിലെ", "artist": "വിജയ് യേശുദാസ്", "language": "Malayalam" },
+        { "videoId": "ta_c1", "title": "ரோஜா பூந்தோட்டம்", "artist": "எஸ். பி. பாலசுப்பிரமணியம்", "language": "Tamil" },
+        { "videoId": "te_c2", "title": "బూట్టబొమ్మ", "artist": "అర్మాన్ మాలిక్", "language": "Telugu" },
+        { "videoId": "ml_c2", "title": "ആലിപ്പഴം", "artist": "സുജാത മോഹൻ", "language": "Malayalam" },
+        { "videoId": "ta_c2", "title": "அரபிக் குத்து", "artist": "அனிருத் ரவிச்சந்தர்", "language": "Tamil" }
+      ]
+    }
+  },
+  {
+    "id": "user_09_pan_indian_film",
+    "persona": "Pan-Indian Film Music",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "hi_t1", "title": "तुम ही हो", "artist": "अरिजीत सिंह", "language": "Hindi" }, "timestamp": 1700010000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "ta_t1", "title": "கண்ணான கண்ணே", "artist": "டி. இமான்", "language": "Tamil" }, "timestamp": 1700020000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "ml_t1", "title": "മലരേ", "artist": "വിജയ് യേശുദാസ്", "language": "Malayalam" }, "timestamp": 1700030000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "te_t1", "title": "నాటు నాటు", "artist": "రాహుల్", "language": "Telugu" }, "timestamp": 1700040000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "hi_t2", "title": "केसरिया", "artist": "अरिजीत सिंह", "language": "Hindi" }, "timestamp": 1700060000000, "completed": true, "isLiked": true }
+    ],
+    "candidatePool": {
+      "hi_t1": [
+        { "videoId": "hi_t2", "title": "केसरिया", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "ta_t4", "title": "ஹுகும்", "artist": "அனிருத் ரவிச்சந்தர்", "language": "Tamil" },
+        { "videoId": "ml_t4", "title": "ചെമ്പകപ്പൂ", "artist": "യേശുദാസ്", "language": "Malayalam" },
+        { "videoId": "te_t2", "title": "సామి సామి", "artist": "మౌనిక యాదవ్", "language": "Telugu" },
+        { "videoId": "hi_c1", "title": "हवाएं", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "ta_c2", "title": "அரபிக் குத்து", "artist": "அனிருத் ரவிச்சந்தர்", "language": "Tamil" },
+        { "videoId": "ml_c1", "title": "കുട്ടനാടൻ പുഞ്ചയിലെ", "artist": "വിജയ് യേശുദാസ്", "language": "Malayalam" },
+        { "videoId": "te_c1", "title": "శ్రీవల్లి", "artist": "సిద్ శ్రీరామ్", "language": "Telugu" },
+        { "videoId": "hi_c4", "title": "कल हो ना हो", "artist": "सोनू निगम", "language": "Hindi" }
+      ]
+    }
+  },
+  {
+    "id": "user_10_desi_indie_fusion",
+    "persona": "Desi Indie + Pop Fusion",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "hi_t1", "title": "तुम ही हो", "artist": "अरिजीत सिंह", "language": "Hindi" }, "timestamp": 1700010000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "en_t1", "title": "Blinding Lights", "artist": "The Weeknd", "language": null }, "timestamp": 1700020000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "en_t2", "title": "Starboy", "artist": "The Weeknd", "language": null }, "timestamp": 1700030000000, "completed": true, "isLiked": false },
+      { "track": { "videoId": "hi_t2", "title": "केसरिया", "artist": "अरिजीत सिंह", "language": "Hindi" }, "timestamp": 1700060000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "en_t3", "title": "Save Your Tears", "artist": "The Weeknd", "language": null }, "timestamp": 1700070000000, "completed": true, "isLiked": true }
+    ],
+    "candidatePool": {
+      "hi_t1": [
+        { "videoId": "hi_t2", "title": "केसरिया", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "en_t3", "title": "Save Your Tears", "artist": "The Weeknd", "language": null },
+        { "videoId": "en_c2", "title": "Shape of You", "artist": "Ed Sheeran", "language": null },
+        { "videoId": "hi_c1", "title": "हवाएं", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "en_c3", "title": "Levitating", "artist": "Dua Lipa", "language": null },
+        { "videoId": "hi_c2", "title": "चन्ना मेरेया", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "en_c4", "title": "As It Was", "artist": "Harry Styles", "language": null },
+        { "videoId": "hi_c4", "title": "कल हो ना हो", "artist": "सोनू निगम", "language": "Hindi" },
+        { "videoId": "en_c5", "title": "Bad Guy", "artist": "Billie Eilish", "language": null }
+      ]
+    }
+  },
+  {
+    "id": "user_11_english_pop_mainstream",
+    "persona": "English-only Mainstream Pop",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "en_t1", "title": "Blinding Lights", "artist": "The Weeknd", "language": null }, "timestamp": 1700010000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "en_t2", "title": "Starboy", "artist": "The Weeknd", "language": null }, "timestamp": 1700020000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "en_t4", "title": "Cruel Summer", "artist": "Taylor Swift", "language": null }, "timestamp": 1700030000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "en_t3", "title": "Save Your Tears", "artist": "The Weeknd", "language": null }, "timestamp": 1700060000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "en_t5", "title": "Anti-Hero", "artist": "Taylor Swift", "language": null }, "timestamp": 1700070000000, "completed": true, "isLiked": true }
+    ],
+    "candidatePool": {
+      "en_t1": [
+        { "videoId": "en_t3", "title": "Save Your Tears", "artist": "The Weeknd", "language": null },
+        { "videoId": "en_t5", "title": "Anti-Hero", "artist": "Taylor Swift", "language": null },
+        { "videoId": "en_c3", "title": "Levitating", "artist": "Dua Lipa", "language": null },
+        { "videoId": "en_c2", "title": "Shape of You", "artist": "Ed Sheeran", "language": null },
+        { "videoId": "en_c4", "title": "As It Was", "artist": "Harry Styles", "language": null },
+        { "videoId": "en_c5", "title": "Bad Guy", "artist": "Billie Eilish", "language": null },
+        { "videoId": "en_c6", "title": "Flowers", "artist": "Miley Cyrus", "language": null },
+        { "videoId": "en_c7", "title": "Stay", "artist": "The Kid LAROI", "language": null },
+        { "videoId": "en_c8", "title": "Ghost", "artist": "Justin Bieber", "language": null },
+        { "videoId": "hi_t1", "title": "तुम ही हो", "artist": "अरिजीत सिंह", "language": "Hindi" }
+      ]
+    }
+  },
+  {
+    "id": "user_12_english_hiphop",
+    "persona": "English-only Hip-Hop",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "hh_t1", "title": "God's Plan", "artist": "Drake", "language": null }, "timestamp": 1700010000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "hh_t2", "title": "HUMBLE.", "artist": "Kendrick Lamar", "language": null }, "timestamp": 1700020000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "hh_t3", "title": "Lose Yourself", "artist": "Eminem", "language": null }, "timestamp": 1700060000000, "completed": true, "isLiked": true }
+    ],
+    "candidatePool": {
+      "hh_t1": [
+        { "videoId": "hh_t3", "title": "Lose Yourself", "artist": "Eminem", "language": null },
+        { "videoId": "hh_c1", "title": "Hotline Bling", "artist": "Drake", "language": null },
+        { "videoId": "hh_c2", "title": "One Dance", "artist": "Drake", "language": null },
+        { "videoId": "hh_c3", "title": "Alright", "artist": "Kendrick Lamar", "language": null },
+        { "videoId": "hh_c4", "title": "DNA.", "artist": "Kendrick Lamar", "language": null },
+        { "videoId": "hh_c5", "title": "Without Me", "artist": "Eminem", "language": null },
+        { "videoId": "hh_c6", "title": "Till I Collapse", "artist": "Eminem", "language": null },
+        { "videoId": "hh_c7", "title": "In Da Club", "artist": "50 Cent", "language": null },
+        { "videoId": "en_c1", "title": "Blinding Lights", "artist": "The Weeknd", "language": null }
+      ]
+    }
+  },
+  {
+    "id": "user_13_english_indie_rock",
+    "persona": "English-only Indie Rock",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "rk_t1", "title": "Yellow", "artist": "Coldplay", "language": null }, "timestamp": 1700010000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "rk_t2", "title": "Do I Wanna Know?", "artist": "Arctic Monkeys", "language": null }, "timestamp": 1700020000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "rk_t3", "title": "Fix You", "artist": "Coldplay", "language": null }, "timestamp": 1700060000000, "completed": true, "isLiked": true }
+    ],
+    "candidatePool": {
+      "rk_t1": [
+        { "videoId": "rk_t3", "title": "Fix You", "artist": "Coldplay", "language": null },
+        { "videoId": "rk_c1", "title": "The Scientist", "artist": "Coldplay", "language": null },
+        { "videoId": "rk_c2", "title": "Viva La Vida", "artist": "Coldplay", "language": null },
+        { "videoId": "rk_c3", "title": "R U Mine?", "artist": "Arctic Monkeys", "language": null },
+        { "videoId": "rk_c4", "title": "505", "artist": "Arctic Monkeys", "language": null },
+        { "videoId": "rk_c5", "title": "Mr. Brightside", "artist": "The Killers", "language": null },
+        { "videoId": "rk_c6", "title": "Somebody Told Me", "artist": "The Killers", "language": null },
+        { "videoId": "rk_c7", "title": "Sex on Fire", "artist": "Kings of Leon", "language": null },
+        { "videoId": "en_t1", "title": "Blinding Lights", "artist": "The Weeknd", "language": null }
+      ]
+    }
+  },
+  {
+    "id": "user_14_english_electronic",
+    "persona": "English-only Electronic / Chill",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "el_t1", "title": "One More Time", "artist": "Daft Punk", "language": null }, "timestamp": 1700010000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "el_t2", "title": "Midnight City", "artist": "M83", "language": null }, "timestamp": 1700020000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "el_t3", "title": "Get Lucky", "artist": "Daft Punk", "language": null }, "timestamp": 1700060000000, "completed": true, "isLiked": true }
+    ],
+    "candidatePool": {
+      "el_t1": [
+        { "videoId": "el_t3", "title": "Get Lucky", "artist": "Daft Punk", "language": null },
+        { "videoId": "el_c1", "title": "Harder Better Faster Stronger", "artist": "Daft Punk", "language": null },
+        { "videoId": "el_c2", "title": "Around the World", "artist": "Daft Punk", "language": null },
+        { "videoId": "el_c3", "title": "Wait", "artist": "M83", "language": null },
+        { "videoId": "el_c4", "title": "Strobe", "artist": "deadmau5", "language": null },
+        { "videoId": "el_c5", "title": "Clarity", "artist": "Zedd", "language": null },
+        { "videoId": "el_c6", "title": "Titanium", "artist": "David Guetta", "language": null },
+        { "videoId": "el_c7", "title": "Wake Me Up", "artist": "Avicii", "language": null },
+        { "videoId": "en_t1", "title": "Blinding Lights", "artist": "The Weeknd", "language": null }
+      ]
+    }
+  },
+  {
+    "id": "user_15_cold_start_minimal",
+    "persona": "Cold Start (1 like, 1 play)",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "en_t1", "title": "Blinding Lights", "artist": "The Weeknd", "language": null }, "timestamp": 1700010000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "en_t2", "title": "Starboy", "artist": "The Weeknd", "language": null }, "timestamp": 1700060000000, "completed": true, "isLiked": false }
+    ],
+    "candidatePool": {
+      "en_t1": [
+        { "videoId": "en_t2", "title": "Starboy", "artist": "The Weeknd", "language": null },
+        { "videoId": "en_t3", "title": "Save Your Tears", "artist": "The Weeknd", "language": null },
+        { "videoId": "en_c2", "title": "Shape of You", "artist": "Ed Sheeran", "language": null },
+        { "videoId": "en_c3", "title": "Levitating", "artist": "Dua Lipa", "language": null },
+        { "videoId": "en_c4", "title": "As It Was", "artist": "Harry Styles", "language": null },
+        { "videoId": "en_c5", "title": "Bad Guy", "artist": "Billie Eilish", "language": null },
+        { "videoId": "en_c6", "title": "Flowers", "artist": "Miley Cyrus", "language": null },
+        { "videoId": "en_c7", "title": "Stay", "artist": "The Kid LAROI", "language": null },
+        { "videoId": "en_c8", "title": "Ghost", "artist": "Justin Bieber", "language": null }
+      ]
+    }
+  },
+  {
+    "id": "user_16_cold_start_single_artist",
+    "persona": "Cold Start (Single artist 2 plays)",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "hi_t1", "title": "तुम ही हो", "artist": "अरिजीत सिंह", "language": "Hindi" }, "timestamp": 1700010000000, "completed": true, "isLiked": false },
+      { "track": { "videoId": "hi_t2", "title": "केसरिया", "artist": "अरिजीत सिंह", "language": "Hindi" }, "timestamp": 1700020000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "hi_t4", "title": "रातां लंबियां", "artist": "जुबिन नौटियाल", "language": "Hindi" }, "timestamp": 1700060000000, "completed": true, "isLiked": true }
+    ],
+    "candidatePool": {
+      "hi_t2": [
+        { "videoId": "hi_t4", "title": "रातां लंबियां", "artist": "जुबिन नौटियाल", "language": "Hindi" },
+        { "videoId": "hi_c1", "title": "हवाएं", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "hi_c2", "title": "चन्ना मेरेया", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "hi_c3", "title": "गेरुआ", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "hi_c4", "title": "कल हो ना हो", "artist": "सोनू निगम", "language": "Hindi" },
+        { "videoId": "hi_c5", "title": "तेरे वास्ते", "artist": "वरुण जैन", "language": "Hindi" },
+        { "videoId": "hi_c6", "title": "शायद", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "hi_c7", "title": "तुझे कितना चाहने लगे", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "en_c2", "title": "Shape of You", "artist": "Ed Sheeran", "language": null }
+      ]
+    }
+  },
+  {
+    "id": "user_17_cold_start_guest_explore",
+    "persona": "Cold Start (Guest 3 diverse tracks)",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "ml_t1", "title": "മലരേ", "artist": "വിജയ് യേശുദാസ്", "language": "Malayalam" }, "timestamp": 1700010000000, "completed": true, "isLiked": false },
+      { "track": { "videoId": "en_t1", "title": "Blinding Lights", "artist": "The Weeknd", "language": null }, "timestamp": 1700020000000, "completed": true, "isLiked": false },
+      { "track": { "videoId": "ml_t2", "title": "ആരോ വിരൽ നീട്ടി", "artist": "യേശുദാസ്", "language": "Malayalam" }, "timestamp": 1700060000000, "completed": true, "isLiked": true }
+    ],
+    "candidatePool": {
+      "ml_t1": [
+        { "videoId": "ml_t2", "title": "ആരോ വിരൽ നീട്ടി", "artist": "യേശുദാസ്", "language": "Malayalam" },
+        { "videoId": "en_t2", "title": "Starboy", "artist": "The Weeknd", "language": null },
+        { "videoId": "ml_t4", "title": "ചെമ്പകപ്പൂ", "artist": "യേശുദാസ്", "language": "Malayalam" },
+        { "videoId": "en_t3", "title": "Save Your Tears", "artist": "The Weeknd", "language": null },
+        { "videoId": "ml_c1", "title": "കുട്ടനാടൻ പുഞ്ചയിലെ", "artist": "വിജയ് യേശുദാസ്", "language": "Malayalam" },
+        { "videoId": "en_c2", "title": "Shape of You", "artist": "Ed Sheeran", "language": null },
+        { "videoId": "ml_c2", "title": "ആലിപ്പഴം", "artist": "സുജാത മോഹൻ", "language": "Malayalam" },
+        { "videoId": "en_c3", "title": "Levitating", "artist": "Dua Lipa", "language": null },
+        { "videoId": "ml_c3", "title": "കണ്ണാംതുമ്പി", "artist": "യേശുദാസ്", "language": "Malayalam" }
+      ]
+    }
+  },
+  {
+    "id": "user_18_heavy_repeat_single_track",
+    "persona": "Heavy Repeat (Single track 15+ plays)",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "en_t1", "title": "Blinding Lights", "artist": "The Weeknd", "language": null }, "timestamp": 1700010000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "en_t1", "title": "Blinding Lights", "artist": "The Weeknd", "language": null }, "timestamp": 1700020000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "en_t1", "title": "Blinding Lights", "artist": "The Weeknd", "language": null }, "timestamp": 1700030000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "en_t1", "title": "Blinding Lights", "artist": "The Weeknd", "language": null }, "timestamp": 1700040000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "en_t2", "title": "Starboy", "artist": "The Weeknd", "language": null }, "timestamp": 1700060000000, "completed": true, "isLiked": true }
+    ],
+    "candidatePool": {
+      "en_t1": [
+        { "videoId": "en_t2", "title": "Starboy", "artist": "The Weeknd", "language": null },
+        { "videoId": "en_t3", "title": "Save Your Tears", "artist": "The Weeknd", "language": null },
+        { "videoId": "en_c3", "title": "Levitating", "artist": "Dua Lipa", "language": null },
+        { "videoId": "en_c2", "title": "Shape of You", "artist": "Ed Sheeran", "language": null },
+        { "videoId": "en_c4", "title": "As It Was", "artist": "Harry Styles", "language": null },
+        { "videoId": "en_c5", "title": "Bad Guy", "artist": "Billie Eilish", "language": null },
+        { "videoId": "en_c6", "title": "Flowers", "artist": "Miley Cyrus", "language": null },
+        { "videoId": "en_c7", "title": "Stay", "artist": "The Kid LAROI", "language": null },
+        { "videoId": "en_c8", "title": "Ghost", "artist": "Justin Bieber", "language": null }
+      ]
+    }
+  },
+  {
+    "id": "user_19_heavy_repeat_short_album",
+    "persona": "Heavy Repeat (Looped 3-track album)",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "hi_t1", "title": "तुम ही हो", "artist": "अरिजीत सिंह", "language": "Hindi" }, "timestamp": 1700010000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "hi_t2", "title": "केसरिया", "artist": "अरिजीत सिंह", "language": "Hindi" }, "timestamp": 1700020000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "hi_t1", "title": "तुम ही हो", "artist": "अरिजीत सिंह", "language": "Hindi" }, "timestamp": 1700030000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "hi_t3", "title": "अपना बना ले", "artist": "अरिजीत सिंह", "language": "Hindi" }, "timestamp": 1700060000000, "completed": true, "isLiked": true }
+    ],
+    "candidatePool": {
+      "hi_t1": [
+        { "videoId": "hi_t3", "title": "अपना बना ले", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "hi_t4", "title": "रातां लंबियां", "artist": "जुबिन नौटियाल", "language": "Hindi" },
+        { "videoId": "hi_c1", "title": "हवाएं", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "hi_c2", "title": "चन्ना मेरेया", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "hi_c3", "title": "गेरुआ", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "hi_c4", "title": "कल हो ना हो", "artist": "सोनू निगम", "language": "Hindi" },
+        { "videoId": "hi_c5", "title": "तेरे वास्ते", "artist": "वरुण जैन", "language": "Hindi" },
+        { "videoId": "hi_c6", "title": "शायद", "artist": "अरिजीत सिंह", "language": "Hindi" },
+        { "videoId": "hi_c7", "title": "तुझे कितना चाहने लगे", "artist": "अरिजीत सिंह", "language": "Hindi" }
+      ]
+    }
+  },
+  {
+    "id": "user_20_heavy_repeat_lofi_study",
+    "persona": "Heavy Repeat (Lo-fi study instrumental)",
+    "cutoffTimestamp": 1700050000000,
+    "history": [
+      { "track": { "videoId": "lf_t1", "title": "Lofi Rain Beats", "artist": "ChillHop", "language": null }, "timestamp": 1700010000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "lf_t2", "title": "Late Night Study Focus", "artist": "ChillHop", "language": null }, "timestamp": 1700020000000, "completed": true, "isLiked": true },
+      { "track": { "videoId": "lf_t3", "title": "Coffee Shop Ambient", "artist": "ChillHop", "language": null }, "timestamp": 1700060000000, "completed": true, "isLiked": true }
+    ],
+    "candidatePool": {
+      "lf_t1": [
+        { "videoId": "lf_t3", "title": "Coffee Shop Ambient", "artist": "ChillHop", "language": null },
+        { "videoId": "lf_c1", "title": "Sunday Morning Lo-Fi", "artist": "Lofi Girl", "language": null },
+        { "videoId": "lf_c2", "title": "Midnight Cozy Beats", "artist": "ChillHop", "language": null },
+        { "videoId": "lf_c3", "title": "Deep Sleep Rain", "artist": "Lofi Girl", "language": null },
+        { "videoId": "lf_c4", "title": "Coding in the Rain", "artist": "ChillHop", "language": null },
+        { "videoId": "lf_c5", "title": "Library Whispers", "artist": "Lofi Girl", "language": null },
+        { "videoId": "lf_c6", "title": "Autumn Leaves Chill", "artist": "ChillHop", "language": null },
+        { "videoId": "lf_c7", "title": "Warm Tea Lo-Fi", "artist": "Lofi Girl", "language": null },
+        { "videoId": "en_t1", "title": "Blinding Lights", "artist": "The Weeknd", "language": null }
+      ]
+    }
+  }
+]

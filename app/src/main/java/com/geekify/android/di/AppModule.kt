@@ -21,9 +21,11 @@ import com.geekify.android.data.local.MIGRATION_3_4
 import com.geekify.android.data.local.MIGRATION_4_5
 import com.geekify.android.data.local.MIGRATION_5_6
 import com.geekify.android.data.local.MIGRATION_6_7
+import com.geekify.android.data.local.MIGRATION_7_8
 import com.geekify.android.data.local.PlayStatDao
 import com.geekify.android.data.local.PlaylistDao
 import com.geekify.android.data.local.RecentSearchDao
+import com.geekify.android.data.local.RecommendationLogDao
 import com.geekify.android.data.local.ShelfCacheDao
 import com.geekify.android.data.source.MusicSource
 import com.geekify.android.data.source.YouTubeMusicSource
@@ -74,7 +76,7 @@ abstract class AppModule {
         @Provides @Singleton
         fun provideDatabase(@ApplicationContext ctx: Context): GeekifyDatabase =
             Room.databaseBuilder(ctx, GeekifyDatabase::class.java, "geekify.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 .build()
 
         @Provides fun provideLikedDao(db: GeekifyDatabase): LikedDao = db.likedDao()
@@ -85,5 +87,6 @@ abstract class AppModule {
         @Provides fun provideCatalogDao(db: GeekifyDatabase): CatalogDao = db.catalogDao()
         @Provides fun provideShelfCacheDao(db: GeekifyDatabase): ShelfCacheDao = db.shelfCacheDao()
         @Provides fun provideRecentSearchDao(db: GeekifyDatabase): RecentSearchDao = db.recentSearchDao()
+        @Provides fun provideRecommendationLogDao(db: GeekifyDatabase): RecommendationLogDao = db.recommendationLogDao()
     }
 }

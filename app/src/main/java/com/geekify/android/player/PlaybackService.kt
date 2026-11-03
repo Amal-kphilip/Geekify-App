@@ -119,6 +119,7 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var musicSource: MusicSource
     @Inject lateinit var historyRepository: com.geekify.android.data.local.HistoryRepository
     @Inject lateinit var listeningStatsRepository: ListeningStatsRepository
+    @Inject lateinit var recommendationLogRepository: com.geekify.android.data.local.RecommendationLogRepository
     @Inject lateinit var libraryRepository: com.geekify.android.data.local.LibraryRepository
     @Inject lateinit var http: OkHttpClient
     @Inject lateinit var audioCache: SimpleCache
@@ -1134,6 +1135,15 @@ class PlaybackService : MediaSessionService() {
         lastListeningUpdatedAt = activeListeningStartedAt
         activeListeningMs = 0L
         lastListeningCheckpointMs = 0L
+
+        listeningPersistenceScope.launch {
+            try {
+                recommendationLogRepository.recordOutcome(
+                    track.videoId,
+                    com.geekify.android.data.local.RecommendationOutcomeEvent.PLAYED
+                )
+            } catch (_: Exception) {}
+        }
     }
 
     private fun checkpointListeningSession() {
@@ -1205,6 +1215,19 @@ class PlaybackService : MediaSessionService() {
                 // This job waits for all previous periodic checkpoints, then writes and uploads the
                 // final cumulative record. Account handoff joins it before clearing Room or changing UID.
                 persistenceJob = enqueueListeningPersistence(record, pushToCloud = true)
+
+                listeningPersistenceScope.launch {
+                    try {
+                        val event = when {
+                            meaningfulCompletion -> com.geekify.android.data.local.RecommendationOutcomeEvent.COMPLETED
+                            skipped && activeListeningMs < playThreshold -> com.geekify.android.data.local.RecommendationOutcomeEvent.SKIPPED_EARLY
+                            else -> null
+                        }
+                        if (event != null) {
+                            recommendationLogRepository.recordOutcome(track.videoId, event)
+                        }
+                    } catch (_: Exception) {}
+                }
             }
         }
         activeListeningSessionId = null

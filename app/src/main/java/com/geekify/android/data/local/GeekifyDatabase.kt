@@ -170,6 +170,60 @@ data class RecentSearchEntity(
 )
 
 @Entity(
+    tableName = "recommendation_impressions",
+    indices = [
+        Index(value = ["videoId", "shownAt"]),
+        Index(value = ["requestId"]),
+        Index(value = ["accountId"]),
+        Index(value = ["shownAt"])
+    ]
+)
+data class RecommendationImpressionEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val accountId: String?,
+    val requestId: String,
+    val mixId: String,
+    val videoId: String,
+    val position: Int,
+    val sourceSeed: String?,
+    val score: Double,
+    val shownAt: Long = System.currentTimeMillis()
+)
+
+enum class RecommendationOutcomeEvent {
+    PLAYED,
+    COMPLETED,
+    SKIPPED_EARLY,
+    LIKED,
+    ADDED_TO_PLAYLIST,
+    DISMISSED,
+    IGNORED
+}
+
+@Entity(
+    tableName = "recommendation_outcomes",
+    foreignKeys = [
+        ForeignKey(
+            entity = RecommendationImpressionEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["impressionId"],
+            onDelete = ForeignKey.CASCADE,
+            onUpdate = ForeignKey.CASCADE
+        )
+    ],
+    indices = [
+        Index(value = ["impressionId"]),
+        Index(value = ["at"])
+    ]
+)
+data class RecommendationOutcomeEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val impressionId: Long,
+    val event: String,
+    val at: Long = System.currentTimeMillis()
+)
+
+@Entity(
     tableName = "playlist_tracks",
     primaryKeys = ["playlistId", "videoId"],
     foreignKeys = [
@@ -404,15 +458,50 @@ interface RecentSearchDao {
     }
 }
 
+data class VideoImpressionCount(
+    val videoId: String,
+    val count: Int
+)
+
+@Dao
+interface RecommendationLogDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertImpressions(impressions: List<RecommendationImpressionEntity>): List<Long>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOutcome(outcome: RecommendationOutcomeEntity): Long
+
+    @Query("SELECT * FROM recommendation_impressions WHERE videoId = :videoId AND shownAt >= :sinceTimestamp ORDER BY shownAt DESC LIMIT 1")
+    suspend fun findRecentImpressionForVideo(videoId: String, sinceTimestamp: Long): RecommendationImpressionEntity?
+
+    @Query("SELECT videoId, COUNT(*) as count FROM recommendation_impressions WHERE shownAt >= :sinceTimestamp GROUP BY videoId")
+    suspend fun getImpressionCountsSince(sinceTimestamp: Long): List<VideoImpressionCount>
+
+    @Query("SELECT * FROM recommendation_impressions WHERE requestId = :requestId ORDER BY position ASC")
+    suspend fun getImpressionsForRequest(requestId: String): List<RecommendationImpressionEntity>
+
+    @Query("SELECT * FROM recommendation_outcomes WHERE impressionId = :impressionId ORDER BY at ASC")
+    suspend fun getOutcomesForImpression(impressionId: Long): List<RecommendationOutcomeEntity>
+
+    @Query("DELETE FROM recommendation_impressions WHERE shownAt < :timestamp")
+    suspend fun pruneImpressionsOlderThan(timestamp: Long): Int
+
+    @Query("SELECT COUNT(*) FROM recommendation_impressions")
+    suspend fun countImpressions(): Int
+
+    @Query("SELECT COUNT(*) FROM recommendation_outcomes")
+    suspend fun countOutcomes(): Int
+}
+
 // ---- Database ----
 
 @Database(
     entities = [
         LikedTrackEntity::class, HistoryTrackEntity::class, PlaylistEntity::class, PlaylistTrackEntity::class, PlayStatEntity::class,
         TrackEntity::class, AlbumEntity::class, ArtistEntity::class, CachedShelfEntity::class, ListeningSessionEntity::class,
-        RecentSearchEntity::class
+        RecentSearchEntity::class, RecommendationImpressionEntity::class, RecommendationOutcomeEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -425,6 +514,7 @@ abstract class GeekifyDatabase : RoomDatabase() {
     abstract fun catalogDao(): CatalogDao
     abstract fun shelfCacheDao(): ShelfCacheDao
     abstract fun recentSearchDao(): RecentSearchDao
+    abstract fun recommendationLogDao(): RecommendationLogDao
 }
 
 /** v2 -> v3: adds the offline catalog (tracks, albums, artists) and the cached home shelves. Nothing is dropped. */
@@ -529,5 +619,38 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
             "CREATE TABLE IF NOT EXISTS `recent_searches` (`query` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, PRIMARY KEY(`query`))"
         )
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_recent_searches_timestamp` ON `recent_searches` (`timestamp`)")
+    }
+}
+
+/** v7 -> v8: adds recommendation_impressions and recommendation_outcomes tables with indexes and foreign key. */
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `recommendation_impressions` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`accountId` TEXT, " +
+                "`requestId` TEXT NOT NULL, " +
+                "`mixId` TEXT NOT NULL, " +
+                "`videoId` TEXT NOT NULL, " +
+                "`position` INTEGER NOT NULL, " +
+                "`sourceSeed` TEXT, " +
+                "`score` REAL NOT NULL, " +
+                "`shownAt` INTEGER NOT NULL)"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_recommendation_impressions_videoId_shownAt` ON `recommendation_impressions` (`videoId`, `shownAt`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_recommendation_impressions_requestId` ON `recommendation_impressions` (`requestId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_recommendation_impressions_accountId` ON `recommendation_impressions` (`accountId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_recommendation_impressions_shownAt` ON `recommendation_impressions` (`shownAt`)")
+
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `recommendation_outcomes` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`impressionId` INTEGER NOT NULL, " +
+                "`event` TEXT NOT NULL, " +
+                "`at` INTEGER NOT NULL, " +
+                "FOREIGN KEY(`impressionId`) REFERENCES `recommendation_impressions`(`id`) ON UPDATE CASCADE ON DELETE CASCADE)"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_recommendation_outcomes_impressionId` ON `recommendation_outcomes` (`impressionId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_recommendation_outcomes_at` ON `recommendation_outcomes` (`at`)")
     }
 }

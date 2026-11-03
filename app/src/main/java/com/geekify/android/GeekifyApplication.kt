@@ -23,6 +23,7 @@ class GeekifyApplication : Application() {
         NotificationChannels.ensureAll(this)
         // KEEP policy: scheduling on every launch never duplicates or resets the existing periodic job.
         NotificationWorker.schedule(this)
+        com.geekify.android.domain.recommend.RecommendationPruneWorker.schedule(this)
     }
 
     private class ReleaseLoggingTree : Timber.Tree() {

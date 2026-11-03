@@ -51,7 +51,8 @@ class HomeViewModel @Inject constructor(
     private val auth: AuthRepository,
     private val memory: RecommendationMemory,
     private val shelfCache: ShelfCacheRepository,
-    private val appSettings: com.geekify.android.settings.AppSettingsRepository
+    private val appSettings: com.geekify.android.settings.AppSettingsRepository,
+    private val recommendationLog: com.geekify.android.data.local.RecommendationLogRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -373,6 +374,8 @@ class HomeViewModel @Inject constructor(
                 )
             }
 
+        val nowMs = System.currentTimeMillis()
+        // When timestamps are missing from cached Track objects, Recommender gracefully falls back to index-based decay approximation
         fun signal(t: Track) = Recommender.Signal(t.videoId, t.artist, t.title)
         val liked = likedTracks.take(40).map(::signal)
         val recent = recentTracks.take(30).map(::signal)
@@ -388,7 +391,7 @@ class HomeViewModel @Inject constructor(
         val preferredContentLanguage = LANGUAGE_TO_RECOMMENDER_TAG[settings.contentLanguage.lowercase()]
         val hourOfDay = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
 
-        val languageProfile = Recommender.languageAffinity(liked, recent, frequent, playlist)
+        val languageProfile = Recommender.languageAffinity(liked, recent, frequent, playlist, nowMs = nowMs)
         val (weights, meta, _) = Recommender.seedWeights(
             liked,
             recent,
@@ -396,7 +399,8 @@ class HomeViewModel @Inject constructor(
             playlist,
             savedArtists,
             languageAffinity = languageProfile.affinity,
-            sessions = sessionSignals
+            sessions = sessionSignals,
+            nowMs = nowMs
         )
         val seeds = Recommender.pickSeedsVaried(weights, meta, SEED_COUNT)
 
@@ -410,6 +414,8 @@ class HomeViewModel @Inject constructor(
         val exclude = (likedTracks + recentTracks + playlistTracks).map { it.videoId }.toMutableSet().apply {
             addAll(frequent.map { it.videoId })
         }
+
+        val shownCounts = runCatching { recommendationLog.getImpressionCountsSince(sevenDaysAgo) }.getOrDefault(emptyMap())
 
         val (mixResults, _) = Recommender.buildMixes(
             liked = liked,
@@ -429,12 +435,16 @@ class HomeViewModel @Inject constructor(
             savedArtists = savedArtists,
             exclude = exclude,
             shown = memory.snapshot(accountId),
+            shownCounts = shownCounts,
+            album = { it.album },
             seeds = seeds,
             sessions = sessionSignals,
             hourOfDay = hourOfDay,
-            preferredContentLanguage = preferredContentLanguage
+            preferredContentLanguage = preferredContentLanguage,
+            nowMs = nowMs
         )
 
+        val mixResultSources = mixResults.associate { it.id to it.sources }
         val allKnownTracksById = (likedTracks + recentTracks + playlistTracks + relatedMap.values.flatten())
             .associateBy { it.videoId }
         val tracksById = relatedMap.values.flatten().associateBy { it.videoId }
@@ -517,6 +527,22 @@ class HomeViewModel @Inject constructor(
 
         if (mixes.isEmpty() || accountId != recommendationAccountId) return@withContext
         memory.remember(accountId, mixes.filter { it.id != "on-repeat" && it.id != "repeat-rewind" }.flatMap { mix -> mix.tracks.take(10).map { it.videoId } })
+
+        val requestId = java.util.UUID.randomUUID().toString()
+        val nowShownAt = System.currentTimeMillis()
+        mixes.forEach { mix ->
+            val sourceMap = mixResultSources[mix.id]
+            val items = mix.tracks.mapIndexed { idx, tr ->
+                com.geekify.android.data.local.RecommendationLogRepository.ImpressionItem(
+                    videoId = tr.videoId,
+                    position = idx,
+                    sourceSeed = sourceMap?.get(tr.videoId),
+                    score = 0.0
+                )
+            }
+            recommendationLog.recordImpressions(accountId, requestId, mix.id, items, nowShownAt)
+        }
+
         _uiState.update { it.copy(mixes = mixes) }
         rebuildDailyRecommendations(mixes)
     }
@@ -764,6 +790,11 @@ class HomeViewModel @Inject constructor(
             "ml" to "Malayalam",
             "ta" to "Tamil",
             "te" to "Telugu",
+            "kn" to "Kannada",
+            "bn" to "Bengali",
+            "gu" to "Gujarati",
+            "or" to "Odia",
+            "pa" to "Punjabi",
             "es" to "Spanish",
             "fr" to "French",
             "de" to "German",
@@ -777,6 +808,11 @@ class HomeViewModel @Inject constructor(
             "hi" to "Hindi",
             "ta" to "Tamil",
             "te" to "Telugu",
+            "kn" to "Kannada",
+            "bn" to "Bengali",
+            "gu" to "Gujarati",
+            "or" to "Odia",
+            "pa" to "Punjabi",
             "ko" to "K-pop",
             "ja" to "Japanese"
         )

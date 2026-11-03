@@ -32,7 +32,8 @@ data class SavedCollection(
 class LibraryRepository @Inject constructor(
     private val dao: PlaylistDao,
     private val likedDao: LikedDao,
-    private val dataStore: DataStore<Preferences>
+    private val dataStore: DataStore<Preferences>,
+    private val recommendationLog: dagger.Lazy<RecommendationLogRepository>
 ) {
     private val savedKey = stringPreferencesKey("saved_collections")
     private val savedJson = Json { ignoreUnknownKeys = true }
@@ -76,8 +77,17 @@ class LibraryRepository @Inject constructor(
     suspend fun isLiked(videoId: String) = likedDao.isLiked(videoId)
 
     suspend fun toggleLike(track: Track) {
-        if (likedDao.isLiked(track.videoId)) likedDao.delete(track.toLiked())
-        else likedDao.insert(track.toLiked())
+        if (likedDao.isLiked(track.videoId)) {
+            likedDao.delete(track.toLiked())
+        } else {
+            likedDao.insert(track.toLiked())
+            runCatching {
+                recommendationLog.get().recordOutcome(
+                    track.videoId,
+                    RecommendationOutcomeEvent.LIKED
+                )
+            }
+        }
     }
 
     suspend fun createPlaylist(name: String): LocalPlaylist {
@@ -99,6 +109,12 @@ class LibraryRepository @Inject constructor(
         if (existing.any { it.videoId == track.videoId }) return
         val nextPosition = nextPlaylistPosition(existing.map { it.position })
         dao.insertTrack(track.toPlaylistTrack(id, nextPosition))
+        runCatching {
+            recommendationLog.get().recordOutcome(
+                track.videoId,
+                RecommendationOutcomeEvent.ADDED_TO_PLAYLIST
+            )
+        }
     }
 
     suspend fun removeFromPlaylist(id: String, videoId: String) =
