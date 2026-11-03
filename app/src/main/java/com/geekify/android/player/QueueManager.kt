@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -571,6 +572,45 @@ class QueueManager(
             s.copy(queue = q, index = idx),
             queueChanged = true
         )
+    }
+
+    /**
+     * Clears account-specific playback state during sign-out/account handoff. Device-level audio
+     * preferences (volume, shuffle and repeat) are retained; the previous account's queue, index,
+     * progress and recommendation explanations are removed from DataStore before another account
+     * can become active.
+     */
+    suspend fun clearForAccountTransition() {
+        awaitLoaded()
+        val pendingWriter = synchronized(stateLock) {
+            persistJob.also { persistJob = null }
+        }
+        pendingWriter?.cancelAndJoin()
+        persistMutex.withLock {
+            synchronized(stateLock) {
+                val current = _state.value
+                _state.value = QueueState(
+                    shuffle = current.shuffle,
+                    repeat = current.repeat,
+                    volume = current.volume
+                )
+                _position.value = PlaybackPosition()
+                pendingStartMs = 0L
+                shuffleOrder = null
+                shufflePointer = 0
+                dirtyQueue = false
+                dirtyModes = false
+                dirtyProgress = false
+                // Volume and shuffle/repeat are global settings and are deliberately preserved.
+                dirtyVolume = false
+            }
+            dataStore.edit { prefs ->
+                prefs.remove(KEY_QUEUE)
+                prefs.remove(KEY_INDEX)
+                prefs.remove(KEY_PROGRESS)
+                prefs.remove(KEY_RECOMMENDATION_REASONS)
+            }
+        }
     }
 
     fun clearQueue() = runWhenLoaded {

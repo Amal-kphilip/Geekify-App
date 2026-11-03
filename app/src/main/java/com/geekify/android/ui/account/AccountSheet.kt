@@ -100,8 +100,7 @@ fun AccountSheet(
             title = { Text("Sign out of Geekify?") },
             text = {
                 Text(
-                    "Geekify will back up your library, recents and listening sessions before signing out. " +
-                        "If the backup fails, you'll remain signed in and your data will stay on this device."
+                    "Geekify will save your library, recents and listening sessions first. If another saved account is ready on this device, Geekify will switch to it automatically. Otherwise you'll be signed out. If backup fails, your current account and data stay intact."
                 )
             },
             confirmButton = {

@@ -56,6 +56,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import dagger.hilt.android.AndroidEntryPoint
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -72,6 +73,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 
 @OptIn(UnstableApi::class)
@@ -79,6 +81,24 @@ import okhttp3.OkHttpClient
 class PlaybackService : MediaSessionService() {
 
     companion object {
+        @Volatile private var activeInstance: PlaybackService? = null
+
+        /** Stops the live playback session before an account transition. A non-running service is a no-op. */
+        suspend fun stopForAccountTransition() {
+            activeInstance?.pauseAndStopForAccountTransition()
+        }
+
+        /** Clears the old account's media state after the data handoff commits. The service and
+         * MediaSession remain alive so the next account can play without requiring an activity restart. */
+        suspend fun completeAccountTransition() {
+            activeInstance?.completeAccountTransition()
+        }
+
+        /** Restores the old service to a safe paused state when backup or account validation fails. */
+        suspend fun abortAccountTransition() {
+            activeInstance?.abortAccountTransition()
+        }
+
         private const val PLAYBACK_CHANNEL_ID = NotificationChannels.PLAYBACK
         private const val PLAYBACK_NOTIFICATION_ID = 1001
         /** Fresh-link attempts for one track before the error is shown. */
@@ -112,6 +132,8 @@ class PlaybackService : MediaSessionService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     // Persistence survives service teardown long enough to flush the final listening checkpoint.
     private val listeningPersistenceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** Serializes periodic and final session checkpoints so an old checkpoint cannot land after account cleanup. */
+    private var listeningPersistenceJob: Job? = null
     private var prefetchJob: Job? = null
     private var autoplayJob: Job? = null
     private var progressJob: Job? = null
@@ -133,9 +155,15 @@ class PlaybackService : MediaSessionService() {
     private var activeListeningMs = 0L
     private var lastListeningCheckpointMs = 0L
     private var restoredPositionUsed = false
+    @Volatile private var accountTransitionInProgress = false
+    @Volatile private var transitionWasPlaying = false
+    private var transitionOriginalVolume = 1f
+    /** Invalidates resolver, retry, autoplay and watchdog work across account boundaries. */
+    private val playbackGeneration = AtomicLong(0L)
 
     override fun onCreate() {
         super.onCreate()
+        activeInstance = this
 
         createPlaybackNotificationChannel()
         registerConnectivityMonitor()
@@ -264,7 +292,17 @@ class PlaybackService : MediaSessionService() {
             // onIsPlayingChanged(false). Mirroring that false here used to flip the intent back
             // off, so the next song was loaded paused and auto-advance never started playback.
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                // A media-button or external-controller command must never restart the previous
+                // account's player while an account handoff is being committed.
                 val queueState = queueManager.state.value
+                if (accountTransitionInProgress || (playWhenReady && queueState.current == null)) {
+                    if (playWhenReady) {
+                        player.playWhenReady = false
+                        player.pause()
+                    }
+                    if (queueState.current == null && queueState.isPlaying) queueManager.setPlaying(false)
+                    return
+                }
                 // A false playWhenReady can be the deliberate tonearm gate during a track swap,
                 // not a user pause. Preserve the queue's play intent until the stylus lands.
                 if (!playWhenReady && queueState.tonearmTransitionPending && queueState.isPlaying) return
@@ -280,6 +318,12 @@ class PlaybackService : MediaSessionService() {
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 playerActivelyPlaying.value = isPlaying
+                if ((accountTransitionInProgress || queueManager.state.value.current == null) && isPlaying) {
+                    player.volume = 0f
+                    player.pause()
+                    queueManager.setPlaying(false)
+                    return
+                }
                 if (isPlaying) {
                     queueManager.setBuffering(false)
                     queueManager.state.value.current?.let(::recordTrackStarted)
@@ -289,6 +333,7 @@ class PlaybackService : MediaSessionService() {
                 }
             }
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (accountTransitionInProgress) return
                 // A track can change while ExoPlayer remains continuously in the playing state.
                 // Pair this callback with onIsPlayingChanged so session accounting isn't missed.
                 if (player.isPlaying) queueManager.state.value.current?.let(::recordTrackStarted)
@@ -298,11 +343,18 @@ class PlaybackService : MediaSessionService() {
                 newPosition: Player.PositionInfo,
                 reason: Int
             ) {
+                if (accountTransitionInProgress) return
                 // Seeks from the notification, Bluetooth or Android Auto while paused would otherwise
                 // not reach the UI until playback resumes, because the ticker is suspended.
                 if (!player.isPlaying) publishPlayerPosition()
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
+                if (accountTransitionInProgress) {
+                    bufferingWatchdogJob?.cancel()
+                    bufferingWatchdogJob = null
+                    queueManager.setBuffering(false)
+                    return
+                }
                 when (playbackState) {
                     Player.STATE_BUFFERING -> {
                         queueManager.setBuffering(true)
@@ -327,6 +379,7 @@ class PlaybackService : MediaSessionService() {
                 }
             }
             override fun onPlayerError(error: PlaybackException) {
+                if (accountTransitionInProgress) return
                 bufferingWatchdogJob?.cancel()
                 bufferingWatchdogJob = null
                 queueManager.setBuffering(false)
@@ -364,7 +417,7 @@ class PlaybackService : MediaSessionService() {
                         val current = queueManager.state.value.current
                         if (current != null && current.videoId == lastPlayingVideoId && listenedMs >= threshold) {
                             playCounted = true
-                            if (!appSettings.state.value.pauseListenHistory) scope.launch { historyRepository.countPlay(current) }
+                            enqueueHistoryWrite { historyRepository.countPlay(current) }
                         }
                     }
                     if (++tick % 10 == 0) queueManager.persistProgress()
@@ -375,11 +428,16 @@ class PlaybackService : MediaSessionService() {
 
         // Listen for seek events from UI
         queueManager.seekEvents.onEach { posMs ->
-            player.seekTo(posMs)
+            if (!accountTransitionInProgress && queueManager.state.value.current != null) {
+                player.seekTo(posMs)
+            }
         }.launchIn(scope)
 
         // Observe queue changes and drive ExoPlayer
         queueManager.state.onEach { state ->
+            // A user/account transition deliberately tears down the active item. Do not let this
+            // observer resolve and prepare the old account's current track again during teardown.
+            if (accountTransitionInProgress) return@onEach
             if (player.volume != state.volume) player.volume = state.volume
             val track = state.current ?: return@onEach
             if (activeListeningTrack != null && activeListeningTrack?.videoId != track.videoId && activeListeningSessionId != null) {
@@ -560,6 +618,10 @@ class PlaybackService : MediaSessionService() {
             }
 
             val result = SettableFuture.create<SessionResult>()
+            if (accountTransitionInProgress || queueManager.state.value.current == null) {
+                result.set(SessionResult(SessionResult.RESULT_SUCCESS))
+                return result
+            }
             scope.launch {
                 try {
                     when (customCommand) {
@@ -601,15 +663,15 @@ class PlaybackService : MediaSessionService() {
 
         override fun isCommandAvailable(command: Int): Boolean = availableCommands.contains(command)
 
-        override fun hasNextMediaItem(): Boolean = queueManager.state.value.hasNext
-        override fun hasPreviousMediaItem(): Boolean = queueManager.state.value.queue.isNotEmpty()
+        override fun hasNextMediaItem(): Boolean = !accountTransitionInProgress && queueManager.state.value.hasNext
+        override fun hasPreviousMediaItem(): Boolean = !accountTransitionInProgress && queueManager.state.value.queue.isNotEmpty()
 
-        override fun seekToNext() { queueManager.next() }
-        override fun seekToNextMediaItem() { queueManager.next() }
+        override fun seekToNext() { if (!accountTransitionInProgress) queueManager.next() }
+        override fun seekToNextMediaItem() { if (!accountTransitionInProgress) queueManager.next() }
 
         // Same rule as the in-app button: past 3 s restarts the song, otherwise go to the previous one.
-        override fun seekToPrevious() { queueManager.previous(currentPosition.coerceAtLeast(0L) / 1000) }
-        override fun seekToPreviousMediaItem() { queueManager.previous(currentPosition.coerceAtLeast(0L) / 1000) }
+        override fun seekToPrevious() { if (!accountTransitionInProgress) queueManager.previous(currentPosition.coerceAtLeast(0L) / 1000) }
+        override fun seekToPreviousMediaItem() { if (!accountTransitionInProgress) queueManager.previous(currentPosition.coerceAtLeast(0L) / 1000) }
     }
 
     private fun observeRuntimeAppSettings() {
@@ -716,8 +778,15 @@ class PlaybackService : MediaSessionService() {
 
     private var loadJob: Job? = null
     private var loadingId: String? = null
+    /** Prevents a cancelled old-account resolver from clearing a new account's same-track load marker. */
+    private var loadingGeneration: Long = -1L
+    private var historyWriteJob: Job? = null
 
     private fun loadAndPlay(track: Track, autoPlay: Boolean = true) {
+        // Never resolve or attach a stream after account teardown has begun. This also prevents
+        // a slow in-flight resolver from installing the previous account's track after clearMediaItems().
+        if (accountTransitionInProgress) return
+        val generation = playbackGeneration.get()
         // State emissions (progress, volume...) must not restart a lookup that is already running.
         if (loadingId == track.videoId && loadJob?.isActive == true) return
         if (player.currentMediaItem?.mediaId == track.videoId && !retryCoordinator.isRetryActive()) {
@@ -729,6 +798,7 @@ class PlaybackService : MediaSessionService() {
         bufferingWatchdogJob = null
         retryCoordinator.onNewTrackLoading(track.videoId)
         loadingId = track.videoId
+        loadingGeneration = generation
         lastPlayingVideoId = null
         // Only the very first load after the app starts is a restored queue; it resumes at the saved position.
         val pendingStart = queueManager.takePendingStart()
@@ -742,7 +812,9 @@ class PlaybackService : MediaSessionService() {
         loadJob = scope.launch {
             try {
                 val stream = streamResolver.resolve(track.videoId)
-                if (queueManager.state.value.current?.videoId != track.videoId) return@launch
+                if (accountTransitionInProgress || generation != playbackGeneration.get() ||
+                    queueManager.state.value.current?.videoId != track.videoId
+                ) return@launch
                 audioEffects.setTrackLoudness(stream.loudnessDb)
                 val item = buildMediaItem(track, stream.url, stream.mimeType, stream.itag)
                 player.setMediaItem(item, startMs)
@@ -753,6 +825,7 @@ class PlaybackService : MediaSessionService() {
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
+                if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
                 // Show the reason instead of failing silently. Only move on to the next song when the
                 // person was actually listening: a restored, paused queue must never start by itself.
                 val wasPlaying = queueManager.state.value.isPlaying
@@ -765,18 +838,23 @@ class PlaybackService : MediaSessionService() {
                     if (wasPlaying) skipAfterError(track)
                 }
             } finally {
-                if (loadingId == track.videoId) loadingId = null
+                if (loadingId == track.videoId && loadingGeneration == generation) {
+                    loadingId = null
+                    loadingGeneration = -1L
+                }
             }
         }
     }
 
     private fun skipAfterError(failed: Track) {
-        if (!appSettings.state.value.autoSkipOnError) return
+        if (accountTransitionInProgress || !appSettings.state.value.autoSkipOnError) return
+        val generation = playbackGeneration.get()
         val online = isCurrentlyConnected()
         retryCoordinator.onConnectivityChanged(online, failed.videoId) {}
         if (!retryCoordinator.canSkipAfterError()) return
         val job = scope.launch {
             delay(3000)
+            if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
             if (!isCurrentlyConnected() || !retryCoordinator.canSkipAfterError()) return@launch
             val s = queueManager.state.value
             // Only skip if the user has not already moved to another track.
@@ -790,8 +868,10 @@ class PlaybackService : MediaSessionService() {
         val track = queueManager.state.value.current ?: return
         if (!queueManager.state.value.isPlaying) return
         val trackId = track.videoId
+        val generation = playbackGeneration.get()
         bufferingWatchdogJob = scope.launch {
             delay(BUFFERING_TIMEOUT_MS)
+            if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
             val state = queueManager.state.value
             if (state.current?.videoId != trackId || !state.isPlaying || player.playbackState != Player.STATE_BUFFERING) return@launch
 
@@ -828,6 +908,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun retryCurrentStream(track: Track, resumeAt: Long, wasPlaying: Boolean, markFailed: Boolean) {
+        if (accountTransitionInProgress) return
+        val generation = playbackGeneration.get()
         val online = isCurrentlyConnected()
         retryCoordinator.onConnectivityChanged(online, track.videoId) {}
         if (retryCoordinator.deferIfOffline(track, resumeAt, wasPlaying, markFailed)) {
@@ -854,6 +936,7 @@ class PlaybackService : MediaSessionService() {
         bufferingWatchdogJob = null
         loadJob?.cancel()
         loadingId = null
+        loadingGeneration = -1L
         player.stop()
         queueManager.setBuffering(true)
 
@@ -861,6 +944,7 @@ class PlaybackService : MediaSessionService() {
         launchedJob = scope.launch {
             try {
                 delay(400L * attempt)
+                if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
                 val stillOnline = isCurrentlyConnected()
                 retryCoordinator.onConnectivityChanged(stillOnline, track.videoId) {}
                 if (retryCoordinator.deferIfOffline(track, resumeAt, wasPlaying, markFailed)) {
@@ -869,7 +953,9 @@ class PlaybackService : MediaSessionService() {
                     return@launch
                 }
                 val stream = streamResolver.resolve(track.videoId, forceRefresh = true)
-                if (queueManager.state.value.current?.videoId != track.videoId) return@launch
+                if (accountTransitionInProgress || generation != playbackGeneration.get() ||
+                    queueManager.state.value.current?.videoId != track.videoId
+                ) return@launch
                 audioEffects.setTrackLoudness(stream.loudnessDb)
                 val item = buildMediaItem(track, stream.url, stream.mimeType, stream.itag)
                 player.setMediaItem(item, resumeAt)
@@ -879,6 +965,7 @@ class PlaybackService : MediaSessionService() {
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
+                if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
                 queueManager.setBuffering(false)
                 val stillOnline = isCurrentlyConnected()
                 retryCoordinator.onConnectivityChanged(stillOnline, track.videoId) {}
@@ -896,6 +983,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun handlePlaybackError(error: PlaybackException) {
+        if (accountTransitionInProgress) return
         val track = queueManager.state.value.current ?: return
         val wasPlaying = queueManager.state.value.isPlaying
         val resumeAt = player.currentPosition.coerceAtLeast(0L)
@@ -934,6 +1022,32 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    /**
+     * Recent-history and play-count writes share one ordered queue. Account handoff waits for its
+     * tail before clearing Room, so no queued old-account write can land in the next account's DB.
+     */
+    private fun enqueueHistoryWrite(write: suspend () -> Unit) {
+        val generation = playbackGeneration.get()
+        val previous = historyWriteJob
+        historyWriteJob = scope.launch {
+            previous?.join()
+            try {
+                // A write queued before a handoff is allowed to finish for the old identity. The
+                // handoff joins this job before switching Auth/clearing local tables.
+                if (!appSettings.state.value.pauseListenHistory) {
+                    write()
+                    if (!accountTransitionInProgress && generation == playbackGeneration.get()) {
+                        syncRepository.get().schedulePush()
+                    }
+                }
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                timber.log.Timber.w(error, "Could not persist local listening history")
+            }
+        }
+    }
+
     private fun recordTrackStarted(current: Track) {
         if (activeListeningTrack?.videoId != current.videoId) {
             if (activeListeningSessionId != null) finishListeningSession(skipped = true)
@@ -943,19 +1057,16 @@ class PlaybackService : MediaSessionService() {
             lastPlayingVideoId = current.videoId
             listenedMs = 0L
             playCounted = false
-            scope.launch {
-                if (!appSettings.state.value.pauseListenHistory) {
-                    historyRepository.add(current)
-                    // Plays are written locally first, so push them (debounced) to the cloud copy too.
-                    syncRepository.get().schedulePush()
-                }
-            }
+            val generation = playbackGeneration.get()
+            enqueueHistoryWrite { historyRepository.add(current) }
             startPrefetch(current.videoId)
             startAutoplay(current)
         }
     }
 
     private fun startPrefetch(currentId: String) {
+        if (accountTransitionInProgress) return
+        val generation = playbackGeneration.get()
         prefetchJob?.cancel()
         prefetchJob = scope.launch {
             // No artificial delay: resolving a URL is a tiny request, and having the next songs
@@ -965,6 +1076,7 @@ class PlaybackService : MediaSessionService() {
                 s.queue.getOrNull(s.index + 1)?.videoId?.let { add(it) }
                 s.queue.getOrNull(s.index + 2)?.videoId?.let { add(it) }
             }.filter { it != currentId }
+            if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
             streamResolver.prefetch(nextIds)
         }
     }
@@ -975,13 +1087,15 @@ class PlaybackService : MediaSessionService() {
      * queue already loops by itself.
      */
     private fun startAutoplay(track: Track) {
-        if (!appSettings.state.value.autoplayRelated) return
+        if (accountTransitionInProgress || !appSettings.state.value.autoplayRelated) return
+        val generation = playbackGeneration.get()
         val s = queueManager.state.value
         val upcoming = s.queue.size - s.index - 1
         if (upcoming >= 2 || s.repeat != RepeatMode.OFF || s.shuffle) return
         autoplayJob?.cancel()
         autoplayJob = scope.launch {
             val result = musicSource.related(track.videoId)
+            if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
             if (result is com.geekify.android.data.source.MusicResult.Success) {
                 val latestQueue = queueManager.state.value
                 val latestUpcoming = latestQueue.queue.size - latestQueue.index - 1
@@ -992,8 +1106,11 @@ class PlaybackService : MediaSessionService() {
                 val candidates = result.value.filter { it.videoId !in queuedIds }
                 if (candidates.isEmpty()) return@launch
                 val sessions = listeningStatsRepository.latest(2_000)
+                if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
                 val plays = historyRepository.topPlayed(500)
+                if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
                 val liked = libraryRepository.likedOnce()
+                if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
                 val ranked = SmartQueueRanker.rank(
                     candidates = candidates,
                     current = latestQueue.current ?: track,
@@ -1020,6 +1137,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun checkpointListeningSession() {
+        if (accountTransitionInProgress) return
         val sessionId = activeListeningSessionId ?: return
         val track = activeListeningTrack ?: return
         val listened = activeListeningMs
@@ -1039,13 +1157,33 @@ class PlaybackService : MediaSessionService() {
             skipped = false
         )
         if (!appSettings.state.value.pauseListenHistory) {
-            listeningPersistenceScope.launch { runCatching { listeningStatsRepository.save(record) } }
+            enqueueListeningPersistence(record, pushToCloud = false)
         }
     }
 
-    private fun finishListeningSession(completed: Boolean = false, skipped: Boolean = false) {
-        val sessionId = activeListeningSessionId ?: return
+    /** Serial queue for session writes. The final checkpoint is appended after every earlier periodic one. */
+    private fun enqueueListeningPersistence(
+        record: ListeningSessionEntity,
+        pushToCloud: Boolean
+    ): Job {
+        val previous = listeningPersistenceJob
+        return listeningPersistenceScope.launch {
+            previous?.join()
+            try {
+                listeningStatsRepository.save(record)
+                if (pushToCloud) syncRepository.get().pushSession(record)
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                timber.log.Timber.w(error, "Could not persist listening session ${record.sessionId}")
+            }
+        }.also { listeningPersistenceJob = it }
+    }
+
+    private fun finishListeningSession(completed: Boolean = false, skipped: Boolean = false): Job? {
+        val sessionId = activeListeningSessionId ?: return null
         val track = activeListeningTrack
+        var persistenceJob: Job? = null
         if (track != null && activeListeningMs > 0L) {
             val duration = player.duration.takeIf { it > 0L } ?: (track.durationSeconds?.toLong()?.times(1_000L) ?: 0L)
             val playThreshold = if (duration > 0L) minOf(30_000L, duration / 2L) else 30_000L
@@ -1064,17 +1202,9 @@ class PlaybackService : MediaSessionService() {
                 skipped = skipped && !meaningfulCompletion
             )
             if (!appSettings.state.value.pauseListenHistory) {
-                listeningPersistenceScope.launch {
-                    runCatching {
-                        listeningStatsRepository.save(record)
-                        // Push the completed session, not every 15-second local checkpoint.
-                        // If the process is killed before completion, the next startup sync merges
-                        // the latest durable Room checkpoint using its stable session ID.
-                        syncRepository.get().pushSession(record)
-                    }.onFailure { error ->
-                        timber.log.Timber.w(error, "Could not persist completed listening session")
-                    }
-                }
+                // This job waits for all previous periodic checkpoints, then writes and uploads the
+                // final cumulative record. Account handoff joins it before clearing Room or changing UID.
+                persistenceJob = enqueueListeningPersistence(record, pushToCloud = true)
             }
         }
         activeListeningSessionId = null
@@ -1083,6 +1213,121 @@ class PlaybackService : MediaSessionService() {
         lastListeningUpdatedAt = 0L
         activeListeningMs = 0L
         lastListeningCheckpointMs = 0L
+        return persistenceJob
+    }
+
+    /**
+     * Pauses and tears down the active Media3 session before the account's final sync. The queue
+     * remains intact until SyncRepository confirms the backup; this way a failed backup does not
+     * destroy the user's current queue.
+     */
+    private suspend fun pauseAndStopForAccountTransition() {
+        withContext(Dispatchers.Main.immediate) {
+            if (accountTransitionInProgress || !::player.isInitialized) return@withContext
+            transitionWasPlaying = player.playWhenReady || player.isPlaying
+            transitionOriginalVolume = player.volume
+            accountTransitionInProgress = true
+            playbackGeneration.incrementAndGet()
+            // Mute before pausing/stopping so even a delayed renderer callback cannot leak audio
+            // from the previous identity during the sync handoff.
+            player.volume = 0f
+            prefetchJob?.cancel()
+            autoplayJob?.cancel()
+            bufferingWatchdogJob?.cancel()
+            loadJob?.cancel()
+            retryCoordinator.cancelAll()
+            // Do not cancel these writes: they belong to the old account and must finish before
+            // its final backup snapshot. Their tail is joined below, before the UID changes.
+            historyWriteJob?.join()
+            historyWriteJob = null
+
+            // Close the listening segment before player.pause() emits its own pause callback.
+            val checkpointJob = finishListeningSession(skipped = true)
+            // A normal pause may already have closed the active session while its final upload is
+            // still running. Join the tail of the serialized persistence queue even in that case.
+            val sessionPersistenceTail = listeningPersistenceJob
+            player.playWhenReady = false
+            player.pause()
+            player.stop()
+            player.clearMediaItems()
+            queueManager.setPlaying(false)
+            queueManager.setBuffering(false)
+            queueManager.persistProgress()
+
+            // Do not allow the next account to become active until this account's last session
+            // checkpoint has reached Room and the existing cloud sync path. Keep the service
+            // recoverable until SyncRepository confirms the account handoff.
+            checkpointJob?.join()
+            sessionPersistenceTail?.join()
+        }
+    }
+
+    private suspend fun completeAccountTransition() {
+        withContext(Dispatchers.Main.immediate) {
+            if (!::player.isInitialized) return@withContext
+
+            // Keep the service and its MediaSession alive. MainActivity starts PlaybackService once;
+            // stopping the service here would leave the next account without a playback observer
+            // until the process/activity is recreated. The queue has already been cleared by
+            // SyncRepository, so this only releases the previous account's player state.
+            accountTransitionInProgress = true
+            playbackGeneration.incrementAndGet()
+            transitionWasPlaying = false
+            prefetchJob?.cancel(); prefetchJob = null
+            autoplayJob?.cancel(); autoplayJob = null
+            bufferingWatchdogJob?.cancel(); bufferingWatchdogJob = null
+            loadJob?.cancel(); loadJob = null
+            loadingId = null
+            loadingGeneration = -1L
+            retryCoordinator.cancelAll()
+
+            player.volume = 0f
+            player.playWhenReady = false
+            player.pause()
+            player.stop()
+            player.clearMediaItems()
+            queueManager.setPlaying(false)
+            queueManager.setBuffering(false)
+            playerActivelyPlaying.value = false
+            placeholderShown = false
+            lastPlayingVideoId = null
+            listenedMs = 0L
+            playCounted = false
+            activeListeningSessionId = null
+            activeListeningTrack = null
+            activeListeningStartedAt = 0L
+            lastListeningUpdatedAt = 0L
+            activeListeningMs = 0L
+            lastListeningCheckpointMs = 0L
+
+            // Remove the stale playback notification, but keep the registered session available
+            // for the next account's queue. Media3 will publish a fresh notification on playback.
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            player.volume = queueManager.state.value.volume.coerceIn(0f, 1f)
+            accountTransitionInProgress = false
+            updateMediaNotificationButtons(
+                liked = false,
+                shuffle = queueManager.state.value.shuffle
+            )
+        }
+    }
+
+    private suspend fun abortAccountTransition() {
+        withContext(Dispatchers.Main.immediate) {
+            if (!::player.isInitialized) return@withContext
+            playbackGeneration.incrementAndGet()
+            accountTransitionInProgress = false
+            player.volume = transitionOriginalVolume.coerceIn(0f, 1f)
+            val shouldResume = transitionWasPlaying
+            transitionWasPlaying = false
+            val current = queueManager.state.value.current ?: return@withContext
+            // The queue was intentionally retained until cloud backup succeeded. Restore the
+            // previous account's item on abort; successful handoffs finalize and release the service.
+            if (shouldResume) queueManager.setPlaying(true)
+            if (player.currentMediaItem?.mediaId != current.videoId) {
+                loadAndPlay(current, autoPlay = shouldResume)
+            }
+        }
     }
 
     private fun nextListeningUpdatedAt(): Long {
@@ -1106,10 +1351,16 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        if (activeInstance === this) activeInstance = null
         unregisterConnectivityMonitor()
         retryCoordinator.cancelAll()
         finishListeningSession()
-        queueManager.persistProgress()
+        // The final checkpoint runs in its own IO scope so it can outlive the service just long
+        // enough to finish the durable Room/Firestore write. Cancel that scope immediately after
+        // the final queued write completes to avoid leaking a service-owned coroutine scope.
+        listeningPersistenceJob?.invokeOnCompletion { listeningPersistenceScope.cancel() }
+            ?: listeningPersistenceScope.cancel()
+        if (!accountTransitionInProgress) queueManager.persistProgress()
         progressJob?.cancel()
         bufferingWatchdogJob?.cancel()
         mediaSession.release()

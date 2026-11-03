@@ -222,4 +222,38 @@ class QueueManagerTest {
         assertEquals(4, state.queue.size)
         assertEquals(tracks[state.index], state.current)
     }
+    @Test
+    fun `account transition clears the previous account queue but preserves device audio preferences`() = runBlocking {
+        val store = FakePreferencesDataStore()
+        val manager = QueueManager(store, Dispatchers.Unconfined, debounceMs = 0L)
+        manager.awaitLoaded()
+
+        manager.play(track("account-a-song"), listOf(track("account-a-song"), track("account-a-next")))
+        manager.setProgress(52_000L, 180_000L)
+        manager.setVolume(0.37f)
+        manager.toggleShuffle()
+        manager.cycleRepeat()
+        manager.flushPersistence()
+
+        val volumeBefore = manager.state.value.volume
+        val shuffleBefore = manager.state.value.shuffle
+        val repeatBefore = manager.state.value.repeat
+
+        manager.clearForAccountTransition()
+
+        assertTrue(manager.state.value.queue.isEmpty())
+        assertEquals(-1, manager.state.value.index)
+        assertFalse(manager.state.value.isPlaying)
+        assertEquals(0L, manager.position.value.positionMs)
+        assertEquals(volumeBefore, manager.state.value.volume, 0.0001f)
+        assertEquals(shuffleBefore, manager.state.value.shuffle)
+        assertEquals(repeatBefore, manager.state.value.repeat)
+        assertEquals(null, store.state.value[QueueManager.KEY_QUEUE])
+        assertEquals(null, store.state.value[QueueManager.KEY_INDEX])
+        assertEquals(null, store.state.value[QueueManager.KEY_PROGRESS])
+        assertEquals(volumeBefore, store.state.value[QueueManager.KEY_VOLUME] ?: 0f, 0.0001f)
+        assertEquals(shuffleBefore.toString(), store.state.value[QueueManager.KEY_SHUFFLE])
+        assertEquals(repeatBefore.name, store.state.value[QueueManager.KEY_REPEAT])
+    }
+
 }

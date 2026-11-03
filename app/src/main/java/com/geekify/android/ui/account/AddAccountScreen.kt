@@ -32,13 +32,13 @@ import com.geekify.android.ui.components.LocalBottomInset
 import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.theme.*
 
-/** Account manager. Credentials are never saved; switching asks the provider to authenticate again. */
+/** Account manager. Firebase maintains a separate SDK-managed session for each saved identity. */
 @Composable
 fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
     val state by viewModel.uiState.collectAsState()
     val activityContext = LocalContext.current.findActivity()
     val hadActiveAccountOnEntry = remember { viewModel.uiState.value.user != null }
-    var showAuthForm by remember { mutableStateOf(state.user == null && state.knownAccounts.isEmpty()) }
+    var showAuthForm by remember { mutableStateOf(!state.isRestoringAccounts && state.user == null && state.knownAccounts.isEmpty()) }
     var selectedAccount by remember { mutableStateOf<KnownAccount?>(null) }
     var isSignUp by remember { mutableStateOf(false) }
     var email by remember { mutableStateOf("") }
@@ -48,6 +48,11 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
     var signInWasRequested by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { viewModel.clearFeedback() }
+    LaunchedEffect(state.isRestoringAccounts, state.user?.uid, state.knownAccounts.size) {
+        if (!state.isRestoringAccounts && state.user == null && state.knownAccounts.isEmpty()) {
+            showAuthForm = true
+        }
+    }
     LaunchedEffect(state.user?.uid) {
         val currentUid = state.user?.uid
         if (currentUid != null && signInWasRequested) {
@@ -92,6 +97,29 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
             accountCount = state.knownAccounts.size
         )
 
+        if (state.isRestoringAccounts) {
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(InkPanel)
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    color = Color(0xFF69C9E7),
+                    strokeWidth = 2.dp
+                )
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text("Restoring saved accounts", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Checking secure sign-in sessions before showing switch actions…", color = TextSecondary, fontSize = 11.sp)
+                }
+            }
+        }
+
         if (state.user != null) {
             Spacer(Modifier.height(18.dp))
             AccountSectionTitle("CURRENT ACCOUNT", "This account is active on this device")
@@ -102,7 +130,8 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
                     name = state.user!!.name,
                     photoUrl = state.user!!.photoUrl,
                     hasPassword = state.user!!.hasPassword,
-                    lastUsedAt = System.currentTimeMillis()
+                    lastUsedAt = System.currentTimeMillis(),
+                    hasCachedSession = true
                 ),
                 active = true,
                 onClick = {}
@@ -125,18 +154,20 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
                         account = account,
                         active = false,
                         compact = true,
+                        enabled = !state.isRestoringAccounts && !state.isLoading,
                         onClick = {
                             viewModel.clearFeedback()
-                            if (account.hasPassword) {
-                                selectedAccount = account
-                                email = account.email.orEmpty()
+                            signInWasRequested = !hadActiveAccountOnEntry
+                            // Always ask the repository to inspect the Firebase SDK session first.
+                            // The visible cached-session flag is only presentation state and can be
+                            // stale during app/process restoration. Re-authentication is shown only
+                            // after the repository confirms that no reusable session exists.
+                            viewModel.switchToKnownAccount(account.uid) { needsAuth ->
+                                selectedAccount = needsAuth
+                                email = needsAuth.email.orEmpty()
                                 password = ""
                                 isSignUp = false
                                 showAuthForm = true
-                            } else {
-                                selectedAccount = account
-                                signInWasRequested = !hadActiveAccountOnEntry
-                                viewModel.signInGoogle(activityContext, expectedUid = account.uid)
                             }
                         }
                     )
@@ -152,6 +183,7 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
             PrimaryAccountAction(
                 title = "Add another account",
                 subtitle = "Sign in with Google or email and password",
+                enabled = !state.isRestoringAccounts && !state.isLoading,
                 onClick = {
                     selectedAccount = null
                     email = ""
@@ -168,7 +200,7 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
                 name = name,
                 email = email,
                 password = password,
-                isLoading = state.isLoading,
+                isLoading = state.isLoading || state.isRestoringAccounts,
                 selectedAccount = selectedAccount,
                 error = state.error,
                 message = state.message,
@@ -211,7 +243,7 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
                     Text("Account security", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Geekify backs up the active library before switching accounts. Passwords and sign-in tokens are never stored by the account switcher.",
+                        "Geekify keeps separate Firebase sign-in sessions for saved accounts on this device. Passwords are never stored by Geekify, and each account's library and recommendations stay separate.",
                         color = TextSecondary,
                         fontSize = 13.sp,
                         lineHeight = 19.sp
@@ -232,6 +264,14 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
         (state.syncError ?: state.error)?.takeIf { state.user != null && state.error == null }?.let {
             Text(it, color = ErrorRed, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
         }
+        if (state.user == null) {
+            state.error?.let {
+                Text(it, color = ErrorRed, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 12.dp))
+            }
+            state.message?.let {
+                Text(it, color = Lime, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 12.dp))
+            }
+        }
     }
 
     if (showSignOutConfirmation) {
@@ -240,8 +280,7 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
             title = { Text("Sign out of Geekify?") },
             text = {
                 Text(
-                    "Geekify will back up this account's library, recents and listening sessions first. " +
-                        "If backup fails, you'll remain signed in and your data will stay on this device."
+                    "Geekify will save this account's library, recents and listening sessions first. If another saved account is ready on this device, Geekify will switch to it automatically. Otherwise you'll be signed out. If backup fails, your current account and data stay intact."
                 )
             },
             confirmButton = {
@@ -274,7 +313,7 @@ private fun AccountManagerHero(activeName: String?, activeEmail: String?, accoun
         Text("YOUR GEEKIFY ACCOUNTS", color = Color(0xFF69C9E7), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
         Spacer(Modifier.height(10.dp))
         Text(
-            if (activeName != null) "Switch without mixing libraries" else "Keep your music lives separate",
+            if (activeName != null) "Switch accounts without signing in again" else "Keep your music lives separate",
             color = TextPrimary,
             fontSize = 23.sp,
             lineHeight = 28.sp,
@@ -282,8 +321,8 @@ private fun AccountManagerHero(activeName: String?, activeEmail: String?, accoun
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            if (activeName != null) "Active: ${activeEmail ?: activeName}. Each account loads its own synced library and listening history."
-            else "Add an account or sign back in to restore its library, history and recommendations.",
+            if (activeName != null) "Active: ${activeEmail ?: activeName}. Saved accounts keep separate Firebase sessions, libraries, histories and recommendations."
+            else "Add an account or sign back in once to enable quick switching and restore its own library, history and recommendations.",
             color = TextSecondary,
             fontSize = 13.sp,
             lineHeight = 19.sp
@@ -306,6 +345,7 @@ private fun KnownAccountCard(
     account: KnownAccount,
     active: Boolean,
     compact: Boolean = false,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
     Row(
@@ -313,7 +353,7 @@ private fun KnownAccountCard(
             .fillMaxWidth()
             .clip(RoundedCornerShape(if (compact) 18.dp else 24.dp))
             .background(if (compact) Color.Transparent else InkPanel)
-            .then(if (!active) Modifier.bouncyClickable(pressedScale = 0.98f, onClick = onClick) else Modifier)
+            .then(if (!active && enabled) Modifier.bouncyClickable(pressedScale = 0.98f, onClick = onClick) else Modifier)
             .padding(horizontal = if (compact) 4.dp else 16.dp, vertical = if (compact) 12.dp else 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -336,21 +376,47 @@ private fun KnownAccountCard(
         Column(Modifier.weight(1f)) {
             Text(account.name, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(account.email ?: "${if (account.hasPassword) "Email account" else "Google account"}", color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (!compact) Text(if (account.hasPassword) "Email & password" else "Google", color = TextMuted, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp))
+            Text(
+                when {
+                    active -> if (account.hasPassword) "Email & password" else "Google"
+                    !enabled -> "Checking saved sign-in session…"
+                    account.hasCachedSession -> "Ready for quick switching"
+                    account.hasPassword -> "One-time password check required"
+                    else -> "One-time Google sign-in required"
+                },
+                color = TextMuted,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(top = 3.dp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
         Spacer(Modifier.width(8.dp))
         if (active) {
             Text("ACTIVE", color = Color(0xFF53D69A), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+        } else if (!enabled) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                color = Color(0xFF69C9E7),
+                strokeWidth = 2.dp
+            )
         } else {
-            Text("Switch", color = Color(0xFF69C9E7), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                if (account.hasCachedSession) "Switch" else "Verify",
+                color = Color(0xFF69C9E7),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }
 
 @Composable
-private fun PrimaryAccountAction(title: String, subtitle: String, onClick: () -> Unit) {
+private fun PrimaryAccountAction(title: String, subtitle: String, enabled: Boolean = true, onClick: () -> Unit) {
     Surface(
-        modifier = Modifier.fillMaxWidth().bouncyClickable(pressedScale = 0.98f, onClick = onClick),
+        modifier = Modifier.fillMaxWidth().then(
+            if (enabled) Modifier.bouncyClickable(pressedScale = 0.98f, onClick = onClick) else Modifier
+        ),
         color = InkPanel,
         shape = RoundedCornerShape(24.dp)
     ) {
@@ -397,24 +463,30 @@ private fun AccountAuthForm(
                 fontSize = 21.sp,
                 fontWeight = FontWeight.Bold
             )
+            val selectedGoogleAccount = selectedAccount != null && !selectedAccount.hasPassword
             Text(
-                if (selectedAccount != null) "Re-enter your password to verify this account. Geekify never saves it."
-                else "Your current account is backed up before a different account becomes active.",
+                when {
+                    selectedGoogleAccount -> "Continue with the Google identity linked to this saved account."
+                    selectedAccount != null -> "Re-enter your password to verify this account. Geekify never saves it."
+                    else -> "Your current account is backed up before a different account becomes active."
+                },
                 color = TextSecondary,
                 fontSize = 13.sp,
                 lineHeight = 19.sp,
                 modifier = Modifier.padding(top = 5.dp, bottom = 18.dp)
             )
 
-            if (isSignUp) {
-                AccountTextField(name, onNameChange, "Display name", password = false, keyboardType = KeyboardType.Text)
+            if (!selectedGoogleAccount) {
+                if (isSignUp) {
+                    AccountTextField(name, onNameChange, "Display name", password = false, keyboardType = KeyboardType.Text)
+                    Spacer(Modifier.height(11.dp))
+                }
+                AccountTextField(email, onEmailChange, "Email address", password = false, keyboardType = KeyboardType.Email, enabled = selectedAccount == null)
                 Spacer(Modifier.height(11.dp))
+                AccountTextField(password, onPasswordChange, "Password", password = true, keyboardType = KeyboardType.Password)
             }
-            AccountTextField(email, onEmailChange, "Email address", password = false, keyboardType = KeyboardType.Email, enabled = selectedAccount == null)
-            Spacer(Modifier.height(11.dp))
-            AccountTextField(password, onPasswordChange, "Password", password = true, keyboardType = KeyboardType.Password)
 
-            if (!isSignUp && selectedAccount == null) {
+            if (!isSignUp && (selectedAccount == null || selectedGoogleAccount)) {
                 TextButton(onClick = onGoogle, enabled = !isLoading, modifier = Modifier.fillMaxWidth()) {
                     Text("Continue with Google", color = Color(0xFF69C9E7), fontWeight = FontWeight.SemiBold)
                 }
@@ -423,8 +495,8 @@ private fun AccountAuthForm(
             message?.let { Text(it, color = Lime, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 8.dp)) }
 
             Spacer(Modifier.height(17.dp))
-            val canSubmit = !isLoading && email.isNotBlank() && password.isNotEmpty() && (!isSignUp || name.isNotBlank())
-            Button(
+            val canSubmit = !selectedGoogleAccount && !isLoading && email.isNotBlank() && password.isNotEmpty() && (!isSignUp || name.isNotBlank())
+            if (!selectedGoogleAccount) Button(
                 onClick = onSubmit,
                 enabled = canSubmit,
                 modifier = Modifier.fillMaxWidth().height(50.dp),

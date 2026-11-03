@@ -30,13 +30,23 @@ import org.json.JSONArray
 import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlinx.coroutines.Dispatchers
 import timber.log.Timber
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.flow.first
+import kotlin.coroutines.resume
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -62,7 +72,9 @@ data class KnownAccount(
     val name: String,
     val photoUrl: String?,
     val hasPassword: Boolean,
-    val lastUsedAt: Long
+    val lastUsedAt: Long,
+    /** True when Firebase already has a persistent session for this account on this device. */
+    val hasCachedSession: Boolean = false
 )
 
 enum class SyncState { IDLE, SYNCING, SAVED, OFFLINE, ERROR }
@@ -71,7 +83,19 @@ enum class SyncState { IDLE, SYNCING, SAVED, OFFLINE, ERROR }
 @Singleton
 class AuthRepository @Inject constructor(@ApplicationContext private val context: Context) {
 
-    private val auth: FirebaseAuth = Firebase.auth
+    private val defaultApp: FirebaseApp = FirebaseApp.getInstance()
+    private val defaultAuth: FirebaseAuth = FirebaseAuth.getInstance(defaultApp)
+    @Volatile private var activeApp: FirebaseApp = defaultApp
+    @Volatile private var auth: FirebaseAuth = defaultAuth
+    private val sessionAppLock = Any()
+    private val sessionRestoreMutex = Mutex()
+    private val sessionRestoreScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val _sessionReady = MutableStateFlow(false)
+    val sessionReady: StateFlow<Boolean> = _sessionReady.asStateFlow()
+    @Volatile private var preservePreferredUidWhenEmpty = false
+    private val activeAuthListener = FirebaseAuth.AuthStateListener { source ->
+        if (source === auth && _sessionReady.value) publishUser()
+    }
     private val TAG = "GeekifyAuth"
 
     private val _user = MutableStateFlow<AccountUser?>(null)
@@ -83,11 +107,16 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
     private val _knownAccounts = MutableStateFlow(readKnownAccounts())
     val knownAccounts: StateFlow<List<KnownAccount>> = _knownAccounts.asStateFlow()
 
-    /** Synchronous Firebase session UID, available to WorkManager before the auth Flow listener emits. */
-    fun currentUid(): String? = auth.currentUser?.uid
+    /** The selected account UID is exposed only after all persisted Firebase sessions are restored. */
+    fun currentUid(): String? = if (_sessionReady.value) auth.currentUser?.uid else null
+
+    suspend fun awaitSessionReady() {
+        _sessionReady.first { it }
+    }
 
     companion object {
         private const val KEY_KNOWN_ACCOUNTS = "known_accounts_v1"
+        private const val KEY_ACTIVE_ACCOUNT_UID = "active_account_uid_v2"
         private const val MAX_KNOWN_ACCOUNTS = 8
         private val secureRandom = SecureRandom()
         private val jwtJson = Json { ignoreUnknownKeys = true }
@@ -124,8 +153,96 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
     }
 
     init {
-        // Existing authentication sessions are preserved across app restarts.
-        auth.addAuthStateListener { publishUser() }
+        // Start on the default Firebase app but do not publish its user yet. A previous release may
+        // have persisted the selected account in a named FirebaseApp. Firebase restores each app's
+        // auth state asynchronously; choosing an app before its initial AuthStateListener callback
+        // is the source of intermittent "sign in again" prompts after app restart.
+        activeApp = defaultApp
+        auth = defaultAuth
+        auth.addAuthStateListener(activeAuthListener)
+        sessionRestoreScope.launch {
+            runCatching { restorePersistedSessions() }
+                .onFailure { error ->
+                    Timber.tag(TAG).e(error, "Could not restore saved account sessions")
+                    // Do not leave the UI permanently blocked. The default session is the safest
+                    // fallback, and the user can still authenticate normally.
+                    _sessionReady.value = true
+                    publishUser()
+                }
+        }
+    }
+
+    /**
+     * Waits for Firebase's initial auth-state callback before selecting the remembered account.
+     * Then warms every saved named FirebaseApp so the account switcher never mistakes a session
+     * that is still restoring for an account that needs credentials again.
+     */
+    suspend fun restorePersistedSessions() = sessionRestoreMutex.withLock {
+        if (_sessionReady.value) return@withLock
+        withContext(Dispatchers.IO) {
+            awaitInitialAuthState(defaultAuth)
+            val preferredUid = accountPrefs.getString(KEY_ACTIVE_ACCOUNT_UID, null)
+                ?.takeIf(String::isNotBlank)
+
+            val selected = if (preferredUid == null || defaultAuth.currentUser?.uid == preferredUid) {
+                defaultApp to defaultAuth
+            } else {
+                val preferredApp = accountApp(preferredUid)
+                val preferredAuth = FirebaseAuth.getInstance(preferredApp)
+                // Keep the preferred app selected even if its first callback is delayed. The active
+                // listener is attached below and will publish the user as soon as Firebase restores it.
+                runCatching { awaitInitialAuthState(preferredAuth) }
+                preferredApp to preferredAuth
+            }
+
+            bindActiveSession(selected.first, selected.second, publish = false)
+            preservePreferredUidWhenEmpty =
+                preferredUid != null && selected.second.currentUser?.uid != preferredUid
+
+            val restoredAccounts = _knownAccounts.value.map { account ->
+                val accountAuth = runCatching {
+                    if (defaultAuth.currentUser?.uid == account.uid) {
+                        defaultAuth
+                    } else {
+                        val app = accountApp(account.uid)
+                        FirebaseAuth.getInstance(app).also { awaitInitialAuthState(it) }
+                    }
+                }.getOrNull()
+                account.copy(hasCachedSession = accountAuth?.currentUser?.uid == account.uid)
+            }.sortedByDescending { it.lastUsedAt }
+            _knownAccounts.value = restoredAccounts
+            persistKnownAccounts(restoredAccounts)
+            _sessionReady.value = true
+            withContext(Dispatchers.Main.immediate) { publishUser() }
+        }
+    }
+
+    private suspend fun awaitInitialAuthState(targetAuth: FirebaseAuth) {
+        withTimeout(15_000L) {
+            suspendCancellableCoroutine<Unit> { continuation ->
+                val listener = object : FirebaseAuth.AuthStateListener {
+                    override fun onAuthStateChanged(firebaseAuth: FirebaseAuth) {
+                        firebaseAuth.removeAuthStateListener(this)
+                        if (continuation.isActive) continuation.resume(Unit)
+                    }
+                }
+                targetAuth.addAuthStateListener(listener)
+                continuation.invokeOnCancellation { targetAuth.removeAuthStateListener(listener) }
+            }
+        }
+    }
+
+    private suspend fun awaitRestoredAccountAuth(targetAuth: FirebaseAuth) {
+        try {
+            awaitInitialAuthState(targetAuth)
+        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+            // A late Firebase callback must not be mistaken for a revoked session, or the UI will
+            // unnecessarily ask the user for a password / Google picker again.
+            throw IllegalStateException(
+                "The saved account is still being restored. Please try switching again in a moment.",
+                timeout
+            )
+        }
     }
 
     private fun avatarKey(uid: String) = "avatar_$uid"
@@ -137,7 +254,21 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
     private fun publishUser() {
         val current = auth.currentUser?.let(::mapAccountUser)
         _user.value = current
-        current?.takeIf { it.emailVerified }?.let(::rememberAccount)
+        if (current != null) {
+            preservePreferredUidWhenEmpty = false
+            accountPrefs.edit().putString(KEY_ACTIVE_ACCOUNT_UID, current.uid).apply()
+            current.takeIf { it.emailVerified }?.let(::rememberAccount)
+        } else if (!preservePreferredUidWhenEmpty) {
+            val previousUid = accountPrefs.getString(KEY_ACTIVE_ACCOUNT_UID, null)
+            if (!previousUid.isNullOrBlank()) {
+                val updated = _knownAccounts.value.map { account ->
+                    if (account.uid == previousUid) account.copy(hasCachedSession = false) else account
+                }
+                _knownAccounts.value = updated
+                persistKnownAccounts(updated)
+            }
+            accountPrefs.edit().remove(KEY_ACTIVE_ACCOUNT_UID).apply()
+        }
     }
 
     private fun mapAccountUser(u: com.google.firebase.auth.FirebaseUser): AccountUser {
@@ -166,20 +297,16 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
                 name = item.optString("name", "Listener").ifBlank { "Listener" },
                 photoUrl = item.optString("photoUrl").takeIf(String::isNotBlank),
                 hasPassword = item.optBoolean("hasPassword", false),
-                lastUsedAt = item.optLong("lastUsedAt", 0L)
+                lastUsedAt = item.optLong("lastUsedAt", 0L),
+                // Recomputed after Firebase has completed its initial restoration for every app.
+                hasCachedSession = false
             )
         }.sortedByDescending { it.lastUsedAt }
     }.getOrDefault(emptyList())
 
-    private fun rememberAccount(user: AccountUser) {
-        val now = System.currentTimeMillis()
-        val updated = (listOf(
-            KnownAccount(user.uid, user.email, user.name, user.photoUrl, user.hasPassword, now)
-        ) + _knownAccounts.value.filterNot { it.uid == user.uid })
-            .take(MAX_KNOWN_ACCOUNTS)
-        _knownAccounts.value = updated
+    private fun persistKnownAccounts(accounts: List<KnownAccount>) {
         val json = JSONArray()
-        updated.forEach { account ->
+        accounts.forEach { account ->
             json.put(
                 JSONObject()
                     .put("uid", account.uid)
@@ -193,21 +320,196 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
         accountPrefs.edit().putString(KEY_KNOWN_ACCOUNTS, json.toString()).apply()
     }
 
-    /** Removes an account only from this device's switcher; it does not delete the Firebase account. */
+    private fun rememberAccount(user: AccountUser, hasCachedSession: Boolean = true) {
+        val now = System.currentTimeMillis()
+        val updated = (listOf(
+            KnownAccount(user.uid, user.email, user.name, user.photoUrl, user.hasPassword, now, hasCachedSession)
+        ) + _knownAccounts.value.filterNot { it.uid == user.uid })
+            .take(MAX_KNOWN_ACCOUNTS)
+        _knownAccounts.value = updated
+        persistKnownAccounts(updated)
+    }
+
+    /** Returns the Firebase app name for a user without exposing the UID in app/component names. */
+    private fun accountAppName(uid: String): String = "GeekifyAccount_${sha256Hex(uid).take(24)}"
+
+    /**
+     * Creates or retrieves a stable named FirebaseApp for [uid]. FirebaseAuth persists a separate
+     * signed-in session for every FirebaseApp, so switching accounts does not require storing a
+     * password or asking the identity provider to authenticate again.
+     */
+    private fun accountApp(uid: String): FirebaseApp = synchronized(sessionAppLock) {
+        val name = accountAppName(uid)
+        FirebaseApp.getApps(context).firstOrNull { it.name == name }
+            ?: FirebaseApp.initializeApp(context, defaultApp.options, name)
+            ?: FirebaseApp.getInstance(name)
+    }
+
+    private fun cachedAuthForUid(uid: String): Pair<FirebaseApp, FirebaseAuth>? {
+        if (defaultAuth.currentUser?.uid == uid) return defaultApp to defaultAuth
+        val app = runCatching { accountApp(uid) }.getOrNull() ?: return null
+        val accountAuth = FirebaseAuth.getInstance(app)
+        return if (accountAuth.currentUser?.uid == uid) app to accountAuth else null
+    }
+
+    /**
+     * Checks Firebase's persisted session after its initial auth callback. This intentionally does
+     * not trust the UI's cached boolean alone: a named FirebaseApp may still be restoring after
+     * process recreation, and that must never trigger an unnecessary password/Google prompt.
+     */
+    suspend fun hasCachedSession(uid: String): Boolean {
+        awaitSessionReady()
+        val targetAuth = if (defaultAuth.currentUser?.uid == uid) {
+            defaultAuth
+        } else {
+            FirebaseAuth.getInstance(accountApp(uid))
+        }
+        // A timeout is not evidence that the account needs credentials again. Surface it as a
+        // recoverable session-restore error instead of opening the password/Google flow.
+        awaitRestoredAccountAuth(targetAuth)
+        val available = targetAuth.currentUser?.uid == uid
+        val updated = _knownAccounts.value.map { account ->
+            if (account.uid == uid) account.copy(hasCachedSession = available) else account
+        }
+        _knownAccounts.value = updated
+        persistKnownAccounts(updated)
+        return available
+    }
+
+    /**
+     * Refreshes a saved account's Firebase token before a handoff. This distinguishes a genuinely
+     * reusable session from a stale local FirebaseUser left behind after revocation or deletion.
+     * Network failures are propagated so the active account is not signed out merely because the
+     * device cannot validate another session at that moment.
+     */
+    suspend fun refreshCachedAccount(uid: String): AccountUser? {
+        awaitSessionReady()
+        val targetAuth = if (defaultAuth.currentUser?.uid == uid) {
+            defaultAuth
+        } else {
+            FirebaseAuth.getInstance(accountApp(uid))
+        }
+        awaitRestoredAccountAuth(targetAuth)
+        val beforeRefresh = targetAuth.currentUser?.takeIf { it.uid == uid } ?: return null
+        if (beforeRefresh.uid != uid) return null
+
+        try {
+            // Let Firebase reuse a still-valid token and refresh it automatically only when needed.
+            // Forcing a refresh and then calling reload() added two network round trips to every
+            // account switch, making a healthy persisted session look like a re-authentication
+            // problem on slow/offline connections.
+            val tokenResult = beforeRefresh.getIdToken(false).await()
+            val refreshed = targetAuth.currentUser
+                ?.takeIf { it.uid == uid }
+                ?: run {
+                    markCachedSessionUnavailable(uid)
+                    return null
+                }
+
+            val isPasswordAccount = refreshed.providerData.any { it.providerId == "password" }
+            val emailVerified = tokenResult.claims["email_verified"] as? Boolean
+                ?: refreshed.isEmailVerified
+            if (isPasswordAccount && !emailVerified) {
+                targetAuth.signOut()
+                markCachedSessionUnavailable(uid)
+                return null
+            }
+
+            return mapAccountUser(refreshed).also { rememberAccount(it, hasCachedSession = true) }
+        } catch (error: com.google.firebase.auth.FirebaseAuthException) {
+            val invalidSessionCodes = setOf(
+                "ERROR_USER_NOT_FOUND",
+                "ERROR_USER_DISABLED",
+                "ERROR_INVALID_USER_TOKEN",
+                "ERROR_USER_TOKEN_EXPIRED"
+            )
+            if (error.errorCode in invalidSessionCodes) {
+                runCatching { targetAuth.signOut() }
+                markCachedSessionUnavailable(uid)
+                return null
+            }
+            throw error
+        }
+    }
+
+    private fun markCachedSessionUnavailable(uid: String) {
+        val updated = _knownAccounts.value.map { account ->
+            if (account.uid == uid) account.copy(hasCachedSession = false) else account
+        }
+        _knownAccounts.value = updated
+        persistKnownAccounts(updated)
+    }
+
+    /** The app backing the currently active FirebaseAuth; SyncRepository uses the same app for Firestore. */
+    fun activeFirebaseApp(): FirebaseApp = activeApp
+
+    /** Switches the active identity to an already-authenticated Firebase session without prompting. */
+    fun activateCachedAccount(uid: String): Boolean {
+        val cached = cachedAuthForUid(uid) ?: return false
+        bindActiveSession(cached.first, cached.second)
+        return auth.currentUser?.uid == uid
+    }
+
+    /**
+     * Authenticates [credential] in the stable per-account FirebaseApp without disturbing the
+     * currently active Firebase session. Call activateCachedAccount only after the old account's
+     * local data has been safely backed up and cleared.
+     */
+    suspend fun persistCredentialSession(credential: AuthCredential, expectedUid: String): AccountUser {
+        // Prefer an existing FirebaseApp session for this UID (including the legacy default app).
+        // Otherwise create the stable per-account app. Signing in with the freshly validated
+        // credential refreshes the SDK-managed session without persisting passwords or ID tokens.
+        val existing = cachedAuthForUid(expectedUid)
+        val targetApp = existing?.first ?: accountApp(expectedUid)
+        val targetAuth = existing?.second ?: FirebaseAuth.getInstance(targetApp)
+        val signedUser = targetAuth.signInWithCredential(credential).await().user
+            ?: throw IllegalStateException("Firebase didn't return an account.")
+
+        if (signedUser.uid != expectedUid) {
+            targetAuth.signOut()
+            throw IllegalStateException("Those credentials belong to a different account. Please try again.")
+        }
+        signedUser.reload().await()
+        val passwordAccount = signedUser.providerData.any { it.providerId == "password" }
+        if (passwordAccount && !signedUser.isEmailVerified) {
+            runCatching { signedUser.sendEmailVerification().await() }
+            targetAuth.signOut()
+            markCachedSessionUnavailable(expectedUid)
+            throw EmailVerificationRequiredException(
+                "Please verify ${signedUser.email ?: "your email address"} before switching to this account."
+            )
+        }
+        val mapped = mapAccountUser(signedUser)
+        rememberAccount(mapped, hasCachedSession = true)
+        return mapped
+    }
+
+    private fun bindActiveSession(app: FirebaseApp, targetAuth: FirebaseAuth, publish: Boolean = true) {
+        if (auth !== targetAuth) {
+            auth.removeAuthStateListener(activeAuthListener)
+            activeApp = app
+            auth = targetAuth
+            auth.addAuthStateListener(activeAuthListener)
+        } else {
+            activeApp = app
+        }
+        targetAuth.currentUser?.uid?.let { uid ->
+            accountPrefs.edit().putString(KEY_ACTIVE_ACCOUNT_UID, uid).apply()
+        }
+        if (publish && _sessionReady.value) publishUser()
+    }
+
+    /** Removes a saved account from the switcher and revokes its on-device Firebase session. */
     fun forgetKnownAccount(uid: String) {
         val updated = _knownAccounts.value.filterNot { it.uid == uid }
         _knownAccounts.value = updated
-        val json = JSONArray()
-        updated.forEach { account ->
-            json.put(JSONObject()
-                .put("uid", account.uid)
-                .put("email", account.email ?: "")
-                .put("name", account.name)
-                .put("photoUrl", account.photoUrl ?: "")
-                .put("hasPassword", account.hasPassword)
-                .put("lastUsedAt", account.lastUsedAt))
+        persistKnownAccounts(updated)
+        if (defaultAuth.currentUser?.uid == uid && auth !== defaultAuth) defaultAuth.signOut()
+        val app = runCatching { accountApp(uid) }.getOrNull()
+        if (app != null && app.name != defaultApp.name) {
+            runCatching { FirebaseAuth.getInstance(app).signOut() }
+            runCatching { app.delete() }
         }
-        accountPrefs.edit().putString(KEY_KNOWN_ACCOUNTS, json.toString()).apply()
     }
 
     private fun validationAuth(): Pair<FirebaseApp, FirebaseAuth> {
@@ -416,7 +718,10 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
         auth.sendPasswordResetEmail(email.trim()).await()
     }
 
-    suspend fun signOut() = auth.signOut()
+    suspend fun signOut() {
+        preservePreferredUidWhenEmpty = false
+        auth.signOut()
+    }
 
     fun friendlyError(e: Throwable): String {
         if (e is EmailVerificationRequiredException) return e.message ?: "Please verify your email address before signing in."

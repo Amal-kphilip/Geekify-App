@@ -86,10 +86,15 @@ class HomeViewModel @Inject constructor(
     }
 
     /** Instant content on a cold start: the last feed is shown from Room while the network request runs. */
+    private fun homeCacheKey(uid: String?): String =
+        if (uid.isNullOrBlank()) ShelfCacheRepository.HOME else "${ShelfCacheRepository.HOME}_account_$uid"
+
     private fun showCachedFeed() {
         viewModelScope.launch {
-            val cached = shelfCache.load() ?: return@launch
-            // The network may already have won the race; never replace fresh content with old content.
+            val requestedAccountId = recommendationAccountId
+            val cached = shelfCache.load(homeCacheKey(requestedAccountId)) ?: return@launch
+            // The account or network request may have changed while Room was loading.
+            if (requestedAccountId != recommendationAccountId) return@launch
             if (liveFeedLoaded || allShelves.isNotEmpty()) return@launch
             allShelves = cached
             applyFilter(_uiState.value.selectedFilter)
@@ -169,13 +174,22 @@ class HomeViewModel @Inject constructor(
                     recommendationAccountId = nextUid
                     mixJob?.cancel()
                     lastMixBuild = 0L
-                    // A safe account handoff clears the local library before the next account
-                    // syncs. Clear account-derived UI immediately to prevent recommendation
-                    // cards from the previous listener remaining visible during that handoff.
-                    _uiState.update { it.copy(mixes = emptyList(), dailyRecommendations = emptyMap()) }
-                    // Wait for this UID's local library to be restored before constructing mixes.
-                    // The taste observer forces a rebuild as soon as the new account data arrives.
+                    liveFeedLoaded = false
+                    allShelves = emptyList()
+                    // Clear every account-derived Home surface immediately. A cached feed and any
+                    // in-flight response are keyed to the UID that requested them, never shared
+                    // between two signed-in accounts.
+                    _uiState.update {
+                        it.copy(
+                            mixes = emptyList(),
+                            dailyRecommendations = emptyMap(),
+                            shelves = emptyList(),
+                            isLoading = true,
+                            fromCache = false
+                        )
+                    }
                     lastMixBuildHadNoPersonalData = true
+                    loadHome(forceRefresh = true)
                 }
             }
             .launchIn(viewModelScope)
@@ -195,6 +209,7 @@ class HomeViewModel @Inject constructor(
 
     fun loadHome(forceRefresh: Boolean = false) {
         viewModelScope.launch {
+            val requestedAccountId = recommendationAccountId
             _uiState.update { it.copy(isLoading = true, error = null) }
 
             // 1. Load recommendations / mixes (in parallel with the feed)
@@ -203,16 +218,18 @@ class HomeViewModel @Inject constructor(
             // 2. Load home feed
             when (val result = musicSource.home()) {
                 is MusicResult.Success -> {
+                    if (requestedAccountId != recommendationAccountId) return@launch
                     liveFeedLoaded = true
                     allShelves = result.value.shelves
                     applyFilter(_uiState.value.selectedFilter)
                     syncRegionalMixAndDailyRecommendations()
                     _uiState.update { it.copy(isLoading = false, fromCache = false) }
-                    shelfCache.save(result.value.shelves)
+                    shelfCache.save(result.value.shelves, key = homeCacheKey(requestedAccountId))
                     // Do not block the Home screen on personalized recommendation network calls.
                     // The feed is already usable; the mixes update when their background job finishes.
                     if (mixes.isCompleted && _uiState.value.mixes.isEmpty()) buildStarterMix()
                     mixes.invokeOnCompletion {
+                        if (requestedAccountId != recommendationAccountId) return@invokeOnCompletion
                         if (_uiState.value.mixes.isEmpty()) {
                             viewModelScope.launch { runCatching { buildStarterMix() } }
                         } else {
@@ -221,7 +238,8 @@ class HomeViewModel @Inject constructor(
                     }
                 }
                 is MusicResult.Failure -> {
-                    // Keep whatever is on screen (cached shelves); the screen shows a retry banner.
+                    if (requestedAccountId != recommendationAccountId) return@launch
+                    // Keep this account's cached shelves; the screen shows a retry banner.
                     _uiState.update { it.copy(isLoading = false, error = result.message) }
                 }
             }
@@ -655,6 +673,7 @@ class HomeViewModel @Inject constructor(
 
     /** Fallback for people with no listening history yet: popular songs from the feed, or a search. */
     private suspend fun buildStarterMix() {
+        val requestedAccountId = recommendationAccountId
         val settings = appSettings.state.value
         val countryLabel = COUNTRY_LABELS[settings.contentCountry.uppercase()] ?: settings.contentCountry.uppercase()
         var tracks = allShelves.asSequence()
@@ -669,7 +688,7 @@ class HomeViewModel @Inject constructor(
             val found = (musicSource.search("trending songs $countryLabel", SearchType.SONG) as? MusicResult.Success)?.value?.songs.orEmpty()
             tracks = found.filter { (it.durationSeconds ?: 0) <= Recommender.MAX_TRACK_SECONDS }.take(25)
         }
-        if (tracks.size >= 5) {
+        if (tracks.size >= 5 && requestedAccountId == recommendationAccountId) {
             _uiState.update {
                 it.copy(mixes = listOf(Mix("trending", "Trending in $countryLabel", "Popular songs to get you started", tracks)))
             }

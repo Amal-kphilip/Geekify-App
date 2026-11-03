@@ -21,11 +21,12 @@ import com.geekify.android.data.local.SavedCollection
 import com.geekify.android.data.model.ArtistRef
 import com.geekify.android.data.model.Thumbnail
 import com.geekify.android.data.model.Track
+import com.geekify.android.player.PlaybackService
+import com.geekify.android.player.QueueManager
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
-import com.google.firebase.firestore.ktx.firestore
-import com.google.firebase.ktx.Firebase
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -63,6 +64,7 @@ class SyncRepository @Inject constructor(
     private val library: LibraryRepository,
     private val history: HistoryRepository,
     private val listeningStats: ListeningStatsRepository,
+    private val queueManager: QueueManager,
     private val dataStore: DataStore<Preferences>
 ) {
     companion object {
@@ -204,8 +206,12 @@ class SyncRepository @Inject constructor(
     )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val db by lazy { Firebase.firestore }
+    // Firestore must use the same named FirebaseApp as the currently active FirebaseAuth session.
+    // This keeps each remembered account's cloud data scoped to its own authenticated identity.
+    private val db: FirebaseFirestore
+        get() = FirebaseFirestore.getInstance(auth.activeFirebaseApp())
     private val syncMutex = Mutex()
+    private val startSyncMutex = Mutex()
     private val jobLock = Any()
     private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
 
@@ -218,6 +224,7 @@ class SyncRepository @Inject constructor(
     @Volatile private var pushJob: Job? = null
     @Volatile private var lastPull = 0L
     @Volatile private var applying = false
+    @Volatile private var accountTransitionInProgress = false
 
     @Volatile private var wasOffline = false
 
@@ -399,11 +406,16 @@ class SyncRepository @Inject constructor(
 
     // ---- Core operations ----
 
-    suspend fun startSync(uid: String) {
+    suspend fun startSync(uid: String, force: Boolean = false) = startSyncMutex.withLock {
+        if (accountTransitionInProgress) return@withLock
+        if (!force && activeUid == uid && _syncState.value in setOf(
+                SyncState.SYNCING, SyncState.SAVED, SyncState.OFFLINE, SyncState.ERROR
+            )
+        ) return@withLock
         stopSync()
         if (auth.currentUid() != uid) {
             _syncState.value = SyncState.IDLE
-            return
+            return@withLock
         }
         activeUid = uid
         if (!isNetworkConnected()) {
@@ -411,7 +423,7 @@ class SyncRepository @Inject constructor(
             _syncError.value = null
             markLocalDirty()
             SyncWorker.enqueue(context)
-            return
+            return@withLock
         }
         _syncError.value = null
         _syncState.value = SyncState.SYNCING
@@ -472,7 +484,7 @@ class SyncRepository @Inject constructor(
     }
 
     fun schedulePush() {
-        if (applying) return
+        if (applying || accountTransitionInProgress) return
         val uid = auth.currentUid() ?: auth.user.value?.uid ?: activeUid ?: return
         activeUid = uid
         synchronized(jobLock) {
@@ -498,7 +510,7 @@ class SyncRepository @Inject constructor(
      * Used for user actions such as Like where the app may be minimized or closed immediately after the tap.
      */
     fun pushNow() {
-        if (applying) return
+        if (applying || accountTransitionInProgress) return
         val uid = auth.currentUid() ?: auth.user.value?.uid ?: activeUid ?: return
         activeUid = uid
         synchronized(jobLock) {
@@ -524,6 +536,7 @@ class SyncRepository @Inject constructor(
 
     /** Called by [SyncWorker] or connectivity callback when network connectivity returns. */
     suspend fun flushPendingSync(isBackgroundWorker: Boolean = false): Boolean = syncMutex.withLock {
+        if (accountTransitionInProgress) return@withLock false
         // Only attempt cloud sync when an authenticated user session is active
         val uid = auth.currentUid() ?: auth.user.value?.uid ?: return@withLock true
         activeUid = uid
@@ -657,41 +670,144 @@ class SyncRepository @Inject constructor(
 
     /** Stops syncing and removes this account's backed-up library from the cloud. */
     suspend fun deleteCloudData(uid: String) {
-        stopSync()
-        SyncWorker.cancel(context)
-        syncMutex.withLock {
-            val userDoc = db.collection("users").document(uid)
-            val playlistDocs = userDoc.collection("playlists").get().await()
-            for (chunk in playlistDocs.documents.chunked(FIRESTORE_BATCH_LIMIT)) {
-                val batch = db.batch()
-                chunk.forEach { batch.delete(it.reference) }
-                batch.commit().await()
+        accountTransitionInProgress = true
+        try {
+            PlaybackService.stopForAccountTransition()
+            stopSync()
+            SyncWorker.cancel(context)
+            syncMutex.withLock {
+                val userDoc = db.collection("users").document(uid)
+                val playlistDocs = userDoc.collection("playlists").get().await()
+                for (chunk in playlistDocs.documents.chunked(FIRESTORE_BATCH_LIMIT)) {
+                    val batch = db.batch()
+                    chunk.forEach { batch.delete(it.reference) }
+                    batch.commit().await()
+                }
+                val likedDocs = userDoc.collection("liked_chunks").get().await()
+                for (chunk in likedDocs.documents.chunked(FIRESTORE_BATCH_LIMIT)) {
+                    val batch = db.batch()
+                    chunk.forEach { batch.delete(it.reference) }
+                    batch.commit().await()
+                }
+                val sessionDocs = userDoc.collection("listening_sessions").get().await()
+                for (chunk in sessionDocs.documents.chunked(FIRESTORE_BATCH_LIMIT)) {
+                    val batch = db.batch()
+                    chunk.forEach { batch.delete(it.reference) }
+                    batch.commit().await()
+                }
+                userDoc.delete().await()
             }
-            val likedDocs = userDoc.collection("liked_chunks").get().await()
-            for (chunk in likedDocs.documents.chunked(FIRESTORE_BATCH_LIMIT)) {
-                val batch = db.batch()
-                chunk.forEach { batch.delete(it.reference) }
-                batch.commit().await()
-            }
-            val sessionDocs = userDoc.collection("listening_sessions").get().await()
-            for (chunk in sessionDocs.documents.chunked(FIRESTORE_BATCH_LIMIT)) {
-                val batch = db.batch()
-                chunk.forEach { batch.delete(it.reference) }
-                batch.commit().await()
-            }
-            userDoc.delete().await()
+        } catch (error: Exception) {
+            accountTransitionInProgress = false
+            PlaybackService.abortAccountTransition()
+            if (auth.currentUid() == uid) runCatching { startSync(uid, force = true) }
+            throw error
         }
     }
 
-    /** Resumes syncing for [uid], e.g. when an account deletion failed part-way. */
-    suspend fun resumeSync(uid: String) = startSync(uid)
+    /** Resumes the current account after a failed destructive operation or account deletion. */
+    suspend fun resumeSync(uid: String) {
+        accountTransitionInProgress = false
+        PlaybackService.abortAccountTransition()
+        startSync(uid, force = true)
+    }
 
+    /**
+     * Backs up and clears the active account's local data while retaining its FirebaseAuth session.
+     * The caller can then activate another already-authenticated FirebaseApp without a password or
+     * Google account picker. The previous account remains saved for a later quick switch.
+     */
+    suspend fun prepareForAccountSwitch() {
+        backupAndClearLocalState(signOutFirebaseSession = false)
+    }
+
+    /** Releases the account-handoff gate after AuthRepository activates the new FirebaseApp. */
+    suspend fun completeAccountSwitch(uid: String) {
+        // The old queue is retained until the destination Firebase session has been activated.
+        // Clear it now, before allowing any observer to see the new account's local state.
+        queueManager.clearForAccountTransition()
+        PlaybackService.completeAccountTransition()
+        accountTransitionInProgress = false
+        startSync(uid, force = true)
+    }
+
+    /** Rehydrates the previous account if a prepared handoff could not activate its destination. */
+    suspend fun abortAccountSwitch(previousUid: String?) {
+        // If the destination auth session was activated but its local handoff failed, roll back
+        // to the original FirebaseApp before restarting sync. Both sessions remain available.
+        if (!previousUid.isNullOrBlank() && auth.currentUid() != previousUid) {
+            auth.activateCachedAccount(previousUid)
+        }
+        accountTransitionInProgress = false
+        PlaybackService.abortAccountTransition()
+        if (!previousUid.isNullOrBlank() && auth.currentUid() == previousUid) {
+            startSync(previousUid, force = true)
+        }
+    }
+
+    /**
+     * Refuses to attach an unidentified local library to a different saved account. This is used
+     * when the app has no active Firebase identity (for example, after a process restart during a
+     * previously interrupted handoff). A mismatch must be resolved by restoring the owning account,
+     * not by merging its private library into whichever account is selected next.
+     */
+    suspend fun ensureLocalAccountOwnership(uid: String) {
+        require(uid.isNotBlank()) { "A valid account is required." }
+        val prefs = dataStore.data.first()
+        val persistedOwner = prefs[KEY_LAST_UID]
+        val runtimeOwner = activeUid
+        val owner = persistedOwner ?: runtimeOwner
+        if (!owner.isNullOrBlank() && owner != uid) {
+            throw IllegalStateException(
+                "This device still has local data belonging to another account. Sign in to that account first so Geekify can finish its backup safely."
+            )
+        }
+    }
+
+    /**
+     * Clears only detached playback state when there is no authenticated account to roll back to.
+     * The library/history are deliberately retained; ownership checks prevent them from leaking to
+     * another account, while clearing the queue ensures old audio cannot resume after sign-in.
+     */
+    suspend fun discardDetachedPlayback() {
+        accountTransitionInProgress = true
+        try {
+            synchronized(jobLock) {
+                pushJob?.cancel()
+                pushJob = null
+            }
+            stopSync()
+            SyncWorker.cancel(context)
+            queueManager.clearForAccountTransition()
+            PlaybackService.completeAccountTransition()
+            _syncState.value = SyncState.IDLE
+            _syncError.value = null
+        } finally {
+            accountTransitionInProgress = false
+        }
+    }
+
+    /** Backs up, clears account-scoped local state, and fully signs out the active Firebase session. */
     suspend fun signOutAndClear() {
+        backupAndClearLocalState(signOutFirebaseSession = true)
+    }
+
+    private suspend fun backupAndClearLocalState(signOutFirebaseSession: Boolean) {
         val uid = auth.currentUid() ?: auth.user.value?.uid ?: activeUid
+
+        // Finish the live playback segment first. Otherwise ExoPlayer can continue producing
+        // listening sessions for the previous account after another account becomes active.
+        PlaybackService.stopForAccountTransition()
+        accountTransitionInProgress = true
+
+        try {
         synchronized(jobLock) {
             pushJob?.cancel()
             pushJob = null
         }
+        stopSync()
+        SyncWorker.cancel(context)
+
         if (uid != null) {
             val backupSucceeded = syncMutex.withLock {
                 // Reconcile first so signing out from a device with an older local snapshot cannot
@@ -727,19 +843,44 @@ class SyncRepository @Inject constructor(
                 )
             }
         }
-        clearLocalAndSignOut()
+
+        // For a full sign-out, discard the old queue and stop the service now. For an account
+        // switch, keep the queue snapshot and stopped service recoverable until the destination
+        // Firebase session is activated by AccountViewModel.
+        if (signOutFirebaseSession) {
+            queueManager.clearForAccountTransition()
+            PlaybackService.completeAccountTransition()
+        }
+        clearLocalAndSignOut(signOutFirebaseSession)
+        if (signOutFirebaseSession) accountTransitionInProgress = false
+        } catch (error: Exception) {
+            accountTransitionInProgress = false
+            PlaybackService.abortAccountTransition()
+            if (!uid.isNullOrBlank() && auth.currentUid() == uid) {
+                runCatching { startSync(uid, force = true) }
+            }
+            throw error
+        }
     }
 
-    /** Used only after the account and its cloud data have already been successfully deleted. */
+    /** Used after the account and its cloud data have already been successfully deleted. */
     suspend fun clearAfterAccountDeletion() {
-        clearLocalAndSignOut()
+        accountTransitionInProgress = true
+        queueManager.clearForAccountTransition()
+        PlaybackService.completeAccountTransition()
+        clearLocalAndSignOut(signOutFirebaseSession = true)
+        accountTransitionInProgress = false
     }
 
-    private suspend fun clearLocalAndSignOut() {
+    private suspend fun clearLocalAndSignOut(signOutFirebaseSession: Boolean) {
         stopSync()
         SyncWorker.cancel(context)
-        auth.signOut()
+        if (signOutFirebaseSession) auth.signOut()
         _syncError.value = null
+        _syncState.value = SyncState.IDLE
+        activeUid = null
+        lastPull = 0L
+        applying = false
         applyCloud(CloudData(emptyList(), emptyList(), emptyList(), emptyList()), wipeHistory = true)
         history.clearStats()
         listeningStats.clear()
@@ -756,12 +897,13 @@ class SyncRepository @Inject constructor(
         val uid = auth.currentUid() ?: auth.user.value?.uid ?: activeUid ?: return
         if (_syncState.value == SyncState.SYNCING) return
         scope.launch {
-            startSync(uid)
+            startSync(uid, force = true)
         }
     }
 
     /** Persists a finished listening session without rewriting the entire library. */
     suspend fun pushSession(session: ListeningSessionEntity) = syncMutex.withLock {
+        if (accountTransitionInProgress) return@withLock
         val uid = auth.currentUid() ?: auth.user.value?.uid ?: activeUid ?: return@withLock
         activeUid = uid
         if (!isNetworkConnected()) {
