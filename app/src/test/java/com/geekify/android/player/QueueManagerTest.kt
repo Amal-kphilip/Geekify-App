@@ -256,4 +256,22 @@ class QueueManagerTest {
         assertEquals(repeatBefore.name, store.state.value[QueueManager.KEY_REPEAT])
     }
 
+    @Test
+    fun `play with a track not present in the passed queue prepends and plays that track instead of next song`() = runBlocking {
+        val store = FakePreferencesDataStore()
+        val manager = QueueManager(store, Dispatchers.Unconfined, debounceMs = 0L)
+        manager.awaitLoaded()
+
+        val clickedTopResult = track("top_result_1")
+        val remainingSearchSongs = listOf(track("next_song_2"), track("next_song_3"))
+
+        manager.play(clickedTopResult, remainingSearchSongs)
+
+        val state = manager.state.value
+        assertEquals(0, state.index)
+        assertEquals("top_result_1", state.current?.videoId)
+        assertEquals(listOf("top_result_1", "next_song_2", "next_song_3"), state.queue.map { it.videoId })
+        assertTrue(state.isPlaying)
+    }
+
 }

@@ -625,11 +625,12 @@ fun SearchScreen(
                                                                     ?: Track(
                                                                         videoId = topResult.videoId ?: topResult.id,
                                                                         title = topResult.title,
-                                                                        artist = topResult.subtitle ?: "Unknown",
+                                                                        artist = com.geekify.android.data.source.innertube.Parsers.cleanTopResultArtist(topResult.subtitle),
                                                                         thumbnails = topResult.thumbnails,
                                                                         explicit = topResult.explicit
                                                                     )
-                                                                onTrackClick(track, response.songs.ifEmpty { listOf(track) })
+                                                                val playQueue = listOf(track) + response.songs.filterNot { it.videoId == track.videoId }
+                                                                onTrackClick(track, playQueue)
                                                             } else {
                                                                 onCardClick(
                                                                     Card(
@@ -646,8 +647,17 @@ fun SearchScreen(
                                                             }
                                                         },
                                                         onMoreClick = {
-                                                            val track = response.songs.firstOrNull { it.videoId == topResult.videoId }
-                                                            if (track != null) onTrackActions(track)
+                                                            if (topResult.kind == "song" || topResult.kind == "video") {
+                                                                val track = response.songs.firstOrNull { it.videoId == topResult.videoId }
+                                                                    ?: Track(
+                                                                        videoId = topResult.videoId ?: topResult.id,
+                                                                        title = topResult.title,
+                                                                        artist = com.geekify.android.data.source.innertube.Parsers.cleanTopResultArtist(topResult.subtitle),
+                                                                        thumbnails = topResult.thumbnails,
+                                                                        explicit = topResult.explicit
+                                                                    )
+                                                                onTrackActions(track)
+                                                            }
                                                         }
                                                     )
                                                 }
@@ -693,14 +703,16 @@ fun SearchScreen(
                                             ) {
                                                 Column(modifier = Modifier.fillMaxWidth()) {
                                                     state.libraryTracks.forEachIndexed { idx, song ->
-                                                        TrackRow(
-                                                            track = song,
-                                                            onClick = { onTrackClick(song, state.libraryTracks) },
-                                                            onLongClick = { onTrackActions(song) },
-                                                            onMoreClick = { onTrackActions(song) }
-                                                        )
-                                                        if (idx < state.libraryTracks.lastIndex) {
-                                                            IosSettingsDivider(insetStart = 88.dp)
+                                                        key(song.videoId) {
+                                                            TrackRow(
+                                                                track = song,
+                                                                onClick = { onTrackClick(song, state.libraryTracks) },
+                                                                onLongClick = { onTrackActions(song) },
+                                                                onMoreClick = { onTrackActions(song) }
+                                                            )
+                                                            if (idx < state.libraryTracks.lastIndex) {
+                                                                IosSettingsDivider(insetStart = 88.dp)
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -729,14 +741,16 @@ fun SearchScreen(
                                             ) {
                                                 Column(modifier = Modifier.fillMaxWidth()) {
                                                     displaySongs.forEachIndexed { idx, song ->
-                                                        TrackRow(
-                                                            track = song,
-                                                            onClick = { onTrackClick(song, response.songs) },
-                                                            onLongClick = { onTrackActions(song) },
-                                                            onMoreClick = { onTrackActions(song) }
-                                                        )
-                                                        if (idx < displaySongs.lastIndex) {
-                                                            IosSettingsDivider(insetStart = 88.dp)
+                                                        key(song.videoId) {
+                                                            TrackRow(
+                                                                track = song,
+                                                                onClick = { onTrackClick(song, response.songs) },
+                                                                onLongClick = { onTrackActions(song) },
+                                                                onMoreClick = { onTrackActions(song) }
+                                                            )
+                                                            if (idx < displaySongs.lastIndex) {
+                                                                IosSettingsDivider(insetStart = 88.dp)
+                                                            }
                                                         }
                                                     }
                                                 }

@@ -135,4 +135,46 @@ class ParsersTest {
         assertEquals(1, response.songs.size)
         assertEquals("4NRXx6U8ABQ", response.songs.first().videoId)
     }
+
+    @Test fun `top result song in musicCardShelfRenderer is placed first in songs and ignores secondary card contents`() {
+        val raw = Json.parseToJsonElement(
+            """{
+              "contents": {
+                "sectionListRenderer": {
+                  "contents": [
+                    {
+                      "musicCardShelfRenderer": {
+                        "title": {
+                          "runs": [{
+                            "text": "Espresso",
+                            "navigationEndpoint": { "watchEndpoint": { "videoId": "topSong1111" } }
+                          }]
+                        },
+                        "subtitle": { "runs": [{ "text": "Song • Sabrina Carpenter • 2:55" }] },
+                        "contents": [
+                          {
+                            "musicResponsiveListItemRenderer": {
+                              "playlistItemData": { "videoId": "nextSong222" },
+                              "flexColumns": [
+                                { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": "Please Please Please" }] } } },
+                                { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": "Sabrina Carpenter" }, { "text": " • " }, { "text": "3:06" }] } } }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }"""
+        )
+
+        val response = Parsers.parseSearchResponseSinglePass(raw, "espresso", null)
+        assertNotNull(response.topResult)
+        assertEquals("topSong1111", response.topResult?.videoId)
+        assertEquals(listOf("topSong1111", "nextSong222"), response.songs.map { it.videoId })
+        assertEquals("Sabrina Carpenter", response.songs.first().artist)
+        assertEquals(175, response.songs.first().durationSeconds)
+    }
 }

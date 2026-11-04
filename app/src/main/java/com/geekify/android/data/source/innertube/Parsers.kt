@@ -232,22 +232,44 @@ object Parsers {
         CollectionHeader(text(h["title"]).trim().ifBlank { null }, creator, description, year)
     }.getOrDefault(CollectionHeader(null, null, null, null))
 
+    fun cleanTopResultArtist(subtitle: String?): String {
+        if (subtitle.isNullOrBlank()) return "Unknown"
+        val parts = subtitle.split("•", "·").map { it.trim() }.filter { it.isNotBlank() }
+        if (parts.isEmpty()) return subtitle.trim()
+        val typeLabels = setOf("song", "video", "single", "ep", "track", "album", "artist", "playlist")
+        val filtered = parts
+            .dropWhile { it.lowercase() in typeLabels }
+            .filterNot { part ->
+                duration.matches(part) ||
+                    Regex("^\\d{4}$").matches(part) ||
+                    Regex("(?i)^[\\d.,]+\\s*[kmb]?\\s*(views|plays|listeners|subscribers)$").matches(part)
+            }
+        return filtered.firstOrNull() ?: parts.first()
+    }
+
     fun parseTopResult(o: JsonObject): SearchTopResult? {
         val renderer = objectOrNull(o["musicCardShelfRenderer"]) ?: return null
         val title = text(renderer["title"]).ifBlank { return null }
         val subtitle = text(renderer["subtitle"]).ifBlank { null }
+        // Exclude secondary list items ("contents") and overflow "menu" so we never extract
+        // the videoId or browseId of the next/related song inside the card shelf.
+        val cardHeader = JsonObject(renderer.filterKeys { it != "contents" && it != "menu" })
         val onTap = objectOrNull(renderer["onTap"])
         val watchEndpoint = objectOrNull(onTap?.get("watchEndpoint"))
         val browseEndpoint = objectOrNull(onTap?.get("browseEndpoint"))
-        val vid = watchEndpoint?.str("videoId") ?: videoId(renderer)
-        val bid = browseEndpoint?.str("browseId")
+        val fallbackBrowse = if (browseEndpoint == null && watchEndpoint == null) browse(cardHeader) else (null to null)
+        val vid = watchEndpoint?.str("videoId") ?: videoId(cardHeader)
+        val bid = browseEndpoint?.str("browseId") ?: fallbackBrowse.first
         val page = objectOrNull(objectOrNull(browseEndpoint?.get("browseEndpointContextSupportedConfigs"))?.get("browseEndpointContextMusicConfig"))?.str("pageType")
+            ?: fallbackBrowse.second
 
         val kind = when {
             page == "MUSIC_PAGE_TYPE_ARTIST" || bid?.startsWith("UC") == true -> "artist"
             page == "MUSIC_PAGE_TYPE_ALBUM" || bid?.startsWith("MPRE") == true -> "album"
             page == "MUSIC_PAGE_TYPE_PLAYLIST" || bid?.startsWith("VL") == true -> "playlist"
-            vid != null -> "song"
+            vid != null -> {
+                if (subtitle?.startsWith("Video", ignoreCase = true) == true) "video" else "song"
+            }
             subtitle?.contains("Artist", ignoreCase = true) == true -> "artist"
             subtitle?.contains("Album", ignoreCase = true) == true -> "album"
             subtitle?.contains("Playlist", ignoreCase = true) == true -> "playlist"
@@ -261,15 +283,15 @@ object Parsers {
             else -> vid ?: bid ?: title
         }
 
-        val explicit = renderer["subtitleBadges"]?.toString()?.contains("EXPLICIT") == true ||
-            renderer["badges"]?.toString()?.contains("EXPLICIT") == true
+        val explicit = cardHeader["subtitleBadges"]?.toString()?.contains("EXPLICIT") == true ||
+            cardHeader["badges"]?.toString()?.contains("EXPLICIT") == true
 
         return SearchTopResult(
             id = id,
             title = title,
             subtitle = subtitle,
             kind = kind,
-            thumbnails = findThumbnails(renderer),
+            thumbnails = findThumbnails(cardHeader),
             videoId = vid,
             playlistId = if (kind == "playlist") bid?.removePrefix("VL") else null,
             browseId = bid,
@@ -402,6 +424,35 @@ object Parsers {
                     }
                 }
                 else -> Unit
+            }
+        }
+
+        // Ensure a playable Top Result (from musicCardShelfRenderer) is always present at the
+        // front of songs even when YouTube Music only lists secondary tracks in the shelf rows.
+        val top = topResult
+        val topVid = top?.videoId
+        if (top != null && topVid != null && (top.kind == "song" || top.kind == "video") && (entityFilter == null || entityFilter == top.kind)) {
+            val existingIdx = allTracks.indexOfFirst { it.videoId == topVid }
+            if (existingIdx > 0) {
+                val existing = allTracks.removeAt(existingIdx)
+                allTracks.add(0, existing)
+            } else if (existingIdx < 0 && seenTrackIds.add(topVid)) {
+                val durationStr = top.subtitle
+                    ?.split("•", "·")
+                    ?.map { it.trim() }
+                    ?.firstOrNull { duration.matches(it) }
+                allTracks.add(
+                    0,
+                    Track(
+                        videoId = topVid,
+                        title = top.title,
+                        artist = cleanTopResultArtist(top.subtitle),
+                        duration = durationStr,
+                        durationSeconds = seconds(durationStr),
+                        thumbnails = top.thumbnails,
+                        explicit = top.explicit
+                    )
+                )
             }
         }
 

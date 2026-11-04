@@ -239,8 +239,13 @@ class QueueManager(
         shuffleOrder = null
         shufflePointer = 0
         val old = _state.value
-        val q = queue.ifEmpty { listOf(track) }
-        val idx = maxOf(0, q.indexOfFirst { it.videoId == track.videoId })
+        val rawIndex = queue.indexOfFirst { it.videoId == track.videoId }
+        val q = when {
+            queue.isEmpty() -> listOf(track)
+            rawIndex >= 0 -> queue
+            else -> listOf(track) + queue
+        }
+        val idx = if (rawIndex >= 0) rawIndex else 0
         if (old.shuffle && q.size > 1) {
             val indices = q.indices.toMutableList()
             indices.remove(idx)
