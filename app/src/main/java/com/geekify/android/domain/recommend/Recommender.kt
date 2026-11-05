@@ -1,5 +1,6 @@
 package com.geekify.android.domain.recommend
 
+import com.geekify.android.domain.listening.ListeningLanguageClassifier
 import kotlin.math.ln
 import kotlin.math.min
 import kotlin.random.Random
@@ -7,7 +8,7 @@ import kotlin.random.Random
 /**
  * Pure Kotlin port of backend/app/services/recommender.py upgraded with
  * behavioral session signals (completion rate, skip penalty, repeat velocity), time-of-day
- * vibe affinity, and multi-cluster Daily Mixes.
+ * vibe affinity, 5-layer hybrid language resolution, and multi-cluster Daily Mixes.
  * No Android imports. Testable with plain JUnit.
  */
 object Recommender {
@@ -17,8 +18,9 @@ object Recommender {
     const val RECENT_DECAY = 0.90
     const val RANK_DECAY = 0.12
     const val CO_OCCURRENCE_BOOST = 0.35
-    const val MAX_SEEDS = 6
+    const val MAX_SEEDS = 8
     const val MAX_SEEDS_PER_ARTIST = 2
+    const val MIN_TRACK_SECONDS = 45
     const val MAX_TRACK_SECONDS = 15 * 60
     /** Language is a strong preference signal, but never an absolute filter. */
     private const val LANGUAGE_AFFINITY_BOOST = 0.70
@@ -105,7 +107,10 @@ object Recommender {
         val type: String,
         var score: Double = 0.0,
         val sources: MutableSet<String> = mutableSetOf(),
-        val album: String? = null
+        val album: String? = null,
+        val sourceArtists: MutableSet<String> = mutableSetOf(),
+        var inferredLanguage: String? = null,
+        var languageConfidence: Double = 1.0
     )
 
     data class MixResult(
@@ -119,26 +124,26 @@ object Recommender {
     private fun akey(name: String?) = (name ?: "").trim().lowercase()
 
     /**
-     * Infers the language where titles or artists use a distinct Indic/Asian script. Latin
-     * titles are deliberately left unknown rather than guessed, so they don't distort a
-     * listener's actual preference.
+     * Infers the language of a track using the unified 5-layer hybrid classifier:
+     * Layer 1 (explicit metadata tags), Layer 2 (native Unicode scripts),
+     * Layer 3 (romanized lexical & phonetic morphology), and Layer 4 (artist/composer taxonomy).
+     * Generic English/Latin titles remain null so they never distort a listener's preference.
      */
-    fun languageOf(title: String?, artist: String?): String? {
-        val text = "${title.orEmpty()} ${artist.orEmpty()}"
-        return when {
-            text.any { it in '\u0D00'..'\u0D7F' } -> "Malayalam"
-            text.any { it in '\u0B80'..'\u0BFF' } -> "Tamil"
-            text.any { it in '\u0C00'..'\u0C7F' } -> "Telugu"
-            text.any { it in '\u0C80'..'\u0CFF' } -> "Kannada"
-            text.any { it in '\u0980'..'\u09FF' } -> "Bengali"
-            text.any { it in '\u0A80'..'\u0AFF' } -> "Gujarati"
-            text.any { it in '\u0B00'..'\u0B7F' } -> "Odia"
-            text.any { it in '\u0A00'..'\u0A7F' } -> "Punjabi"
-            text.any { it in '\u0900'..'\u097F' } -> "Hindi"
-            text.any { it in '\uAC00'..'\uD7AF' } -> "K-pop"
-            text.any { it in '\u3040'..'\u30FF' } -> "Japanese"
-            else -> null
+    fun languageOf(title: String?, artist: String?): String? =
+        ListeningLanguageClassifier.classifyForRecommender(title, artist)
+
+    fun resolveLanguage(
+        videoId: String?,
+        title: String?,
+        artist: String?,
+        languageOverrides: Map<String, String> = emptyMap()
+    ): String? {
+        if (!videoId.isNullOrBlank()) {
+            languageOverrides[videoId]?.let { override ->
+                ListeningLanguageClassifier.normalizeRecommenderLanguage(override)?.let { return it }
+            }
         }
+        return languageOf(title, artist)
     }
 
     /**
@@ -161,7 +166,8 @@ object Recommender {
         recent: List<Signal>,
         frequent: List<PlayedSignal> = emptyList(),
         playlist: List<Signal> = emptyList(),
-        nowMs: Long = System.currentTimeMillis()
+        nowMs: Long = System.currentTimeMillis(),
+        languageOverrides: Map<String, String> = emptyMap()
     ): LanguageAffinityProfile {
         val longTermRaw = mutableMapOf<String, Double>()
         val recentRaw = mutableMapOf<String, Double>()
@@ -175,33 +181,33 @@ object Recommender {
         liked.forEachIndexed { index, signal ->
             add(
                 longTermRaw,
-                languageOf(signal.title, signal.artist),
+                resolveLanguage(signal.videoId, signal.title, signal.artist, languageOverrides),
                 LIKE_LANGUAGE_WEIGHT * exponentialTimeDecay(signal.timestampMs, nowMs, HALF_LIFE_LIKES_PLAYLIST_DAYS, index, LIKE_DECAY)
             )
         }
         playlist.forEachIndexed { index, signal ->
             add(
                 longTermRaw,
-                languageOf(signal.title, signal.artist),
+                resolveLanguage(signal.videoId, signal.title, signal.artist, languageOverrides),
                 PLAYLIST_LANGUAGE_WEIGHT * exponentialTimeDecay(signal.timestampMs, nowMs, HALF_LIFE_LIKES_PLAYLIST_DAYS, index, PLAYLIST_DECAY)
             )
         }
         frequent.forEach { signal ->
             val timeDecay = if (signal.lastPlayedAtMs > 0L) exponentialTimeDecay(signal.lastPlayedAtMs, nowMs, HALF_LIFE_PLAYS_DAYS, 0, 1.0) else 1.0
             val repeatedWeight = FREQUENT_LANGUAGE_WEIGHT * ln(1.0 + signal.plays.coerceAtLeast(1)) * timeDecay
-            add(longTermRaw, languageOf(signal.title, signal.artist), repeatedWeight)
+            add(longTermRaw, resolveLanguage(signal.videoId, signal.title, signal.artist, languageOverrides), repeatedWeight)
         }
         recent.forEachIndexed { index, signal ->
             add(
                 recentRaw,
-                languageOf(signal.title, signal.artist),
+                resolveLanguage(signal.videoId, signal.title, signal.artist, languageOverrides),
                 RECENT_WEIGHT * exponentialTimeDecay(signal.timestampMs, nowMs, HALF_LIFE_PLAYS_DAYS, index, RECENT_DECAY)
             )
         }
         recent.take(SESSION_LANGUAGE_LIMIT).forEachIndexed { index, signal ->
             add(
                 sessionRaw,
-                languageOf(signal.title, signal.artist),
+                resolveLanguage(signal.videoId, signal.title, signal.artist, languageOverrides),
                 SESSION_LANGUAGE_WEIGHT * exponentialTimeDecay(signal.timestampMs, nowMs, 1.0, index, 0.80)
             )
         }
@@ -248,7 +254,8 @@ object Recommender {
         savedArtists: List<String> = emptyList(),
         languageAffinity: Map<String, Double> = emptyMap(),
         sessions: List<SessionSignal> = emptyList(),
-        nowMs: Long = System.currentTimeMillis()
+        nowMs: Long = System.currentTimeMillis(),
+        languageOverrides: Map<String, String> = emptyMap()
     ): WeightResult {
         val weights = mutableMapOf<String, Double>()
         val meta = mutableMapOf<String, Signal>()
@@ -293,7 +300,11 @@ object Recommender {
                 val netDelta = completionBonus - skipPenalty + repeatBoost
                 val currentW = weights[sess.videoId] ?: 0.0
                 if (currentW > 0.0 || netDelta > 0.25) {
-                    val updated = (currentW + netDelta).coerceAtLeast(if (currentW > 0.0) currentW * 0.35 else 0.0)
+                    var updated = (currentW + netDelta).coerceAtLeast(if (currentW > 0.0) currentW * 0.35 else 0.0)
+                    // Heavily skipped tracks should not dominate seed selection
+                    if (sess.skipRate >= 0.6 && sess.completionRate < 0.35) {
+                        updated *= 0.15
+                    }
                     if (updated > 0.0) weights[sess.videoId] = updated
                 }
                 if (ak.isNotEmpty()) {
@@ -306,7 +317,7 @@ object Recommender {
         if (languageAffinity.isNotEmpty()) {
             weights.keys.toList().forEach { videoId ->
                 val signal = meta[videoId] ?: return@forEach
-                val language = languageOf(signal.title, signal.artist)
+                val language = resolveLanguage(videoId, signal.title, signal.artist, languageOverrides)
                 val preference = language?.let { languageAffinity[it] } ?: 0.0
                 if (preference > 0.0) {
                     weights[videoId] = (weights[videoId] ?: 0.0) * (1.0 + LANGUAGE_SEED_BOOST * preference)
@@ -330,22 +341,50 @@ object Recommender {
     }
 
     /**
-     * Like [pickSeeds], but always keeps the two strongest seeds and fills the rest by weighted random
-     * choice from the next-best ones. Two refreshes therefore ask YouTube Music for different "radios"
-     * and the mixes stay fresh, while still being driven by what the person actually plays.
+     * Like [pickSeeds], but always keeps the two strongest seeds, guarantees representation for
+     * secondary language clusters present in the listener's taste pool, and fills the rest by
+     * weighted random choice from the next-best ones.
      */
     fun pickSeedsVaried(
         weights: Map<String, Double>,
         meta: Map<String, Signal>,
         limit: Int = MAX_SEEDS,
-        random: Random = Random.Default
+        random: Random = Random.Default,
+        languageOverrides: Map<String, String> = emptyMap()
     ): List<String> {
         val ranked = pickSeeds(weights, meta, limit * 3)
         if (ranked.size <= limit) return ranked
         val picked = ranked.take(2).toMutableList()
         val pool = ranked.drop(2).toMutableList()
+
+        // Ensure secondary language clusters in the listener's pool get at least one seed slot
+        val coveredLanguages = picked.mapNotNull { vid ->
+            val s = meta[vid]
+            resolveLanguage(vid, s?.title, s?.artist, languageOverrides)
+        }.toMutableSet()
+
+        val secondaryCandidates = pool.filter { vid ->
+            val s = meta[vid]
+            val lang = resolveLanguage(vid, s?.title, s?.artist, languageOverrides)
+            lang != null && lang !in coveredLanguages
+        }
+        for (cand in secondaryCandidates) {
+            if (picked.size >= (limit - 1).coerceAtLeast(2)) break
+            val s = meta[cand]
+            val lang = resolveLanguage(cand, s?.title, s?.artist, languageOverrides) ?: continue
+            if (lang !in coveredLanguages) {
+                picked.add(cand)
+                pool.remove(cand)
+                coveredLanguages.add(lang)
+            }
+        }
+
         while (picked.size < limit && pool.isNotEmpty()) {
             val total = pool.sumOf { weights[it] ?: 0.0 }
+            if (total <= 0.0) {
+                picked.add(pool.removeAt(0))
+                continue
+            }
             var r = random.nextDouble() * total
             var idx = pool.indexOfFirst { r -= (weights[it] ?: 0.0); r <= 0.0 }
             if (idx < 0) idx = pool.lastIndex
@@ -354,13 +393,72 @@ object Recommender {
         return picked
     }
 
+    /**
+     * Evaluates candidate track quality and filters or demotes YouTube noise:
+     * - Returns 0.0 (hard reject) for ultra-short clips (< 45s), long mixes (> 15m),
+     *   ringtones, status videos, karaoke, or instrumental backing tracks.
+     * - Returns 0.35 (heavy demotion) for unrequested 8D audio, nightcore, bass-boosted,
+     *   mashups, jukeboxes, DJ remixes, or tribute covers.
+     */
+    fun candidateQualityMultiplier(
+        title: String,
+        artist: String,
+        durationSeconds: Int?,
+        seedTitles: List<String> = emptyList()
+    ): Double {
+        if (durationSeconds != null && (durationSeconds < MIN_TRACK_SECONDS || durationSeconds > MAX_TRACK_SECONDS)) {
+            return 0.0
+        }
+        val lowerTitle = title.lowercase()
+        val combined = "$lowerTitle ${artist.lowercase()}"
+
+        if (HARD_REJECT_PATTERNS.any { combined.contains(it) }) {
+            return 0.0
+        }
+
+        val seedContext = seedTitles.joinToString(" ").lowercase()
+        for (pattern in SOFT_DEMOTE_PATTERNS) {
+            if (combined.contains(pattern) && !seedContext.contains(pattern)) {
+                return 0.35
+            }
+        }
+        return 1.0
+    }
+
+    private val HARD_REJECT_PATTERNS = listOf(
+        "ringtone",
+        "status video",
+        "whatsapp status",
+        "full screen status",
+        "karaoke",
+        "instrumental version",
+        "backing track",
+        "dialogue promo",
+        "teaser",
+        "trailer"
+    )
+
+    private val SOFT_DEMOTE_PATTERNS = listOf(
+        "8d audio",
+        "8d song",
+        "nightcore",
+        "bass boosted",
+        "mashup",
+        "jukebox",
+        "nonstop",
+        "non-stop",
+        "dj remix",
+        "cover version",
+        "tribute to"
+    )
+
     fun similarity(a: Candidate, b: Candidate): Double {
         val sameArtist = a.artist.isNotEmpty() && a.artist.equals(b.artist, ignoreCase = true)
         if (sameArtist) return 1.0
         val sameAlbum = !a.album.isNullOrBlank() && a.album.equals(b.album, ignoreCase = true)
         if (sameAlbum) return 0.5
-        val langA = languageOf(a.title, a.artistDisplay) ?: "Latin"
-        val langB = languageOf(b.title, b.artistDisplay) ?: "Latin"
+        val langA = a.inferredLanguage ?: languageOf(a.title, a.artistDisplay) ?: "Latin"
+        val langB = b.inferredLanguage ?: languageOf(b.title, b.artistDisplay) ?: "Latin"
         if (langA == langB) return 0.3
         return 0.0
     }
@@ -460,11 +558,91 @@ object Recommender {
         }
     }
 
-    private val MORNING_KEYWORDS = listOf("acoustic", "morning", "melody", "unplugged", "breeze", "sunshine", "classic", "peaceful")
-    private val AFTERNOON_KEYWORDS = listOf("focus", "lofi", "lo-fi", "chill", "groove", "instrumental", "beats", "vibe")
-    private val EVENING_KEYWORDS = listOf("party", "dance", "remix", "workout", "bass", "club", "hit", "anthem", "energetic")
-    private val NIGHT_KEYWORDS = listOf("night", "lofi", "lo-fi", "slowed", "reverb", "chill", "romantic", "unplugged", "ambient", "acoustic", "melody")
+    private val MORNING_KEYWORDS = listOf(
+        "acoustic", "morning", "melody", "unplugged", "breeze", "sunshine", "classic", "peaceful",
+        "pulari", "pular", "kaalai", "subah", "suprabhatam", "udayam", "malare", "poove"
+    )
+    private val AFTERNOON_KEYWORDS = listOf(
+        "focus", "lofi", "lo-fi", "chill", "groove", "instrumental", "beats", "vibe",
+        "soulful", "indie", "breeze", "drive"
+    )
+    private val EVENING_KEYWORDS = listOf(
+        "party", "dance", "remix", "workout", "bass", "club", "hit", "anthem", "energetic",
+        "kuthu", "mass", "dappankuthu", "bhangra", "peppy", "celebration", "beat", "thallumaala", "aavesham"
+    )
+    private val NIGHT_KEYWORDS = listOf(
+        "night", "lofi", "lo-fi", "slowed", "reverb", "chill", "romantic", "unplugged", "ambient", "acoustic", "melody",
+        "raavu", "raavil", "nilavu", "nilave", "iravu", "iravil", "raat", "shaam", "vennila", "mazha", "kanavu"
+    )
     private val LATE_NIGHT_HEAVY_KEYWORDS = listOf("hardstyle", "rave", "workout")
+
+    /**
+     * Interleaves familiar high-affinity "anchor" tracks (~25-30%) with discovery tracks (~70-75%)
+     * so personalized mixes feel cohesive and immediately playable while remaining discovery-forward.
+     */
+    fun <T> blendAnchorTracks(
+        discoveryTracks: List<T>,
+        anchorCandidates: List<T>,
+        videoId: (T) -> String,
+        artist: (T) -> String,
+        targetCount: Int = 28,
+        anchorInterval: Int = 4,
+        maxPerArtist: Int = 3
+    ): List<T> {
+        if (discoveryTracks.isEmpty()) return anchorCandidates.take(targetCount)
+        if (anchorCandidates.isEmpty()) return discoveryTracks.take(targetCount)
+
+        val result = mutableListOf<T>()
+        val usedIds = mutableSetOf<String>()
+        val artistCounts = mutableMapOf<String, Int>()
+
+        val discQueue = discoveryTracks.toMutableList()
+        val anchorQueue = anchorCandidates.toMutableList()
+
+        fun canAdd(item: T): Boolean {
+            val id = videoId(item)
+            if (id.isEmpty() || id in usedIds) return false
+            val a = akey(artist(item))
+            if (a.isNotEmpty() && (artistCounts[a] ?: 0) >= maxPerArtist) return false
+            return true
+        }
+
+        fun recordAdd(item: T) {
+            val id = videoId(item)
+            val a = akey(artist(item))
+            usedIds.add(id)
+            if (a.isNotEmpty()) {
+                artistCounts[a] = (artistCounts[a] ?: 0) + 1
+            }
+            result.add(item)
+        }
+
+        while (result.size < targetCount && (discQueue.isNotEmpty() || anchorQueue.isNotEmpty())) {
+            val slot = result.size
+            val wantAnchor = (slot % anchorInterval == 1) && anchorQueue.isNotEmpty()
+            if (wantAnchor) {
+                val anchorIdx = anchorQueue.indexOfFirst(::canAdd)
+                if (anchorIdx >= 0) {
+                    recordAdd(anchorQueue.removeAt(anchorIdx))
+                    continue
+                } else {
+                    anchorQueue.clear()
+                }
+            }
+            val discIdx = discQueue.indexOfFirst(::canAdd)
+            if (discIdx >= 0) {
+                recordAdd(discQueue.removeAt(discIdx))
+            } else {
+                val fallbackIdx = anchorQueue.indexOfFirst(::canAdd)
+                if (fallbackIdx >= 0) {
+                    recordAdd(anchorQueue.removeAt(fallbackIdx))
+                } else {
+                    break
+                }
+            }
+        }
+        return result
+    }
 
     /**
      * Build mixes from pre-fetched radio tracks.
@@ -505,9 +683,18 @@ object Recommender {
         hourOfDay: Int? = null,
         /** Optional content-language preference from Settings to nudge regional discovery. */
         preferredContentLanguage: String? = null,
-        nowMs: Long = System.currentTimeMillis()
+        nowMs: Long = System.currentTimeMillis(),
+        /** Optional resolved language overrides keyed by videoId. */
+        languageOverrides: Map<String, String> = emptyMap()
     ): Pair<List<MixResult>, List<String>> {
-        val languageProfile = languageAffinity(liked, recent, frequent, playlist, nowMs = nowMs)
+        val languageProfile = languageAffinity(
+            liked = liked,
+            recent = recent,
+            frequent = frequent,
+            playlist = playlist,
+            nowMs = nowMs,
+            languageOverrides = languageOverrides
+        )
         val listenerAffinity = languageProfile.affinity
         val preferredLanguage = preferredContentLanguage ?: listenerAffinity.maxByOrNull { it.value }?.key
         val (weights, meta, affinity) = seedWeights(
@@ -518,7 +705,8 @@ object Recommender {
             savedArtists,
             languageAffinity = listenerAffinity,
             sessions = sessions,
-            nowMs = nowMs
+            nowMs = nowMs,
+            languageOverrides = languageOverrides
         )
         if (weights.isEmpty()) return Pair(emptyList(), emptyList())
         val activeSeeds = seeds ?: pickSeeds(weights, meta)
@@ -527,21 +715,32 @@ object Recommender {
         val knownArtists = affinity.keys.toSet()
         val totalAff = affinity.values.sum().let { if (it == 0.0) 1.0 else it }
 
+        val seedLanguages = activeSeeds.associateWith { seedId ->
+            val s = meta[seedId]
+            resolveLanguage(seedId, s?.title, s?.artist, languageOverrides)
+        }
+        val seedTitles = activeSeeds.mapNotNull { meta[it]?.title?.takeIf { t -> t.isNotEmpty() } }
+
         val cands = mutableMapOf<String, Candidate>()
         for (seed in activeSeeds) {
             val w = (weights[seed] ?: 0.0) / topW
+            val seedArtist = akey(meta[seed]?.artist)
             val tracks = related[seed] ?: continue
             tracks.take(40).forEachIndexed { rank, t ->
                 val vid = videoId(t)
                 if (vid.isEmpty() || vid in known) return@forEachIndexed
                 val dur = durationSeconds(t)
-                if (dur != null && dur > MAX_TRACK_SECONDS) return@forEachIndexed
+                val trackTitle = title(t)
+                val trackArtistDisplay = artistDisplay(t)
+                val qualityMult = candidateQualityMultiplier(trackTitle, trackArtistDisplay, dur, seedTitles)
+                if (qualityMult <= 0.0) return@forEachIndexed
+
                 val c = cands.getOrPut(vid) {
                     Candidate(
                         videoId = vid,
-                        title = title(t),
+                        title = trackTitle,
                         artist = akey(artist(t)),
-                        artistDisplay = artistDisplay(t),
+                        artistDisplay = trackArtistDisplay,
                         thumbnails = thumbs(t),
                         duration = duration(t),
                         durationSeconds = dur,
@@ -550,26 +749,58 @@ object Recommender {
                         album = album(t)
                     )
                 }
-                c.score += w / (1 + RANK_DECAY * rank)
+                c.score += (w / (1 + RANK_DECAY * rank)) * qualityMult
                 c.sources.add(seed)
+                if (seedArtist.isNotEmpty()) {
+                    c.sourceArtists.add(seedArtist)
+                }
             }
         }
 
         for (c in cands.values) {
             // Collaborative co-occurrence boost when multiple seeds lead to the same candidate
             c.score *= 1 + CO_OCCURRENCE_BOOST * (c.sources.size - 1)
+            // Multi-artist seed convergence bonus: distinct seed artists agreeing on a track
+            if (c.sourceArtists.size > 1) {
+                c.score *= 1 + 0.12 * (c.sourceArtists.size - 1).coerceAtMost(3)
+            }
             val share = (affinity[c.artist] ?: 0.0) / totalAff
             c.score *= 1 + min(0.6, share * 3)
-            val candidateLanguage = languageOf(c.title, c.artistDisplay)
+
+            // Layer 1-4 direct language resolution, falling back to Layer 5 seed-cluster propagation
+            val directLanguage = resolveLanguage(c.videoId, c.title, c.artistDisplay, languageOverrides)
+            if (directLanguage != null) {
+                c.inferredLanguage = directLanguage
+                c.languageConfidence = 1.0
+            } else {
+                val langWeights = mutableMapOf<String, Double>()
+                var totalSeedWeight = 0.0
+                for (seedId in c.sources) {
+                    val sw = (weights[seedId] ?: 1.0).coerceAtLeast(0.1)
+                    totalSeedWeight += sw
+                    val sl = seedLanguages[seedId]
+                    if (sl != null) {
+                        langWeights[sl] = (langWeights[sl] ?: 0.0) + sw
+                    }
+                }
+                val topSeedLang = langWeights.maxByOrNull { it.value }
+                if (topSeedLang != null && totalSeedWeight > 0.0 && (topSeedLang.value / totalSeedWeight) >= 0.65) {
+                    c.inferredLanguage = topSeedLang.key
+                    c.languageConfidence = 0.75
+                }
+            }
+
+            val candidateLanguage = c.inferredLanguage
+            val confidence = c.languageConfidence
             val candidateLanguageAffinity = candidateLanguage?.let { listenerAffinity[it] } ?: 0.0
             if (candidateLanguageAffinity > 0.0) {
-                c.score *= 1 + LANGUAGE_AFFINITY_BOOST * candidateLanguageAffinity
+                c.score *= 1 + LANGUAGE_AFFINITY_BOOST * candidateLanguageAffinity * confidence
             }
             if (!preferredContentLanguage.isNullOrBlank() &&
                 candidateLanguage != null &&
                 candidateLanguage.equals(preferredContentLanguage, ignoreCase = true)
             ) {
-                c.score *= 1 + PREFERRED_LANGUAGE_BOOST
+                c.score *= 1 + PREFERRED_LANGUAGE_BOOST * confidence
             }
             c.score *= timeOfDayVibeMultiplier(c.title, c.artistDisplay, hourOfDay)
 
@@ -660,9 +891,17 @@ object Recommender {
         }
 
         // 4. Daily Vibe / Language Cluster Mixes (when sufficient distinct candidates exist)
-        val topLanguages = (listOfNotNull(preferredContentLanguage) + listenerAffinity.entries.sortedByDescending { it.value }.map { it.key }).distinct()
-        for (lang in topLanguages.take(2)) {
-            val langPool = everything.filter { languageOf(it.title, it.artistDisplay) == lang }
+        val topLanguages = (
+            listOfNotNull(preferredContentLanguage) +
+                listenerAffinity.entries
+                    .filter { it.value >= 0.12 }
+                    .sortedByDescending { it.value }
+                    .map { it.key }
+            ).distinct()
+        for (lang in topLanguages.take(3)) {
+            val langPool = everything.filter {
+                (it.inferredLanguage ?: resolveLanguage(it.videoId, it.title, it.artistDisplay, languageOverrides)) == lang
+            }
             val langPicked = diversifyMMR(langPool, 22, maxPerArtist = 3)
             if (langPicked.size >= 8) {
                 mixes.add(
@@ -676,7 +915,6 @@ object Recommender {
             }
         }
 
-        val seedTitles = activeSeeds.mapNotNull { meta[it]?.title?.takeIf { t -> t.isNotEmpty() } }
         return Pair(mixes, seedTitles)
     }
 }

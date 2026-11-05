@@ -59,13 +59,20 @@ class YouTubeMusicSource @Inject constructor(
     private fun List<ShelfItem>.filterExplicitItemsIfNeeded(): List<ShelfItem> =
         if (appSettings.state.value.hideExplicit) filterNot { it is ShelfTrack && it.value.explicit } else this
 
-    override suspend fun search(query: String, type: SearchType?): MusicResult<SearchResponse> = guarded {
+    override suspend fun search(query: String, type: SearchType?): MusicResult<SearchResponse> =
+        search(query, type, forceRefresh = false)
+
+    override suspend fun search(
+        query: String,
+        type: SearchType?,
+        forceRefresh: Boolean
+    ): MusicResult<SearchResponse> = guarded {
         require(query.isNotBlank()) { "Enter a search term." }
         val normalizedQuery = normalizeQuery(query)
         val kind = type?.name?.lowercase(Locale.ROOT)
         val key = "search:${normalizedQuery.lowercase(Locale.ROOT)}:$kind:${localeSuffix()}"
 
-        val cached = cache.get<SearchResponse>(key)
+        val cached = if (forceRefresh) null else cache.get<SearchResponse>(key)
         val res = if (cached != null) {
             cached
         } else {
@@ -134,8 +141,13 @@ class YouTubeMusicSource @Inject constructor(
         }
     }
 
-    override suspend fun related(videoId: String): MusicResult<List<Track>> = guarded {
-        val key = "related:$videoId:${localeSuffix()}"; (cache.get<List<Track>>(key) ?: run {
+    override suspend fun related(videoId: String): MusicResult<List<Track>> =
+        related(videoId, forceRefresh = false)
+
+    override suspend fun related(videoId: String, forceRefresh: Boolean): MusicResult<List<Track>> = guarded {
+        val key = "related:$videoId:${localeSuffix()}"
+        val cached = if (forceRefresh) null else cache.get<List<Track>>(key)
+        (cached ?: run {
             val radio = runCatching { innerTube.next(videoId, "RDAMVM$videoId") }.getOrElse { innerTube.next(videoId) }
             withContext(Dispatchers.Default) {
                 Parsers.tracks(radio, 50).filterNot { it.videoId == videoId }
@@ -174,7 +186,10 @@ class YouTubeMusicSource @Inject constructor(
         }.let { page -> page.copy(tracks = page.tracks.filterExplicitIfNeeded()) }
     }
 
-    override suspend fun home(): MusicResult<HomeResponse> = guarded {
+    override suspend fun home(): MusicResult<HomeResponse> =
+        home(forceRefresh = false)
+
+    override suspend fun home(forceRefresh: Boolean): MusicResult<HomeResponse> = guarded {
         val settings = appSettings.state.value
         val countryCode = settings.contentCountry.uppercase()
         val languageCode = settings.contentLanguage.lowercase()
@@ -182,7 +197,8 @@ class YouTubeMusicSource @Inject constructor(
         val languageName = LANGUAGE_NAMES[languageCode] ?: "Music"
         val poolKey = "home-pool:$countryCode:$languageCode"
 
-        val pool = cache.get<List<Shelf>>(poolKey) ?: coroutineScope {
+        val cachedPool = if (forceRefresh) null else cache.get<List<Shelf>>(poolKey)
+        val pool = cachedPool ?: coroutineScope {
             val concurrencyLimit = Semaphore(3)
             val endpoints = listOf("FEmusic_home", "FEmusic_explore", "FEmusic_charts", "FEmusic_new_releases")
             val browseDeferred = endpoints.map { endpoint ->
@@ -202,7 +218,7 @@ class YouTubeMusicSource @Inject constructor(
                 async(Dispatchers.IO) {
                     concurrencyLimit.withPermit {
                         withTimeoutOrNull(8_000L) {
-                            runCatching { fetchCuratedShelf(spec) }.getOrNull()
+                            runCatching { fetchCuratedShelf(spec, forceRefresh = forceRefresh) }.getOrNull()
                         }
                     }
                 }
@@ -242,8 +258,8 @@ class YouTubeMusicSource @Inject constructor(
         val type: SearchType?
     )
 
-    private suspend fun fetchCuratedShelf(spec: CuratedShelfSpec): Shelf? {
-        val result = (search(spec.query, spec.type) as? MusicResult.Success)?.value ?: return null
+    private suspend fun fetchCuratedShelf(spec: CuratedShelfSpec, forceRefresh: Boolean = false): Shelf? {
+        val result = (search(spec.query, spec.type, forceRefresh = forceRefresh) as? MusicResult.Success)?.value ?: return null
         val items: List<ShelfItem> = when (spec.type) {
             SearchType.SONG -> result.songs.take(16).map(::ShelfTrack) +
                 result.playlists.take(4).map(::ShelfCard)

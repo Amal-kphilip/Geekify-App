@@ -356,6 +356,83 @@ class RecommenderTest {
     fun TimeOfDayVibeMultiplierBoostsContextualTracks() {
         assertTrue(Recommender.timeOfDayVibeMultiplier("Late Night Lofi Chill", "Artist", 23) > 1.0)
         assertTrue(Recommender.timeOfDayVibeMultiplier("Party Dance Remix", "Artist", 19) > 1.0)
+        assertTrue(Recommender.timeOfDayVibeMultiplier("Neela Nilavu", "Artist", 23) > 1.0)
         assertEquals(1.0, Recommender.timeOfDayVibeMultiplier("Standard Track", "Artist", null), 0.001)
+    }
+
+    @Test
+    fun RomanizedRegionalTitlesAndArtistsAreDetectedInRecommender() {
+        assertEquals("Malayalam", Recommender.languageOf("Neela Nilave", "Kapil Kapilan"))
+        assertEquals("Malayalam", Recommender.languageOf("Illuminati", "Sushin Shyam, Dabzee"))
+        assertEquals("Tamil", Recommender.languageOf("Hukum", "Anirudh Ravichander"))
+        assertEquals("Hindi", Recommender.languageOf("Kesariya", "Pritam, Arijit Singh"))
+        assertEquals("Telugu", Recommender.languageOf("Samajavaragamana", "Thaman S"))
+        assertEquals("Punjabi", Recommender.languageOf("295", "Sidhu Moose Wala"))
+    }
+
+    @Test
+    fun MultiArtistCollaborationPrefersPrimaryComposerOverPolyglotSinger() {
+        assertEquals("Malayalam", Recommender.languageOf("Mystery Track", "Sushin Shyam, Shreya Ghoshal"))
+        assertEquals("Tamil", Recommender.languageOf("Mystery Track", "Anirudh Ravichander, Shreya Ghoshal"))
+        assertEquals("Telugu", Recommender.languageOf("Mystery Track", "Devi Sri Prasad, Sid Sriram"))
+    }
+
+    @Test
+    fun CandidateQualityFilterRejectsJunkAndDemotesGimmickUploads() {
+        assertEquals(0.0, Recommender.candidateQualityMultiplier("Song Ringtone Download", "Artist", 180), 0.001)
+        assertEquals(0.0, Recommender.candidateQualityMultiplier("Love Whatsapp Status Video", "Artist", 180), 0.001)
+        assertEquals(0.0, Recommender.candidateQualityMultiplier("Hit Track Karaoke", "Artist", 180), 0.001)
+        assertEquals(0.0, Recommender.candidateQualityMultiplier("Short Snippet", "Artist", 30), 0.001)
+        assertEquals(0.35, Recommender.candidateQualityMultiplier("Hit Song 8D Audio", "Artist", 200), 0.001)
+        assertEquals(0.35, Recommender.candidateQualityMultiplier("Best Songs Nonstop Jukebox", "Artist", 240), 0.001)
+        assertEquals(1.0, Recommender.candidateQualityMultiplier("Neela Nilave", "Sushin Shyam", 220), 0.001)
+    }
+
+    @Test
+    fun SeedClusterLanguagePropagationInfersLanguageForUntaggedCandidates() {
+        val liked = listOf(
+            Recommender.Signal("m1", "Sushin Shyam", "Neela Nilave"),
+            Recommender.Signal("m2", "Vineeth Sreenivasan", "Pavizha Mazha")
+        )
+        val related = mapOf(
+            "m1" to (1..10).map { i -> T("cand_$i", "Indie Band $i", "Track Number $i") },
+            "m2" to (1..10).map { i -> T("cand_$i", "Indie Band $i", "Track Number $i") }
+        )
+        val (mixes, _) = Recommender.buildMixes(
+            liked = liked,
+            recent = emptyList(),
+            related = related,
+            videoId = { it.id },
+            artist = { it.artist },
+            artistDisplay = { it.artist },
+            title = { it.title },
+            thumbs = { emptyList<Any>() },
+            duration = { null },
+            durationSeconds = { 200 },
+            explicit = { false },
+            type = { "song" },
+            seeds = listOf("m1", "m2"),
+            random = kotlin.random.Random(1)
+        )
+        // Because both seeds are Malayalam, untagged candidates inherit Malayalam via Layer 5 propagation
+        assertTrue(mixes.any { it.id == "daily-mix-malayalam" })
+    }
+
+    @Test
+    fun BlendAnchorTracksInterleavesFamiliarAndDiscoveryWithArtistCap() {
+        val discovery = (1..10).map { i -> T("disc_$i", "Discovery Artist $i", "New Song $i") }
+        val anchors = (1..5).map { i -> T("anch_$i", "Favorite Artist $i", "Beloved Song $i") }
+        val blended = Recommender.blendAnchorTracks(
+            discoveryTracks = discovery,
+            anchorCandidates = anchors,
+            videoId = { it.id },
+            artist = { it.artist },
+            targetCount = 12,
+            anchorInterval = 4
+        )
+        assertEquals(12, blended.size)
+        assertEquals("disc_1", blended[0].id)
+        assertEquals("anch_1", blended[1].id)
+        assertTrue(blended.count { it.id.startsWith("anch_") } in 3..4)
     }
 }

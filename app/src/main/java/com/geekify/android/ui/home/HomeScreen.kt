@@ -129,11 +129,14 @@ fun HomeScreen(
         }.getOrDefault(false)
     }
 
-    // Use stable item identities rather than only the non-empty flag.
+    // Use stable item identities and only jump to the initial loop midpoint when not yet positioned
+    // in the looping range, preventing a jarring snap when background mixes finish loading.
     val discoverKeys = discover.map { it.key }
-    LaunchedEffect(discoverKeys) {
+    LaunchedEffect(discoverKeys.size) {
         if (discoverKeys.size > 1) {
-            discoverListState.scrollToItem(initialDiscoverIndex)
+            if (discoverListState.firstVisibleItemIndex < discoverKeys.size) {
+                discoverListState.scrollToItem(initialDiscoverIndex)
+            }
         } else if (discoverKeys.isNotEmpty()) {
             discoverListState.scrollToItem(0)
         }

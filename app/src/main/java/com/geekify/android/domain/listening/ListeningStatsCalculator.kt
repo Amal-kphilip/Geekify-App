@@ -42,73 +42,158 @@ object ListeningLanguageClassifier {
         val anchors: Set<String> = emptySet(),
         val strongWords: Set<String> = emptySet(),
         val supportingWords: Set<String> = emptySet(),
-        val anchorPhrases: Set<String> = emptySet()
+        val anchorPhrases: Set<String> = emptySet(),
+        val morphSuffixes: Set<String> = emptySet(),
+        val morphSubstrings: Set<String> = emptySet()
     )
 
     /*
-     * These are clues, not a translation model. Anchor terms/phrases are uncommon
-     * enough to stand on their own; broader words need multiple matching signals.
+     * Layer 3: Expanded Romanized vocabulary + phonetic/morphological rules.
+     * Anchor terms/phrases are distinctive enough to classify 1-2 word titles on their own;
+     * morphological suffixes/roots and broader words combine to reach the threshold.
      */
     private val romanizedRules = listOf(
         RomanizedRule(
             "Malayalam",
-            anchors = setOf("mazha", "pavizha", "aaromale", "chembakame", "khalbile", "mizhiyil", "pulari", "nilave"),
-            strongWords = setOf("njan", "ente", "ninte", "mazhayil", "manass", "engane", "evide", "cheyyum", "raave", "malare", "ormakal", "azhake", "ninakku", "kiliye"),
-            supportingWords = setOf("alle", "aane", "aanu", "nammal", "ningal", "chechi", "chetta", "pinne", "ivide", "enthe", "poove"),
-            anchorPhrases = setOf("pavizha mazha", "ente nenjil", "malayalam song")
+            anchors = setOf(
+                "mazha", "pavizha", "aaromale", "chembakame", "khalbile", "mizhiyil", "pulari", "nilave",
+                "malare", "uyiril", "thodum", "kinavu", "kanavu", "pranayam", "sneham", "ormakal",
+                "azhake", "nenjil", "koode", "neela", "parayathe", "ariyathe", "kuttanadan", "chempoove",
+                "alliyambal", "harimuraleeravam", "entammede", "jimikki", "kammal", "kalakkatha",
+                "darshana", "puthiyoru", "aavesham", "illuminati", "armadham", "jaada", "kuthanthram",
+                "nebulakal", "cherathukal", "kumbalangi", "premam", "manjummel", "parava", "uyare",
+                "bheeshma", "romancham", "aadujeevitham", "periyone", "maharani", "pookkal", "vennilave",
+                "minungum", "mizhikal", "hridayam", "onakka", "munthiri", "kizhakku", "pookkale",
+                "enthu", "parayamo", "kanmani", "mizhi", "ormayil", "premalu", "mini", "lokam"
+            ),
+            strongWords = setOf(
+                "njan", "ente", "ninte", "mazhayil", "manass", "engane", "evide", "cheyyum", "raave",
+                "ninakku", "kiliye", "ullil", "thoomani", "poove", "raavu", "pularumo", "mizhikalil",
+                "kanavukal", "pranayame", "snehame", "nenjile", "parayu", "ariyum", "kaattu", "melle",
+                "innale", "innu", "naale", "karale", "ponne", "muthe", "vave", "kunjade", "thottu",
+                "koodu", "theeram", "doore", "chaare", "raavil"
+            ),
+            supportingWords = setOf(
+                "alle", "aane", "aanu", "nammal", "ningal", "chechi", "chetta", "pinne", "ivide",
+                "enthe", "oru", "njaan", "ini", "ippo", "appo"
+            ),
+            anchorPhrases = setOf(
+                "pavizha mazha", "ente nenjil", "malayalam song", "neela nilave", "onakka munthiri",
+                "jimikki kammal", "kuttanadan punchayile"
+            ),
+            morphSuffixes = setOf("kkal", "ukal", "athe", "azha", "uzha", "inte", "allo", "umbol"),
+            morphSubstrings = setOf("khal", "mizh", "pular", "kanav", "pranay", "sneh", "ullil", "nenj", "koode", "paray", "thoom", "neel", "poov", "raav", "mazh")
         ),
         RomanizedRule(
             "Tamil",
-            anchors = setOf("kuthu", "kuththu", "thalaiva", "thalapathy", "tamizh", "ennadi", "azhagiya", "nenjukkul", "peidhidum", "vaazhkai"),
-            strongWords = setOf("enakku", "unakku", "kadhal", "kaadhal", "uyire", "vizhiyil", "vaadi", "sollu", "machi", "machan", "ponnu", "thamizha", "poda", "podi", "thirudi"),
-            supportingWords = setOf("anbe", "naan", "nee", "enna", "kanna", "paattu", "amma", "appa"),
-            anchorPhrases = setOf("arabic kuthu", "why this kolaveri", "tamil song")
+            anchors = setOf(
+                "kuthu", "kuththu", "thalaiva", "thalapathy", "tamizh", "ennadi", "azhagiya", "nenjukkul",
+                "peidhidum", "vaazhkai", "uyire", "kadhale", "kaadhale", "thendral", "minnale", "vaazhga",
+                "paravai", "mutham", "hukum", "vaathi", "kaavaalaa", "kolaveri", "vikram", "pathala",
+                "ponniyin", "selvan", "mallipoo", "rakita", "chellamma", "mayakkama", "maruvaarthai",
+                "kurumugil", "thaensudare", "achacho", "katchi", "verithanam", "aaluma", "doluma",
+                "sodakku", "dippam", "dappam", "usure", "pogudhey", "munbe", "nagaram", "kannana",
+                "kanne", "ennai", "konjam", "maattram", "senjitaley", "rowdy", "kutty", "jailer"
+            ),
+            strongWords = setOf(
+                "enakku", "unakku", "kadhal", "kaadhal", "vizhiyil", "vaadi", "sollu", "machi", "machan",
+                "ponnu", "thamizha", "poda", "podi", "thirudi", "anbe", "nenje", "vizhi", "azhagu",
+                "azhage", "kanna", "vaanam", "megam", "mazhai", "iravu", "nilavu", "urave", "uyir",
+                "kaatru", "idhayam", "nenjam"
+            ),
+            supportingWords = setOf("naan", "nee", "enna", "paattu", "amma", "appa", "indha", "andha", "idhu", "adhu", "innum"),
+            anchorPhrases = setOf("arabic kuthu", "why this kolaveri", "tamil song", "vaathi coming", "katchi sera", "kannana kanne"),
+            morphSuffixes = setOf("gal", "inai", "aiye", "aal", "ukkul", "adhey", "athey"),
+            morphSubstrings = setOf("uyir", "kadh", "kaadh", "vizh", "kanman", "thendr", "vaazh", "azhag", "mutham")
         ),
         RomanizedRule(
             "Telugu",
-            anchors = setOf("nuvvu", "nuvve", "naatu", "naatu", "vellipomaakey", "choopultho", "baagundi", "kannulalo"),
-            strongWords = setOf("neeku", "naaku", "ninnu", "vachave", "andham", "manasu", "telugu", "preminchana", "yedalo", "pillaga"),
-            supportingWords = setOf("prema", "pilla", "chala", "raave", "nenu", "ammaye", "naa"),
-            anchorPhrases = setOf("naatu naatu", "telugu song")
+            anchors = setOf(
+                "nuvvu", "nuvve", "naatu", "vellipomaakey", "choopultho", "baagundi", "kannulalo",
+                "srivalli", "buttabomma", "samajavaragamana", "ramuloo", "ramulaa", "antava", "saami",
+                "inkem", "kaavaale", "vachinde", "priyathama", "manohari", "kumkumala", "kurchi",
+                "madathapetti", "chuttamalle", "devara", "pushpa", "pillaga", "ammayi", "abbayi",
+                "chandamama", "preminchana", "mindblock", "ulavacharu", "bujji", "peniviti"
+            ),
+            strongWords = setOf(
+                "neeku", "naaku", "ninnu", "vachave", "andham", "manasu", "telugu", "yedalo", "prema",
+                "pilla", "chala", "nenu", "ammaye", "kannulu", "chiru", "navvu", "velugu", "gunde", "cheliya"
+            ),
+            supportingWords = setOf("naa", "oka", "inka", "ela", "enti"),
+            anchorPhrases = setOf("naatu naatu", "telugu song", "oo antava", "saami saami", "kurchi madathapetti"),
+            morphSuffixes = setOf("vuga", "lalo", "thoti"),
+            morphSubstrings = setOf("nuvv", "neek", "naak", "manas", "andh", "kannul", "preminch", "ammay", "chinni", "butta", "pillag")
         ),
         RomanizedRule(
             "Kannada",
-            anchors = setOf("jotheyali", "belageddu", "kannadathi", "hudugi", "preethi", "maduve"),
-            strongWords = setOf("kannada", "ninna", "naanu", "neenu", "banni", "illi", "yenagali", "magale", "hoovu"),
+            anchors = setOf(
+                "jotheyali", "belageddu", "kannadathi", "hudugi", "preethi", "maduve", "mungaru",
+                "helutaithe", "singara", "siriye", "kantara", "tagaru", "raajakumara", "karabuu",
+                "bekagide", "usire", "geleya", "gelathi", "bombe"
+            ),
+            strongWords = setOf("kannada", "ninna", "naanu", "neenu", "banni", "illi", "yenagali", "magale", "hoovu", "hrudaya", "kanasu"),
             supportingWords = setOf("nanna", "ondu", "yenu", "nodu", "maatu", "maadu", "jeeva"),
-            anchorPhrases = setOf("kannada song")
+            anchorPhrases = setOf("kannada song", "singara siriye", "bombe helutaithe")
         ),
         RomanizedRule(
             "Hindi",
-            anchors = setOf("pyaar", "pyar", "ishq", "zindagi", "chahiye", "raabta", "dhadkan", "aashiqui", "bekhayali", "kesariya", "humsafar", "bepanah", "sajde", "khuda"),
-            strongWords = setOf("tumse", "tumhara", "tumhari", "deewani", "deewana", "mohabbat", "jaane", "jeena", "jeene", "sanam", "sajna", "piya", "khamosh", "duniya"),
-            supportingWords = setOf("tum", "tumhe", "mera", "meri", "mere", "tera", "teri", "tere", "hai", "hain", "hoon", "nahi", "nahin", "kya", "kyun", "dil", "jaan", "rang", "saath"),
-            anchorPhrases = setOf("tum hi ho", "tere liye", "dil se", "channa mereya", "hindi song")
+            anchors = setOf(
+                "pyaar", "pyar", "ishq", "zindagi", "chahiye", "raabta", "dhadkan", "aashiqui",
+                "bekhayali", "kesariya", "humsafar", "bepanah", "sajde", "khuda", "mohabbat",
+                "deewana", "deewani", "channa", "mereya", "shayad", "raataan", "lambiyan",
+                "pasoori", "chaleya", "satranga", "heeriye", "kabira", "ilahi", "gerua",
+                "hawayein", "kalank", "khairiyat", "kamleya", "baarishein", "fitoor", "mehrama",
+                "qaafirana", "naina", "husn", "bulleya", "ae", "dil", "mushkil", "zaalima",
+                "mast", "magan", "subhanallah", "agar", "saath", "tum", "hi", "ho"
+            ),
+            strongWords = setOf(
+                "tumse", "tumhara", "tumhari", "jaane", "jeena", "jeene", "sanam", "sajna", "piya",
+                "khamosh", "duniya", "khwab", "khwaab", "nain", "saans", "saansein", "baat", "baatein",
+                "raat", "raatein", "yaad", "yaadein", "rab", "rabba", "tere", "mere", "tumhe",
+                "mera", "meri", "teri", "suhana", "safar", "manzil", "sitare", "chaand", "subah",
+                "shaam", "lamhe", "apna"
+            ),
+            supportingWords = setOf(
+                "hai", "hain", "hoon", "nahi", "nahin", "kya", "kyun", "jaan", "rang",
+                "aur", "ek", "hum", "toh", "woh", "yeh", "mein"
+            ),
+            anchorPhrases = setOf(
+                "tum hi ho", "tere liye", "dil se", "channa mereya", "hindi song", "apna bana le",
+                "raataan lambiyan", "tere vaaste", "kal ho naa ho", "kal ho na ho", "agar tum saath ho"
+            ),
+            morphSuffixes = setOf("iyan", "iyaan"),
+            morphSubstrings = setOf("khw", "pyaar", "ishq", "mohabb", "zindag", "dhadk", "aashiq", "humsaf", "sajd", "deewan", "chann")
         ),
         RomanizedRule(
             "Punjabi",
-            anchors = setOf("gabru", "kudi", "munde", "mitran", "sohni", "patola", "launglaachi", "bhangra", "gidda", "jatt", "jatta", "vail", "punjabi"),
-            strongWords = setOf("sardar", "pind", "jind", "koka", "maahi", "sohnea", "chakde", "naal"),
-            supportingWords = setOf("ve", "ni", "balle", "sajna", "tere", "gora"),
-            anchorPhrases = setOf("punjabi song", "laung laachi")
+            anchors = setOf(
+                "gabru", "kudi", "kudiye", "munde", "mundeya", "mitran", "sohni", "sohneya", "patola",
+                "launglaachi", "bhangra", "gidda", "jatt", "jatta", "vail", "vailpuna", "punjabi",
+                "chobbar", "pind", "lehenga", "koka", "galwakdi", "qismat", "lalkara", "bandook",
+                "velly", "sardaar", "sardari", "akhiyan", "phulkari", "paranda", "kangna", "jhanjar"
+            ),
+            strongWords = setOf("sardar", "jind", "maahi", "sohnea", "chakde", "naal", "yaaran", "yaari", "mahiya", "dholna", "beliya", "ranjha"),
+            supportingWords = setOf("ve", "ni", "balle", "sajna", "gora", "oye", "tenu", "mainu", "assi", "tussi", "sadda", "vich"),
+            anchorPhrases = setOf("punjabi song", "laung laachi", "brown munde", "suit punjabi"),
+            morphSubstrings = setOf("jatt", "mund", "kudi", "gabr", "vail", "chobb", "patol", "bhangr")
         ),
         RomanizedRule(
             "Bengali",
-            anchors = setOf("bhalobasha", "bhalobashi", "brishti", "shudhu", "bojhena", "kothay", "bangla", "bengali", "chokh"),
+            anchors = setOf("bhalobasha", "bhalobashi", "brishti", "shudhu", "bojhena", "kothay", "bangla", "bengali", "chokh", "prithibi", "tomake", "amake"),
             strongWords = setOf("tumi", "ami", "amar", "tomar", "bhalo", "kemon", "jibon", "moner", "priyo", "shona", "ekla"),
             supportingWords = setOf("mon", "toke", "batashe"),
             anchorPhrases = setOf("bengali song", "bangla gaan")
         ),
         RomanizedRule(
             "Marathi",
-            anchors = setOf("majha", "majhi", "majhya", "marathi", "tuza", "tuzi", "manat", "manala"),
+            anchors = setOf("majha", "majhi", "majhya", "marathi", "tuza", "tuzi", "manat", "manala", "zingaat", "apsara"),
             strongWords = setOf("tula", "mala", "aahe", "ahe", "gaani", "sundara", "saajani"),
-            supportingWords = setOf("mi", "tu", "kay", "rani"),
+            supportingWords = setOf("mi", "kay", "rani"),
             anchorPhrases = setOf("marathi song")
         ),
         RomanizedRule(
             "Gujarati",
-            anchors = setOf("gujarati", "kemcho", "dikri", "chokri", "garba", "gujju"),
+            anchors = setOf("gujarati", "kemcho", "dikri", "chokri", "garba", "gujju", "khalasi", "vhalam"),
             strongWords = setOf("tame", "mane", "tari", "maru", "chhe"),
             supportingWords = setOf("tara", "prem"),
             anchorPhrases = setOf("kem cho", "gujarati song")
@@ -122,24 +207,24 @@ object ListeningLanguageClassifier {
         ),
         RomanizedRule(
             "Korean",
-            anchors = setOf("saranghae", "annyeong", "gomawo", "eotteoke", "mianhae", "gwiyeowo", "jinjja"),
+            anchors = setOf("saranghae", "annyeong", "gomawo", "eotteoke", "mianhae", "gwiyeowo", "jinjja", "bangtan", "hallyu", "daebak"),
             strongWords = setOf("neomu", "chingu", "unnie", "oppa", "sarang"),
             supportingWords = setOf("uri", "bogo", "geurae"),
-            anchorPhrases = setOf("korean song")
+            anchorPhrases = setOf("korean song", "k pop")
         ),
         RomanizedRule(
             "Japanese",
-            anchors = setOf("arigatou", "arigato", "sayonara", "daisuki", "yoroshiku", "watashi"),
-            strongWords = setOf("kokoro", "kawaii", "sekai", "yume"),
-            supportingWords = setOf("kimi", "boku", "sakura"),
-            anchorPhrases = setOf("japanese song")
+            anchors = setOf("arigatou", "arigato", "sayonara", "daisuki", "yoroshiku", "watashi", "shinunoga", "wa", "kaikai", "kitan", "gurenge", "unravel"),
+            strongWords = setOf("kokoro", "kawaii", "sekai", "yume", "hikari", "yoru", "kaze"),
+            supportingWords = setOf("kimi", "boku", "sakura", "aoi"),
+            anchorPhrases = setOf("japanese song", "shinunoga e wa")
         ),
         RomanizedRule(
             "Spanish",
-            anchors = setOf("despacito", "bailando", "besame", "corazon"),
-            strongWords = setOf("cancion", "bailar", "quiero", "amor", "noche", "vida"),
-            supportingWords = setOf("para", "con", "mi", "tu", "yo", "te"),
-            anchorPhrases = setOf("te quiero", "mi vida", "corazon partio", "spanish song")
+            anchors = setOf("despacito", "bailando", "besame", "corazon", "gasolina", "dembow", "perreo", "mamacita", "regueton", "reggaeton"),
+            strongWords = setOf("cancion", "bailar", "quiero", "amor", "noche", "vida", "caliente", "corazon", "bonita", "loco", "fuego"),
+            supportingWords = setOf("para", "con", "yo", "te", "como", "pero", "mas", "todo"),
+            anchorPhrases = setOf("te quiero", "mi vida", "corazon partio", "spanish song", "besame mucho")
         ),
         RomanizedRule(
             "English",
@@ -147,6 +232,128 @@ object ListeningLanguageClassifier {
             supportingWords = setOf("the", "you", "your", "with", "from", "are", "we", "me", "my", "what", "where", "when", "why", "how", "never", "can", "not", "dont", "cant", "ill", "im", "its", "in", "on", "of", "to", "for", "and", "but", "if", "like", "this", "that", "all", "one", "more"),
             anchorPhrases = setOf("stand by me", "let it be", "shape of you", "love me like you do", "someone like you", "what makes you beautiful", "take me home", "we are the champions", "english song")
         )
+    )
+
+    /*
+     * Layer 4: Curated Artist, Composer & Label Language Taxonomy.
+     * Primary anchors (composers, music directors, monolingual artists, regional labels) take precedence
+     * over polyglot playback singers (e.g., Shreya Ghoshal, Sid Sriram, Chithra, Yesudas, SPB, Haricharan)
+     * when both appear on a collaboration credit.
+     */
+    private val primaryArtistTaxonomy: Map<String, String> = buildMap {
+        fun register(language: String, vararg names: String) {
+            names.forEach { put(it, language) }
+        }
+        register(
+            "Malayalam",
+            "sushin shyam", "jakes bejoy", "gopi sundar", "shaan rahman", "rex vijayan", "vidyasagar",
+            "vineeth sreenivasan", "sithara krishnakumar", "kapil kapilan", "dabzee", "fejo", "vedan",
+            "job kurian", "hesham abdul wahab", "govind vasantha", "thaikkudam bridge", "neha nair",
+            "bijibal", "ouseppachan", "m jayachandran", "ks harisankar", "k s harisankar", "najim arshad",
+            "sooraj santhosh", "sachin warrier", "shahabaz aman", "masala coffee", "avial", "agam",
+            "muzik247", "think music malayalam", "manorama music", "satyam audios", "goodwill entertainments",
+            "christo xavier", "vishnu vijay", "justin varghese", "kailas menon", "rahul raj", "deepak dev",
+            "alphons joseph", "m g sreekumar", "mg sreekumar", "sujatha mohan", "madhu balakrishnan",
+            "anne amie", "gouri lakshmi", "hanan shaah"
+        )
+        register(
+            "Tamil",
+            "anirudh ravichander", "anirudh", "a r rahman", "ar rahman", "ilaiyaraaja", "ilayaraja",
+            "yuvan shankar raja", "harris jayaraj", "santhosh narayanan", "g v prakash kumar", "gv prakash",
+            "sean roldan", "d imman", "hiphop tamizha", "nivas k prasanna", "sam c s", "sam cs",
+            "ghibran", "leon james", "darbuka siva", "vivek mervin", "chinmayi", "dhanush",
+            "silambarasan tr", "sony music south", "think music india", "vijay antony", "srikanth deva",
+            "harish raghavendra", "naresh iyer", "saindhavi", "shakthisree gopalan", "dhee", "arivu",
+            "paal dabba", "asal kolar", "ofro"
+        )
+        register(
+            "Hindi",
+            "arijit singh", "pritam", "vishal shekhar", "amit trivedi", "atif aslam", "kk",
+            "jubin nautiyal", "badshah", "sachin jigar", "mithoon", "vishal mishra", "darshan raval",
+            "anuv jain", "prateek kuhad", "shankar ehsaan loy", "salim sulaiman", "mohit chauhan",
+            "sonu nigam", "neha kakkar", "sunidhi chauhan", "armaan malik", "amaal mallik",
+            "tanishk bagchi", "rochak kohli", "b praak", "jaani", "yo yo honey singh", "honey singh",
+            "raftaar", "krsna", "seedhe maut", "divine", "t series", "zee music company",
+            "sony music india", "saregama", "alka yagnik", "udit narayan", "kumar sanu", "kishore kumar",
+            "lata mangeshkar", "asha bhosle", "mohammed rafi", "javed ali", "shaan", "himesh reshammiya",
+            "ankit tiwari", "jeet gannguli", "papon", "rekha bhardwaj", "shilpa rao", "asees kaur",
+            "jasleen royal", "sachet tandon", "parampara tandon", "sachet parampara", "the local train",
+            "when chai met toast", "varun jain"
+        )
+        register(
+            "Telugu",
+            "devi sri prasad", "dsp", "thaman s", "s thaman", "m m keeravani", "mm keeravani",
+            "mickey j meyer", "mani sharma", "ram miriyala", "mangli", "anurag kulkarni",
+            "kaala bhairava", "rahul sipligunj", "sri krishna", "geetha madhuri", "aditya music",
+            "lahari music", "chaitan bharadwaj", "bheems ceciroleo"
+        )
+        register(
+            "Punjabi",
+            "diljit dosanjh", "ap dhillon", "karan aujla", "sidhu moose wala", "shubh", "gurinder gill",
+            "harrdy sandhu", "amrinder gill", "gurdas maan", "satinder sartaaj", "ammy virk",
+            "jassie gill", "parmish verma", "mankirt aulakh", "sharry mann", "speed records",
+            "white hill music", "jass manak", "gurnam bhullar", "nimrat khaira", "sunanda sharma",
+            "baani sandhu", "prem dhillon", "arjan dhillon", "talwiinder", "ikky", "tarsem jassar",
+            "kulwinder billa", "ranjit bawa", "babbu maan", "bohemia", "imran khan", "prophec",
+            "pav dharia", "gippy grewal", "garry sandhu", "jasmine sandlas"
+        )
+        register(
+            "Kannada",
+            "arjun janya", "b ajaneesh loknath", "ajaneesh loknath", "charan raj", "raghu dixit",
+            "sanjith hegde", "vasuki vaibhav", "chandan shetty", "anand audio", "prk audio",
+            "v harikrishna", "gurukiran", "hamsalekha", "rajesh krishnan", "vijay prakash"
+        )
+        register(
+            "Bengali",
+            "anupam roy", "arnob", "fossils", "rupam islam", "nachiketa", "anjan dutt", "svf music"
+        )
+        register(
+            "Korean",
+            "bts", "bangtan boys", "blackpink", "newjeans", "twice", "stray kids", "seventeen", "exo",
+            "iu", "jung kook", "jungkook", "le sserafim", "aespa", "ive", "itzy", "tomorrow x together",
+            "enhypen", "ateez", "nct", "red velvet", "bigbang", "psy", "babymonster", "illit",
+            "kiss of life", "mamamoo", "monsta x", "got7", "shinee", "super junior"
+        )
+        register(
+            "Japanese",
+            "yoasobi", "kenshi yonezu", "fujii kaze", "radwimps", "ado", "aimer", "vaundy",
+            "official hige dandism", "king gnu", "mrs green apple", "one ok rock", "creepy nuts",
+            "yorushika", "zutomayo", "imase", "tatsuya kitani", "hikaru utada"
+        )
+        register(
+            "Spanish",
+            "bad bunny", "karol g", "peso pluma", "feid", "daddy yankee", "j balvin", "rosalia",
+            "shakira", "maluma", "ozuna", "rauw alejandro", "anuel aa", "myke towers", "bizarrap",
+            "quevedo", "nicky jam", "farruko", "romeo santos", "aventura", "marc anthony",
+            "enrique iglesias", "luis fonsi", "sebastian yatra", "camilo", "becky g", "kali uchis",
+            "fuerza regida", "grupo frontera", "junior h", "natanael cano", "luis miguel"
+        )
+    }
+
+    private val polyglotPlaybackSingers: Map<String, String> = mapOf(
+        "shreya ghoshal" to "Hindi",
+        "sid sriram" to "Tamil",
+        "k s chithra" to "Malayalam",
+        "ks chithra" to "Malayalam",
+        "chithra" to "Malayalam",
+        "k j yesudas" to "Malayalam",
+        "kj yesudas" to "Malayalam",
+        "yesudas" to "Malayalam",
+        "s p balasubrahmanyam" to "Tamil",
+        "sp balasubrahmanyam" to "Tamil",
+        "spb" to "Tamil",
+        "vijay yesudas" to "Malayalam",
+        "karthik" to "Tamil",
+        "haricharan" to "Tamil",
+        "haricharan seshadri" to "Tamil",
+        "shweta mohan" to "Malayalam",
+        "jonita gandhi" to "Hindi",
+        "benny dayal" to "Hindi",
+        "nakash aziz" to "Hindi",
+        "pradeep kumar" to "Tamil",
+        "shankar mahadevan" to "Hindi",
+        "hariharan" to "Hindi",
+        "kailash kher" to "Hindi"
     )
 
     private val languageAliases = linkedMapOf(
@@ -176,14 +383,19 @@ object ListeningLanguageClassifier {
         val trackTitle = title.orEmpty().trim()
         val trackArtist = artist.orEmpty().trim()
 
+        // Layer 1: Explicit title / metadata language tags
         explicitLanguageTag(trackTitle)?.let { return it }
-        detectScript(trackTitle)?.let { return it }
 
-        // Prefer evidence from the song title over the artist's name: artists often
-        // perform in multiple languages, so their name alone must not label a song.
+        // Layer 2: Native Unicode script detection (title first, then artist)
+        detectScript(trackTitle)?.let { return it }
+        detectScript(trackArtist)?.let { return it }
+
+        val artistTaxonomyLang = resolveArtistLanguage(trackArtist)
+
+        // Layer 3: Upgraded Romanized lexical + phonetic morphology scoring
         val normalizedTitle = normalizeLatinText(trackTitle)
         if (normalizedTitle.isNotBlank()) {
-            val tokens = Regex("[a-z]+(?:'[a-z]+)?").findAll(normalizedTitle)
+            val tokens = Regex("[a-z0-9]+(?:'[a-z0-9]+)?").findAll(normalizedTitle)
                 .map { it.value.trim('\'') }
                 .filter { it.isNotBlank() }
                 .toSet()
@@ -196,6 +408,17 @@ object ListeningLanguageClassifier {
                 score += rule.anchorPhrases.count { phrase ->
                     Regex("(?:^|\\s)${Regex.escape(phrase)}(?:$|\\s)").containsMatchIn(normalizedTitle)
                 } * 4.0
+
+                val unmatchedTokens = tokens.filter { it.length >= 5 && it !in rule.anchors }
+                val morphHits = unmatchedTokens.count { token ->
+                    rule.morphSuffixes.any { suffix -> token.length > suffix.length + 2 && token.endsWith(suffix) } ||
+                        rule.morphSubstrings.any { sub -> token.contains(sub) }
+                }
+                score += morphHits * 2.0
+
+                if (artistTaxonomyLang != null && rule.language == artistTaxonomyLang && score >= 1.5) {
+                    score += 2.0
+                }
                 rule.language to score
             }.sortedByDescending { it.second }
 
@@ -204,12 +427,81 @@ object ListeningLanguageClassifier {
             if (best != null && best.second >= 3.5 && best.second - runnerUp >= 1.5) {
                 return best.first
             }
-            // An ambiguous Latin title is not made more certain by the artist's script.
+
+            // Layer 4: Curated Artist, Composer & Label Taxonomy fallback when title is not strongly another language
+            if (artistTaxonomyLang != null) {
+                return artistTaxonomyLang
+            }
+
             return "Latin script (language unclear)"
         }
 
-        detectScript(trackArtist)?.let { return it }
+        if (artistTaxonomyLang != null) return artistTaxonomyLang
         return if (trackArtist.any(Char::isLetter)) "Latin script (language unclear)" else "Unknown"
+    }
+
+    /**
+     * Resolves a track's language from artist/composer/label credits, giving precedence to
+     * primary language anchors (composers, music directors, monolingual acts, labels) over
+     * polyglot playback singers on multi-artist collaborations.
+     */
+    fun resolveArtistLanguage(artist: String?): String? {
+        if (artist.isNullOrBlank()) return null
+        val credits = artist
+            .split(Regex("(?i)\\s*(?:,|&|/|•|\\||;|\\bfeat\\.?\\b|\\bft\\.?\\b|\\bx\\b|\\bwith\\b)\\s*"))
+            .map { normalizeLatinText(it) }
+            .filter { it.isNotBlank() }
+
+        // Pass 1: Primary composer / artist / label anchors win on collaborations
+        for (credit in credits) {
+            primaryArtistTaxonomy[credit]?.let { return it }
+        }
+        val normalizedFull = normalizeLatinText(artist)
+        for ((knownName, lang) in primaryArtistTaxonomy) {
+            if (knownName.length >= 4 && Regex("(?:^|\\s)${Regex.escape(knownName)}(?:$|\\s)").containsMatchIn(normalizedFull)) {
+                return lang
+            }
+        }
+
+        // Pass 2: Polyglot playback singers (only when no primary anchor is present)
+        for (credit in credits) {
+            polyglotPlaybackSingers[credit]?.let { return it }
+        }
+        for ((singerName, lang) in polyglotPlaybackSingers) {
+            if (singerName.length >= 5 && Regex("(?:^|\\s)${Regex.escape(singerName)}(?:$|\\s)").containsMatchIn(normalizedFull)) {
+                return lang
+            }
+        }
+        return null
+    }
+
+    /**
+     * Maps the 5-layer classifier output into canonical recommender language tags.
+     * Generic English, Han-only, or uncertain Latin tracks return null so they are never
+     * treated as a regional language preference signal.
+     */
+    fun classifyForRecommender(title: String?, artist: String?): String? {
+        return normalizeRecommenderLanguage(classify(title, artist))
+    }
+
+    fun normalizeRecommenderLanguage(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        return when (raw.trim()) {
+            "Malayalam" -> "Malayalam"
+            "Tamil" -> "Tamil"
+            "Telugu" -> "Telugu"
+            "Kannada" -> "Kannada"
+            "Bengali" -> "Bengali"
+            "Gujarati" -> "Gujarati"
+            "Odia" -> "Odia"
+            "Punjabi", "Punjabi (Gurmukhi script)" -> "Punjabi"
+            "Hindi", "Devanagari (Hindi/Marathi etc.)" -> "Hindi"
+            "Marathi" -> "Marathi"
+            "Korean", "K-pop" -> "K-pop"
+            "Japanese" -> "Japanese"
+            "Spanish" -> "Spanish"
+            else -> null
+        }
     }
 
     private fun explicitLanguageTag(title: String): String? {

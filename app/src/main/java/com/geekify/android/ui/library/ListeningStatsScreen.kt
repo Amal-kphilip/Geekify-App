@@ -32,27 +32,73 @@ import androidx.lifecycle.viewModelScope
 import com.geekify.android.data.local.ListeningStatsRepository
 import com.geekify.android.domain.listening.DailyListeningTotal
 import com.geekify.android.domain.listening.DiscoveredArtist
+import com.geekify.android.domain.listening.ListeningLanguageClassifier
+import com.geekify.android.domain.listening.ListeningLanguageMetadataResolver
 import com.geekify.android.domain.listening.ListeningStatsCalculator
 import com.geekify.android.domain.listening.ListeningStatsSnapshot
 import com.geekify.android.ui.components.LocalBottomInset
 import com.geekify.android.ui.components.IosSettingsPageScaffold
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
 class ListeningStatsViewModel @Inject constructor(
-    repository: ListeningStatsRepository
+    repository: ListeningStatsRepository,
+    private val languageMetadataResolver: ListeningLanguageMetadataResolver
 ) : ViewModel() {
-    val stats: StateFlow<ListeningStatsSnapshot> = repository.observeSessions()
-        .map { rows -> ListeningStatsCalculator.calculate(rows) }
-        .stateIn(
-            viewModelScope,
-            SharingStarted.WhileSubscribed(5_000L),
-            ListeningStatsCalculator.calculate(emptyList())
-        )
+    private val languageOverrides = MutableStateFlow<Map<String, String>>(emptyMap())
+
+    val stats: StateFlow<ListeningStatsSnapshot> = combine(
+        repository.observeSessions().onEach { rows ->
+            resolveAmbiguousTrackLanguages(rows)
+        },
+        languageOverrides
+    ) { rows, overrides ->
+        ListeningStatsCalculator.calculate(rows, languageOverrides = overrides)
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000L),
+        ListeningStatsCalculator.calculate(emptyList())
+    )
+
+    private fun resolveAmbiguousTrackLanguages(rows: List<com.geekify.android.data.local.ListeningSessionEntity>) {
+        val currentOverrides = languageOverrides.value
+        val candidates = rows
+            .filter { it.listenedMs >= 10_000L && it.videoId !in currentOverrides }
+            .distinctBy { it.videoId }
+            .filter { session ->
+                val direct = ListeningLanguageClassifier.classify(session.title, session.artist)
+                direct == "Unknown" || direct.startsWith("Latin script")
+            }
+            .take(8)
+        if (candidates.isEmpty()) return
+        viewModelScope.launch {
+            val resolvedPairs = coroutineScope {
+                candidates.map { session ->
+                    async {
+                        val lang = languageMetadataResolver.resolve(
+                            title = session.title,
+                            artist = session.artist,
+                            durationMs = session.durationMs.takeIf { it > 0L } ?: session.listenedMs
+                        )
+                        if (!lang.isNullOrBlank()) session.videoId to lang else null
+                    }
+                }.awaitAll().filterNotNull()
+            }
+            if (resolvedPairs.isNotEmpty()) {
+                languageOverrides.value = languageOverrides.value + resolvedPairs.toMap()
+            }
+        }
+    }
 }
 
 private val statsChartColors = listOf(

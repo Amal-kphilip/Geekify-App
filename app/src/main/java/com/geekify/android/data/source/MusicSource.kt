@@ -9,11 +9,16 @@ sealed interface MusicResult<out T> {
 
 interface MusicSource {
     suspend fun search(query: String, type: SearchType? = null): MusicResult<SearchResponse>
+    suspend fun search(query: String, type: SearchType? = null, forceRefresh: Boolean): MusicResult<SearchResponse> =
+        search(query, type)
     suspend fun searchSuggestions(query: String): List<String> = emptyList()
     suspend fun searchContinuation(continuation: String): MusicResult<SearchResponse> = MusicResult.Failure("Continuation not supported")
     suspend fun track(videoId: String): MusicResult<Track>
     suspend fun related(videoId: String): MusicResult<List<Track>>
+    suspend fun related(videoId: String, forceRefresh: Boolean): MusicResult<List<Track>> =
+        related(videoId)
     suspend fun artist(channelId: String): MusicResult<ArtistPage>
     suspend fun collection(id: String, kind: CollectionKind): MusicResult<CollectionPage>
     suspend fun home(): MusicResult<HomeResponse>
+    suspend fun home(forceRefresh: Boolean): MusicResult<HomeResponse> = home()
 }

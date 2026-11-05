@@ -127,6 +127,16 @@ class ListeningStatsCalculatorTest {
         assertFalse(stats.hasData)
     }
 
+    @Test
+    fun `romanized regional morphology and artist taxonomy classify short titles accurately`() {
+        assertEquals("Malayalam", ListeningLanguageClassifier.classify("Neela Nilave", "Kapil Kapilan"))
+        assertEquals("Malayalam", ListeningLanguageClassifier.classify("Illuminati", "Sushin Shyam, Dabzee"))
+        assertEquals("Tamil", ListeningLanguageClassifier.classify("Hukum", "Anirudh Ravichander"))
+        assertEquals("Hindi", ListeningLanguageClassifier.classify("Kesariya", "Pritam, Arijit Singh"))
+        assertEquals("Telugu", ListeningLanguageClassifier.classify("Kurchi Madathapetti", "Thaman S"))
+        assertEquals("Punjabi", ListeningLanguageClassifier.classify("Softly", "Karan Aujla"))
+    }
+
     private fun session(
         id: String,
         videoId: String,
