@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17 and 21
         uses: actions/setup-java@v4
@@ -152,9 +154,49 @@ jobs:
           VERSIONED_SHA="${VERSIONED_APK}.sha256"
           LATEST_SHA="${LATEST_APK}.sha256"
 
-          # Create or resume draft release
+          # Create or resume draft release with structured release notes from git log
+          PREV_TAG="$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -Fxv "$TAG" | head -n 1 || true)"
+          if [[ -n "$PREV_TAG" ]]; then
+            COMMITS="$(git log "${PREV_TAG}..${TAG}" --no-merges --pretty=format:'%s' || true)"
+          else
+            COMMITS="$(git log -n 10 --no-merges --pretty=format:'%s' || true)"
+          fi
+
+          NOTES_FILE="$RUNNER_TEMP/release_notes.md"
+          {
+            echo "# Geekify ${TAG} - Release Notes"
+            echo ""
+            FEAT_LINES="$(printf '%s\n' "$COMMITS" | grep -iE '^feat(\([^)]+\))?:' | sed -E 's/^feat(\([^)]+\))?:[[:space:]]*/- /I' || true)"
+            FIX_LINES="$(printf '%s\n' "$COMMITS" | grep -iE '^fix(\([^)]+\))?:' | sed -E 's/^fix(\([^)]+\))?:[[:space:]]*/- /I' || true)"
+            OTHER_LINES="$(printf '%s\n' "$COMMITS" | grep -ivE '^(feat|fix)(\([^)]+\))?:' | sed -E 's/^[a-z]+(\([^)]+\))?:[[:space:]]*/- /I' | grep -v '^$' || true)"
+
+            if [[ -n "$FEAT_LINES" ]]; then
+              echo "### What's New"
+              echo "$FEAT_LINES"
+              echo ""
+            fi
+            if [[ -n "$OTHER_LINES" ]]; then
+              echo "### Improvements"
+              echo "$OTHER_LINES"
+              echo ""
+            fi
+            if [[ -n "$FIX_LINES" ]]; then
+              echo "### Bug Fixes"
+              echo "$FIX_LINES"
+              echo ""
+            fi
+            if [[ -n "$PREV_TAG" ]]; then
+              echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${TAG}"
+            fi
+          } > "$NOTES_FILE"
+
           if ! gh release view "$TAG" > /dev/null 2>&1; then
-            gh release create "$TAG" --draft --generate-notes
+            gh release create "$TAG" --draft --title "Geekify ${TAG}" --notes-file "$NOTES_FILE"
+          else
+            CURRENT_BODY="$(gh release view "$TAG" --json body --jq '.body' || true)"
+            if [[ -z "$CURRENT_BODY" || "$CURRENT_BODY" == "**Full Changelog**:"* ]]; then
+              gh release edit "$TAG" --title "Geekify ${TAG}" --notes-file "$NOTES_FILE"
+            fi
           fi
 
           # Upload only missing assets (idempotent on reruns)

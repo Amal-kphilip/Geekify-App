@@ -901,9 +901,27 @@ internal object UpdateMetadataParser {
         }
     }
 
+    private val plainSectionHeaderRegex = Regex(
+        """^(what'?s\s+new|new\s+features|features|highlights|improvements|performance\s*&\s*improvements|enhancements|bug\s*fixes|fixes|notes|release\s+notes):?$""",
+        RegexOption.IGNORE_CASE
+    )
+    private val releaseTitleBoilerplateRegex = Regex(
+        """^geekify\s+v?\d+\.\d+.*release\s+notes$""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private fun isBoilerplateMetadataLine(cleanedLine: String): Boolean {
+        if (cleanedLine.isEmpty()) return true
+        val lower = cleanedLine.lowercase(Locale.US)
+        return releaseTitleBoilerplateRegex.matches(cleanedLine) ||
+            lower.startsWith("release date:") ||
+            lower == "geekify team" ||
+            lower.startsWith("full changelog:")
+    }
+
     /**
      * Parses raw GitHub release markdown into structured, categorized [ChangelogSection]s.
-     * Filters out noisy commit hashes, full-changelog compare links, and SHA-256 lines.
+     * Filters out noisy commit hashes, full-changelog compare links, boilerplate headers, and SHA-256 lines.
      */
     fun parseChangelogSections(markdown: String): List<ChangelogSection> {
         val sections = mutableListOf<ChangelogSection>()
@@ -924,35 +942,41 @@ internal object UpdateMetadataParser {
 
         markdown.lines().forEach { rawLine ->
             val line = rawLine.trim()
+            val cleanedPlain = cleanInlineMarkdown(line)
             when {
                 line.isEmpty() || line.startsWith("---") -> Unit
                 line.startsWith("http://") || line.startsWith("https://") -> Unit
                 line.contains("Full Changelog", ignoreCase = true) && line.contains("compare/") -> Unit
                 line.startsWith("SHA-256", ignoreCase = true) || line.startsWith("SHA256", ignoreCase = true) -> Unit
+                isBoilerplateMetadataLine(cleanedPlain) -> Unit
                 line.startsWith("#") -> {
-                    flush()
                     val headingText = line.trimStart('#').trim().let(::cleanInlineMarkdown)
-                    if (headingText.isNotEmpty()) {
+                    if (headingText.isNotEmpty() && !isBoilerplateMetadataLine(headingText)) {
+                        flush()
                         currentTitle = headingText
                         currentCategory = categorizeHeading(headingText)
                     }
                 }
+                plainSectionHeaderRegex.matches(cleanedPlain) -> {
+                    flush()
+                    currentTitle = cleanedPlain.removeSuffix(":")
+                    currentCategory = categorizeHeading(currentTitle)
+                }
                 line.startsWith("- ") || line.startsWith("* ") || line.startsWith("• ") -> {
                     val cleaned = cleanInlineMarkdown(line.drop(2).trim())
-                    if (cleaned.isNotEmpty()) {
+                    if (cleaned.isNotEmpty() && !isBoilerplateMetadataLine(cleaned)) {
                         currentBullets += cleaned
                     }
                 }
                 line.matches(Regex("""^\d+\.\s+.*""")) -> {
                     val cleaned = cleanInlineMarkdown(line.substringAfter('.').trim())
-                    if (cleaned.isNotEmpty()) {
+                    if (cleaned.isNotEmpty() && !isBoilerplateMetadataLine(cleaned)) {
                         currentBullets += cleaned
                     }
                 }
                 else -> {
-                    val cleaned = cleanInlineMarkdown(line)
-                    if (cleaned.isNotEmpty() && !sha256Regex.matches(cleaned)) {
-                        currentBullets += cleaned
+                    if (cleanedPlain.isNotEmpty() && !sha256Regex.matches(cleanedPlain)) {
+                        currentBullets += cleanedPlain
                     }
                 }
             }

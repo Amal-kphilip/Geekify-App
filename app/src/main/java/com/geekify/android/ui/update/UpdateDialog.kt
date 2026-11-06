@@ -22,7 +22,9 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -88,7 +90,9 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
@@ -99,17 +103,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.geekify.android.R
+import com.geekify.android.ui.components.GeekifyDialog
 import com.geekify.android.ui.glass.rememberReducedMotion
 import com.geekify.android.ui.theme.InkBackground
 import com.geekify.android.ui.theme.InkElevated
+import com.geekify.android.ui.theme.InkGlass
+import com.geekify.android.ui.theme.InkGlassBorder
 import com.geekify.android.ui.theme.InkPanel
 import com.geekify.android.ui.theme.Lime
+import com.geekify.android.ui.theme.OnAccent
 import com.geekify.android.ui.theme.TextPrimary
 import com.geekify.android.ui.theme.TextSecondary
-import com.geekify.android.update.AvailableUpdate
 import com.geekify.android.update.ChangelogCategory
 import com.geekify.android.update.ChangelogSection
 import com.geekify.android.update.DownloadProgressSnapshot
@@ -124,9 +129,8 @@ import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-private val DarkBackground = InkBackground
-private val DarkSurface = InkPanel
-private val DarkCard = InkElevated
+private val DarkBackground = OnAccent
+private val DarkCard = Color.White.copy(alpha = 0.055f)
 
 /**
  * Legacy stage enum preserved for binary/source compatibility with any existing callers.
@@ -135,12 +139,7 @@ enum class UpdateStage { Available, Downloading, Ready, Installing }
 
 /**
  * Morphe Manager-inspired single-dialog application update experience tailored to Geekify's
- * dark surface and electric lime design system.
- *
- * The header and footer remain anchored while the central stage transitions smoothly across:
- * CHECKING -> UP_TO_DATE / UPDATE_AVAILABLE -> METERED_WARNING -> DOWNLOADING -> VERIFYING ->
- * READY_TO_INSTALL -> INSTALLING -> COMPLETED (plus DOWNLOAD_FAILED / VERIFY_FAILED /
- * INSTALL_FAILED / INSTALL_CANCELLED).
+ * midnight dark surface and electric lime design system.
  */
 @Composable
 fun UpdateDialog(
@@ -168,126 +167,87 @@ fun UpdateDialog(
         }
     }
 
-    Dialog(
+    GeekifyDialog(
         onDismissRequest = {
             if (canDismissOnBackOrOutside) {
                 onDismiss(false)
             }
         },
-        properties = DialogProperties(
-            dismissOnBackPress = canDismissOnBackOrOutside,
-            dismissOnClickOutside = canDismissOnBackOrOutside,
-            usePlatformDefaultWidth = false
-        )
+        dismissible = canDismissOnBackOrOutside
     ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 20.dp),
-            shape = RoundedCornerShape(30.dp),
-            color = DarkSurface,
-            tonalElevation = 12.dp,
-            shadowElevation = 28.dp
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Lime.copy(alpha = 0.13f),
-                                DarkSurface,
-                                DarkBackground
-                            )
-                        )
-                    )
-                    .border(
-                        width = 1.dp,
-                        brush = Brush.verticalGradient(
-                            colors = listOf(
-                                Lime.copy(alpha = 0.36f),
-                                Color.White.copy(alpha = 0.08f)
-                            )
-                        ),
-                        shape = RoundedCornerShape(30.dp)
-                    )
-                    .padding(horizontal = 22.dp, vertical = 20.dp)
-            ) {
-                // 1.ISTENT COORDINATED HEADER
-                UpdateDialogHeader(
+        // 1. CONSISTENT COORDINATED HEADER
+        UpdateDialogHeader(
+            uiState = uiState,
+            canClose = canDismissOnBackOrOutside,
+            onClose = { onDismiss(false) }
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        // 2. STAGE-DRIVEN CENTRAL CONTENT
+        AnimatedContent(
+            targetState = uiState.state,
+            contentKey = { it },
+            transitionSpec = {
+                (fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing)) +
+                    scaleIn(
+                        initialScale = 0.95f,
+                        animationSpec = tween(220, easing = FastOutSlowInEasing)
+                    )) togetherWith
+                    (fadeOut(animationSpec = tween(150, easing = FastOutSlowInEasing)) +
+                        scaleOut(
+                            targetScale = 0.96f,
+                            animationSpec = tween(150, easing = FastOutSlowInEasing)
+                        )) using SizeTransform(clip = false)
+            },
+            label = "UpdateCentralStageTransition",
+            modifier = Modifier.fillMaxWidth()
+        ) { stage ->
+            when (stage) {
+                UpdateState.CHECKING -> CheckingStageContent()
+                UpdateState.UP_TO_DATE -> UpToDateStageContent(
                     uiState = uiState,
-                    canClose = canDismissOnBackOrOutside,
-                    onClose = { onDismiss(false) }
+                    onToggleChangelogVersion = onToggleChangelogVersion
                 )
-
-                Spacer(Modifier.height(16.dp))
-
-                // 2. STAGE-DRIVEN CENTRAL CONTENT
-                AnimatedContent(
-                    targetState = uiState.state,
-                    contentKey = { it },
-                    transitionSpec = {
-                        (fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing)) +
-                            scaleIn(
-                                initialScale = 0.94f,
-                                animationSpec = tween(220, easing = FastOutSlowInEasing)
-                            )) togetherWith
-                            (fadeOut(animationSpec = tween(160, easing = FastOutSlowInEasing)) +
-                                scaleOut(
-                                    targetScale = 0.96f,
-                                    animationSpec = tween(160, easing = FastOutSlowInEasing)
-                                )) using SizeTransform(clip = false)
-                    },
-                    label = "UpdateCentralStageTransition",
-                    modifier = Modifier.fillMaxWidth()
-                ) { stage ->
-                    when (stage) {
-                        UpdateState.CHECKING -> CheckingStageContent()
-                        UpdateState.UP_TO_DATE -> UpToDateStageContent(
-                            uiState = uiState,
-                            onToggleChangelogVersion = onToggleChangelogVersion
-                        )
-                        UpdateState.UPDATE_AVAILABLE -> UpdateAvailableStageContent(
-                            uiState = uiState,
-                            onToggleChangelogVersion = onToggleChangelogVersion
-                        )
-                        UpdateState.METERED_WARNING -> MeteredWarningStageContent(uiState = uiState)
-                        UpdateState.DOWNLOADING -> DownloadingOrVerifyingStageContent(
-                            uiState = uiState,
-                            isVerifying = false
-                        )
-                        UpdateState.VERIFYING -> DownloadingOrVerifyingStageContent(
-                            uiState = uiState,
-                            isVerifying = true
-                        )
-                        UpdateState.READY_TO_INSTALL -> ReadyToInstallStageContent(uiState = uiState)
-                        UpdateState.INSTALLING -> InstallingStageContent(uiState = uiState)
-                        UpdateState.COMPLETED -> CompletedStageContent(
-                            uiState = uiState,
-                            onToggleChangelogVersion = onToggleChangelogVersion
-                        )
-                        UpdateState.DOWNLOAD_FAILED,
-                        UpdateState.VERIFY_FAILED,
-                        UpdateState.INSTALL_FAILED,
-                        UpdateState.INSTALL_CANCELLED -> ErrorOrCancelledStageContent(uiState = uiState)
-                    }
-                }
-
-                Spacer(Modifier.height(18.dp))
-
-                // 3. COORDINATED DYNAMIC FOOTER
-                UpdateDialogFooter(
+                UpdateState.UPDATE_AVAILABLE -> UpdateAvailableStageContent(
                     uiState = uiState,
-                    onStartDownload = onStartDownload,
-                    onConfirmMeteredDownload = onConfirmMeteredDownload,
-                    onCancelDownload = onCancelDownload,
-                    onInstall = onInstall,
-                    onRetryCheck = onRetryCheck,
-                    onOpenReleasePage = openReleasePage,
-                    onDismiss = onDismiss
+                    onToggleChangelogVersion = onToggleChangelogVersion
                 )
+                UpdateState.METERED_WARNING -> MeteredWarningStageContent(uiState = uiState)
+                UpdateState.DOWNLOADING -> DownloadingOrVerifyingStageContent(
+                    uiState = uiState,
+                    isVerifying = false
+                )
+                UpdateState.VERIFYING -> DownloadingOrVerifyingStageContent(
+                    uiState = uiState,
+                    isVerifying = true
+                )
+                UpdateState.READY_TO_INSTALL -> ReadyToInstallStageContent(uiState = uiState)
+                UpdateState.INSTALLING -> InstallingStageContent(uiState = uiState)
+                UpdateState.COMPLETED -> CompletedStageContent(
+                    uiState = uiState,
+                    onToggleChangelogVersion = onToggleChangelogVersion
+                )
+                UpdateState.DOWNLOAD_FAILED,
+                UpdateState.VERIFY_FAILED,
+                UpdateState.INSTALL_FAILED,
+                UpdateState.INSTALL_CANCELLED -> ErrorOrCancelledStageContent(uiState = uiState)
             }
         }
+
+        Spacer(Modifier.height(18.dp))
+
+        // 3. COORDINATED DYNAMIC FOOTER
+        UpdateDialogFooter(
+            uiState = uiState,
+            onStartDownload = onStartDownload,
+            onConfirmMeteredDownload = onConfirmMeteredDownload,
+            onCancelDownload = onCancelDownload,
+            onInstall = onInstall,
+            onRetryCheck = onRetryCheck,
+            onOpenReleasePage = openReleasePage,
+            onDismiss = onDismiss
+        )
     }
 }
 
@@ -331,74 +291,38 @@ private fun UpdateDialogHeader(
         }
     }
 
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Circular Geekify Brand Icon Container
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                Lime.copy(alpha = 0.28f),
-                                Lime.copy(alpha = 0.10f)
-                            )
-                        )
-                    )
-                    .border(1.dp, Lime.copy(alpha = 0.45f), CircleShape),
-                contentAlignment = Alignment.Center
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Actual Geekify App Icon Badge
+        GeekifyAppIconBadge(sizeDp = 46)
+
+        Spacer(Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                GeekifyBrandGlyph(modifier = Modifier.size(26.dp))
-            }
-
-            Spacer(Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Text(
+                    text = stringResource(R.string.update_app_name),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 1.5.sp
+                    ),
+                    color = Lime
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color.White.copy(alpha = 0.07f))
+                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = stringResource(R.string.update_app_name),
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = 1.6.sp
-                        ),
-                        color = Lime
-                    )
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(Color.White.copy(alpha = 0.07f))
-                            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(999.dp))
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = versionBadgeText,
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(2.dp))
-
-                AnimatedContent(
-                    targetState = stateTitle,
-                    transitionSpec = {
-                        fadeIn(tween(180)) togetherWith fadeOut(tween(120))
-                    },
-                    label = "HeaderStateTitleTransition"
-                ) { title ->
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold),
+                        text = versionBadgeText,
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                         color = TextPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -406,21 +330,45 @@ private fun UpdateDialogHeader(
                 }
             }
 
-            if (canClose) {
-                IconButton(
-                    onClick = onClose,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.06f))
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = stringResource(R.string.update_action_close),
-                        tint = TextSecondary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
+            Spacer(Modifier.height(3.dp))
+
+            AnimatedContent(
+                targetState = stateTitle,
+                transitionSpec = {
+                    fadeIn(tween(180)) togetherWith fadeOut(tween(120))
+                },
+                label = "HeaderStateTitleTransition"
+            ) { title ->
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontSize = 20.sp,
+                        lineHeight = 24.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    ),
+                    color = TextPrimary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        if (canClose) {
+            Spacer(Modifier.width(8.dp))
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.07f))
+                    .border(1.dp, Color.White.copy(alpha = 0.10f), CircleShape)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Close,
+                    contentDescription = stringResource(R.string.update_action_close),
+                    tint = TextSecondary,
+                    modifier = Modifier.size(17.dp)
+                )
             }
         }
     }
@@ -431,8 +379,8 @@ private fun CheckingStageContent() {
     val reducedMotion = rememberReducedMotion()
     val infinite = rememberInfiniteTransition(label = "CheckingShimmer")
     val pulseAlpha by infinite.animateFloat(
-        initialValue = if (reducedMotion) 0.14f else 0.08f,
-        targetValue = if (reducedMotion) 0.14f else 0.20f,
+        initialValue = if (reducedMotion) 0.12f else 0.06f,
+        targetValue = if (reducedMotion) 0.12f else 0.16f,
         animationSpec = infiniteRepeatable(
             animation = tween(850, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -446,13 +394,12 @@ private fun CheckingStageContent() {
             .semantics { liveRegion = LiveRegionMode.Polite },
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Version comparison skeleton
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
                 .background(DarkCard)
-                .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(18.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(18.dp))
                 .padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -473,13 +420,12 @@ private fun CheckingStageContent() {
             )
         }
 
-        // Changelog skeleton card
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(20.dp))
                 .background(DarkCard)
-                .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(20.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(20.dp))
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -510,38 +456,42 @@ private fun UpToDateStageContent(
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
-                .background(Lime.copy(alpha = 0.10f))
-                .border(1.dp, Lime.copy(alpha = 0.32f), RoundedCornerShape(18.dp))
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .background(DarkCard)
+                .border(1.dp, Lime.copy(alpha = 0.28f), RoundedCornerShape(18.dp))
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(38.dp)
                     .clip(CircleShape)
-                    .background(Lime.copy(alpha = 0.20f)),
+                    .background(Lime.copy(alpha = 0.16f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Rounded.CheckCircle,
                     contentDescription = null,
                     tint = Lime,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(21.dp)
                 )
             }
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "Geekify v${uiState.installedVersionName}",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    ),
                     color = TextPrimary
                 )
+                Spacer(Modifier.height(1.dp))
                 Text(
                     text = stringResource(R.string.update_up_to_date_subtitle),
                     style = MaterialTheme.typography.bodySmall,
@@ -555,7 +505,7 @@ private fun UpToDateStageContent(
                 entries = uiState.recentChangelog,
                 expandedVersions = uiState.expandedChangelogVersions,
                 onToggleVersion = onToggleChangelogVersion,
-                maxHeightDp = 240
+                maxHeightDp = 250
             )
         }
     }
@@ -575,9 +525,8 @@ private fun UpdateAvailableStageContent(
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Version transition summary row
         VersionTransitionSummaryCard(
             installedVersion = uiState.installedVersionName,
             availableVersion = update.versionName,
@@ -586,12 +535,11 @@ private fun UpdateAvailableStageContent(
             changeCount = update.totalChangeCount
         )
 
-        // Expandable multi-release changelog timeline
         ChangelogTimelinePanel(
             entries = timeline,
             expandedVersions = uiState.expandedChangelogVersions,
             onToggleVersion = onToggleChangelogVersion,
-            maxHeightDp = 260
+            maxHeightDp = 250
         )
     }
 }
@@ -635,7 +583,7 @@ private fun VersionTransitionSummaryCard(
                     imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
                     contentDescription = null,
                     tint = Lime,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(15.dp)
                 )
             }
             VersionPillCard(
@@ -646,23 +594,24 @@ private fun VersionTransitionSummaryCard(
             )
         }
 
-        // Metadata chips (Release Date, Package Size, Change Count)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (!releaseDate.isNullOrBlank()) {
-                MetadataTagChip(text = releaseDate)
-            }
-            if (apkSizeBytes != null && apkSizeBytes > 0L) {
-                MetadataTagChip(text = formatBytes(apkSizeBytes))
-            }
-            if (changeCount > 0) {
-                MetadataTagChip(
-                    text = stringResource(R.string.update_changes_count, changeCount),
-                    highlighted = true
-                )
+        if (!releaseDate.isNullOrBlank() || (apkSizeBytes != null && apkSizeBytes > 0L) || changeCount > 0) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (!releaseDate.isNullOrBlank()) {
+                    MetadataTagChip(text = releaseDate)
+                }
+                if (apkSizeBytes != null && apkSizeBytes > 0L) {
+                    MetadataTagChip(text = formatBytes(apkSizeBytes))
+                }
+                if (changeCount > 0) {
+                    MetadataTagChip(
+                        text = stringResource(R.string.update_changes_count, changeCount),
+                        highlighted = true
+                    )
+                }
             }
         }
     }
@@ -675,14 +624,14 @@ private fun VersionPillCard(
     highlighted: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val borderColor = if (highlighted) Lime.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.07f)
-    val bgColor = if (highlighted) Lime.copy(alpha = 0.11f) else Color.White.copy(alpha = 0.03f)
+    val borderColor = if (highlighted) Lime.copy(alpha = 0.42f) else Color.White.copy(alpha = 0.08f)
+    val bgColor = if (highlighted) Lime.copy(alpha = 0.09f) else Color.White.copy(alpha = 0.03f)
 
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(13.dp))
             .background(bgColor)
-            .border(1.dp, borderColor, RoundedCornerShape(14.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(13.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
         Text(
@@ -710,14 +659,15 @@ private fun MetadataTagChip(
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
             .background(
-                if (highlighted) Lime.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.05f)
+                if (highlighted) Lime.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.06f)
             )
             .padding(horizontal = 9.dp, vertical = 3.dp)
     ) {
         Text(
             text = text,
             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-            color = if (highlighted) Lime else TextSecondary
+            color = if (highlighted) Lime else TextSecondary,
+            maxLines = 1
         )
     }
 }
@@ -812,11 +762,11 @@ private fun ReleaseTimelineCard(
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(
-                if (isLatest) Lime.copy(alpha = 0.06f) else Color.White.copy(alpha = 0.03f)
+                if (isExpanded) Color.White.copy(alpha = 0.065f) else Color.White.copy(alpha = 0.03f)
             )
             .border(
                 width = 1.dp,
-                color = if (isExpanded) Lime.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.06f),
+                color = if (isExpanded) Lime.copy(alpha = 0.32f) else InkGlassBorder,
                 shape = RoundedCornerShape(14.dp)
             )
             .clickable(onClick = onToggle)
@@ -826,39 +776,46 @@ private fun ReleaseTimelineCard(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Timeline indicator dot
             Box(
                 modifier = Modifier
                     .size(8.dp)
                     .clip(CircleShape)
-                    .background(if (isLatest) Lime else TextSecondary.copy(alpha = 0.6f))
+                    .background(if (isLatest) Lime else TextSecondary.copy(alpha = 0.5f))
             )
             Spacer(Modifier.width(8.dp))
             Text(
                 text = "v${entry.versionName}",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
-                color = if (isLatest) Lime else TextPrimary
+                color = if (isLatest) Lime else TextPrimary,
+                maxLines = 1
             )
             if (!entry.formattedDate.isNullOrBlank()) {
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
                 Text(
                     text = "• ${entry.formattedDate}",
                     style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             Spacer(Modifier.weight(1f))
             if (entry.changeCount > 0) {
-                Text(
-                    text = "${entry.changeCount}",
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                    color = TextSecondary,
+                Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
-                        .background(Color.White.copy(alpha = 0.06f))
-                        .padding(horizontal = 7.dp, vertical = 2.dp)
-                )
-                Spacer(Modifier.width(4.dp))
+                        .background(Color.White.copy(alpha = 0.07f))
+                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "${entry.changeCount}",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = TextSecondary,
+                        maxLines = 1
+                    )
+                }
+                Spacer(Modifier.width(6.dp))
             }
             Icon(
                 imageVector = Icons.Rounded.ExpandMore,
@@ -1091,7 +1048,6 @@ private fun DownloadingOrVerifyingStageContent(
                 modifier = Modifier.fillMaxSize()
             )
 
-            // Center readout inside the 220.dp ring
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
@@ -1205,7 +1161,6 @@ private fun CircularWavyProgressRing(
         val baseRadius = (size.minDimension / 2f) - paddingPx
         val centerOffset = Offset(size.width / 2f, size.height / 2f)
 
-        // 1. Subtle background track circle
         drawCircle(
             color = Color.White.copy(alpha = 0.08f),
             radius = baseRadius,
@@ -1213,7 +1168,6 @@ private fun CircularWavyProgressRing(
             style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round)
         )
 
-        // 2. Soft ambient glow behind active arc
         val clampedProgress = progress.coerceIn(0f, 1f)
         if (clampedProgress > 0.005f) {
             val startAngleDeg = -90f + rotationOffsetDeg
@@ -1227,7 +1181,6 @@ private fun CircularWavyProgressRing(
                 val angleDeg = startAngleDeg + sweepAngleDeg * fraction
                 val angleRad = angleDeg * (PI.toFloat() / 180f)
 
-                // Taper wave amplitude smoothly at both ends of the arc so caps stay rounded and clean
                 val edgeEnvelope = sin(fraction * PI.toFloat()).coerceIn(0f, 1f)
                 val waveOffset = sin(angleRad * waveFrequency + wavePhase) * waveAmplitudePx * edgeEnvelope
                 val r = baseRadius + waveOffset
@@ -1241,14 +1194,12 @@ private fun CircularWavyProgressRing(
                 }
             }
 
-            // Outer glow pass
             drawPath(
                 path = wavyPath,
                 color = Lime.copy(alpha = 0.22f),
                 style = Stroke(width = strokeWidthPx * 1.75f, cap = StrokeCap.Round)
             )
 
-            // Crisp primary Lime wave stroke
             drawPath(
                 path = wavyPath,
                 color = Lime,
@@ -1327,7 +1278,7 @@ private fun ReadyToInstallStageContent(uiState: UpdateUiState) {
 }
 
 /**
- * Dedicated Installation Screen (`UpdateState.INSTALLING`) with pulsing Geekify logo animation
+ * Dedicated Installation Screen (`UpdateState.INSTALLING`) with pulsing Geekify app icon animation
  * (`scale` `0.82f..1.0f`, `alpha` `0.45f..1.0f`, `900ms` reverse-repeat).
  */
 @Composable
@@ -1365,41 +1316,27 @@ private fun InstallingStageContent(uiState: UpdateUiState) {
             modifier = Modifier.size(124.dp),
             contentAlignment = Alignment.Center
         ) {
-            // Outer pulsing halo
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
                         scaleX = pulseScale * 1.08f
                         scaleY = pulseScale * 1.08f
-                        alpha = pulseAlpha * 0.35f
+                        alpha = pulseAlpha * 0.32f
                     }
                     .clip(CircleShape)
                     .background(Lime.copy(alpha = 0.22f))
             )
 
-            // Core pulsing Geekify emblem
             Box(
                 modifier = Modifier
-                    .size(92.dp)
                     .graphicsLayer {
                         scaleX = pulseScale
                         scaleY = pulseScale
                         alpha = pulseAlpha
                     }
-                    .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                Lime.copy(alpha = 0.32f),
-                                DarkCard
-                            )
-                        )
-                    )
-                    .border(2.dp, Lime.copy(alpha = 0.65f), CircleShape),
-                contentAlignment = Alignment.Center
             ) {
-                GeekifyBrandGlyph(modifier = Modifier.size(46.dp))
+                GeekifyAppIconBadge(sizeDp = 88)
             }
         }
 
@@ -1424,10 +1361,6 @@ private fun InstallingStageContent(uiState: UpdateUiState) {
     }
 }
 
-/**
- * Post-update completion screen (`UpdateState.COMPLETED`) shown only when verified against
- * the installed application version.
- */
 @Composable
 private fun CompletedStageContent(
     uiState: UpdateUiState,
@@ -1447,27 +1380,27 @@ private fun CompletedStageContent(
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(22.dp))
-                .background(Lime.copy(alpha = 0.10f))
-                .border(1.dp, Lime.copy(alpha = 0.36f), RoundedCornerShape(22.dp))
-                .padding(20.dp),
+                .clip(RoundedCornerShape(20.dp))
+                .background(DarkCard)
+                .border(1.dp, Lime.copy(alpha = 0.34f), RoundedCornerShape(20.dp))
+                .padding(18.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .size(64.dp)
+                    .size(56.dp)
                     .graphicsLayer {
                         scaleX = badgeScale
                         scaleY = badgeScale
                     }
                     .clip(CircleShape)
-                    .background(Lime.copy(alpha = 0.22f))
+                    .background(Lime.copy(alpha = 0.20f))
                     .border(1.5.dp, Lime, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
@@ -1475,7 +1408,7 @@ private fun CompletedStageContent(
                     imageVector = Icons.Rounded.CheckCircle,
                     contentDescription = null,
                     tint = Lime,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(32.dp)
                 )
             }
 
@@ -1505,7 +1438,7 @@ private fun CompletedStageContent(
                 entries = uiState.recentChangelog,
                 expandedVersions = uiState.expandedChangelogVersions,
                 onToggleVersion = onToggleChangelogVersion,
-                maxHeightDp = 200
+                maxHeightDp = 210
             )
         }
     }
@@ -1598,6 +1531,8 @@ private fun UpdateDialogFooter(
     onOpenReleasePage: () -> Unit,
     onDismiss: (rememberSkip: Boolean) -> Unit
 ) {
+    val compactButtonPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
+
     AnimatedContent(
         targetState = uiState.state,
         contentKey = { it },
@@ -1615,12 +1550,15 @@ private fun UpdateDialogFooter(
                 ) {
                     TextButton(
                         onClick = { onDismiss(false) },
-                        shape = RoundedCornerShape(14.dp)
+                        shape = RoundedCornerShape(14.dp),
+                        contentPadding = compactButtonPadding
                     ) {
                         Text(
                             text = stringResource(R.string.update_action_cancel),
                             color = TextSecondary,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -1635,22 +1573,27 @@ private fun UpdateDialogFooter(
                     OutlinedButton(
                         onClick = onRetryCheck,
                         shape = RoundedCornerShape(16.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
+                        contentPadding = compactButtonPadding,
                         modifier = Modifier
                             .weight(1f)
-                            .height(48.dp)
+                            .heightIn(min = 48.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Refresh,
                             contentDescription = null,
                             tint = TextPrimary,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(17.dp)
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
                             text = stringResource(R.string.update_action_check_again),
                             color = TextPrimary,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -1661,13 +1604,18 @@ private fun UpdateDialogFooter(
                             containerColor = Lime,
                             contentColor = DarkBackground
                         ),
+                        contentPadding = compactButtonPadding,
                         modifier = Modifier
                             .weight(1f)
-                            .height(48.dp)
+                            .heightIn(min = 48.dp)
                     ) {
                         Text(
                             text = stringResource(R.string.update_action_done),
-                            fontWeight = FontWeight.ExtraBold
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -1682,12 +1630,15 @@ private fun UpdateDialogFooter(
                     TextButton(
                         onClick = { onDismiss(true) },
                         shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.height(50.dp)
+                        contentPadding = compactButtonPadding,
+                        modifier = Modifier.heightIn(min = 50.dp)
                     ) {
                         Text(
                             text = stringResource(R.string.update_action_later),
                             color = TextSecondary,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
 
@@ -1698,21 +1649,24 @@ private fun UpdateDialogFooter(
                             containerColor = Lime,
                             contentColor = DarkBackground
                         ),
-                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        contentPadding = compactButtonPadding,
                         modifier = Modifier
                             .weight(1f)
-                            .height(50.dp)
+                            .heightIn(min = 50.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.CloudDownload,
                             contentDescription = null,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(19.dp)
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
                             text = stringResource(R.string.update_action_download),
                             fontWeight = FontWeight.ExtraBold,
-                            fontSize = 15.sp
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -1727,12 +1681,15 @@ private fun UpdateDialogFooter(
                     TextButton(
                         onClick = onCancelDownload,
                         shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.height(50.dp)
+                        contentPadding = compactButtonPadding,
+                        modifier = Modifier.heightIn(min = 50.dp)
                     ) {
                         Text(
                             text = stringResource(R.string.update_action_cancel),
                             color = TextSecondary,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
 
@@ -1743,9 +1700,10 @@ private fun UpdateDialogFooter(
                             containerColor = Lime,
                             contentColor = DarkBackground
                         ),
+                        contentPadding = compactButtonPadding,
                         modifier = Modifier
                             .weight(1f)
-                            .height(50.dp)
+                            .heightIn(min = 50.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.CloudDownload,
@@ -1755,7 +1713,11 @@ private fun UpdateDialogFooter(
                         Spacer(Modifier.width(8.dp))
                         Text(
                             text = stringResource(R.string.update_action_download_anyway),
-                            fontWeight = FontWeight.ExtraBold
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -1765,15 +1727,18 @@ private fun UpdateDialogFooter(
                 OutlinedButton(
                     onClick = onCancelDownload,
                     shape = RoundedCornerShape(16.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
+                    contentPadding = compactButtonPadding,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp)
+                        .heightIn(min = 48.dp)
                 ) {
                     Text(
                         text = stringResource(R.string.update_action_cancel),
                         color = TextPrimary,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }
@@ -1782,13 +1747,14 @@ private fun UpdateDialogFooter(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp),
+                        .heightIn(min = 48.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "Please wait while Geekify verifies the package…",
                         style = MaterialTheme.typography.labelMedium,
-                        color = TextSecondary
+                        color = TextSecondary,
+                        textAlign = TextAlign.Center
                     )
                 }
             }
@@ -1802,12 +1768,15 @@ private fun UpdateDialogFooter(
                     TextButton(
                         onClick = { onDismiss(false) },
                         shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.height(50.dp)
+                        contentPadding = compactButtonPadding,
+                        modifier = Modifier.heightIn(min = 50.dp)
                     ) {
                         Text(
                             text = stringResource(R.string.update_action_later),
                             color = TextSecondary,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
 
@@ -1818,20 +1787,24 @@ private fun UpdateDialogFooter(
                             containerColor = Lime,
                             contentColor = DarkBackground
                         ),
+                        contentPadding = compactButtonPadding,
                         modifier = Modifier
                             .weight(1f)
-                            .height(50.dp)
+                            .heightIn(min = 50.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.SystemUpdateAlt,
                             contentDescription = null,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(19.dp)
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
                             text = stringResource(R.string.update_action_install),
                             fontWeight = FontWeight.ExtraBold,
-                            fontSize = 15.sp
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -1846,26 +1819,31 @@ private fun UpdateDialogFooter(
                             containerColor = Lime,
                             contentColor = DarkBackground
                         ),
+                        contentPadding = compactButtonPadding,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(50.dp)
+                            .heightIn(min = 50.dp)
                     ) {
                         Text(
                             text = stringResource(R.string.update_action_grant_permission),
-                            fontWeight = FontWeight.ExtraBold
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 } else {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(48.dp),
+                            .heightIn(min = 48.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = "Confirm installation in the Android system prompt",
                             style = MaterialTheme.typography.labelMedium,
-                            color = Lime
+                            color = Lime,
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
@@ -1879,14 +1857,17 @@ private fun UpdateDialogFooter(
                         containerColor = Lime,
                         contentColor = DarkBackground
                     ),
+                    contentPadding = compactButtonPadding,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(50.dp)
+                        .heightIn(min = 50.dp)
                 ) {
                     Text(
                         text = stringResource(R.string.update_action_done),
                         fontWeight = FontWeight.ExtraBold,
-                        fontSize = 15.sp
+                        fontSize = 15.sp,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }
@@ -1910,12 +1891,15 @@ private fun UpdateDialogFooter(
                         TextButton(
                             onClick = { onDismiss(false) },
                             shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.height(48.dp)
+                            contentPadding = compactButtonPadding,
+                            modifier = Modifier.heightIn(min = 48.dp)
                         ) {
                             Text(
                                 text = stringResource(R.string.update_action_close),
                                 color = TextSecondary,
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
 
@@ -1934,9 +1918,10 @@ private fun UpdateDialogFooter(
                                 containerColor = Lime,
                                 contentColor = DarkBackground
                             ),
+                            contentPadding = compactButtonPadding,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(48.dp)
+                                .heightIn(min = 48.dp)
                         ) {
                             Icon(
                                 imageVector = if (hasVerifiedApk) {
@@ -1954,13 +1939,17 @@ private fun UpdateDialogFooter(
                                 } else {
                                     stringResource(R.string.update_action_retry)
                                 },
-                                fontWeight = FontWeight.ExtraBold
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
 
                     TextButton(
                         onClick = onOpenReleasePage,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                         modifier = Modifier.align(Alignment.CenterHorizontally)
                     ) {
                         Icon(
@@ -1973,7 +1962,8 @@ private fun UpdateDialogFooter(
                         Text(
                             text = stringResource(R.string.update_action_open_release_page),
                             style = MaterialTheme.typography.labelMedium,
-                            color = TextSecondary
+                            color = TextSecondary,
+                            maxLines = 1
                         )
                     }
                 }
@@ -1983,34 +1973,25 @@ private fun UpdateDialogFooter(
 }
 
 /**
- * Custom vector glyph representing Geekify's signature audio/vinyl emblem in Lime.
+ * Renders Geekify's actual application icon inside a circular badge with a subtle Lime rim.
  */
 @Composable
-private fun GeekifyBrandGlyph(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val r = size.minDimension / 2f
-        val center = Offset(size.width / 2f, size.height / 2f)
-
-        // Outer vinyl groove arc
-        drawCircle(
-            color = Lime,
-            radius = r * 0.88f,
-            center = center,
-            style = Stroke(width = r * 0.16f, cap = StrokeCap.Round)
-        )
-        // Inner accent groove
-        drawArc(
-            color = Lime.copy(alpha = 0.65f),
-            startAngle = -45f,
-            sweepAngle = 210f,
-            useCenter = false,
-            style = Stroke(width = r * 0.11f, cap = StrokeCap.Round)
-        )
-        // Center spindle dot
-        drawCircle(
-            color = Lime,
-            radius = r * 0.24f,
-            center = center
+private fun GeekifyAppIconBadge(sizeDp: Int) {
+    Box(
+        modifier = Modifier
+            .size(sizeDp.dp)
+            .clip(CircleShape)
+            .background(DarkCard)
+            .border(1.2.dp, Lime.copy(alpha = 0.45f), CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.ic_geekify_default_preview),
+            contentDescription = stringResource(R.string.update_app_name),
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(CircleShape)
         )
     }
 }

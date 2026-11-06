@@ -67,6 +67,49 @@ class AppUpdateManagerTest {
     }
 
     @Test
+    fun `changelog parser strips release boilerplate and supports plain-text section headers`() {
+        val v251StyleMarkdown = """
+            # Geekify v2.5.1 - Release Notes
+
+            **Release Date:** 06 November 2026
+
+            ### What's New
+            - **Sub-Pixel Spring Settling**: Refined the Now Playing transition.
+
+            ### Bug Fixes
+            - Fixed collapsed hit-test touch interception.
+
+            ---
+
+            **Geekify Team**
+            **Full Changelog**: https://github.com/Amal-kphilip/Geekify-App/compare/v2.5.0...v2.5.1
+        """.trimIndent()
+
+        val v251Sections = UpdateMetadataParser.parseChangelogSections(v251StyleMarkdown)
+        assertEquals(2, v251Sections.size)
+        assertEquals(2, v251Sections.sumOf { it.bullets.size })
+        assertEquals(ChangelogCategory.WHATS_NEW, v251Sections[0].category)
+        assertEquals(ChangelogCategory.BUG_FIXES, v251Sections[1].category)
+
+        val v240PlainHeaderMarkdown = """
+            Geekify v2.4.0 - Release Notes
+            Release Date: 06 November 2026
+            What's New
+            Introduced a 6-stage hybrid recommendation engine.
+            Improvements
+            Upgraded track deduplication.
+            Bug Fixes
+            Fixed a race condition during Home pull-to-refresh.
+        """.trimIndent()
+
+        val v240Sections = UpdateMetadataParser.parseChangelogSections(v240PlainHeaderMarkdown)
+        assertEquals(3, v240Sections.size)
+        assertEquals(ChangelogCategory.WHATS_NEW, v240Sections[0].category)
+        assertEquals(ChangelogCategory.IMPROVEMENTS, v240Sections[1].category)
+        assertEquals(ChangelogCategory.BUG_FIXES, v240Sections[2].category)
+    }
+
+    @Test
     fun `release timeline parser filters drafts and prereleases and marks latest target`() {
         val payload = """
             [
