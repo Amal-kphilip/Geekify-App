@@ -538,7 +538,12 @@ class AppUpdateManager @Inject constructor(
         }
 
         val pm = context.packageManager
-        val archiveFlags = PackageManager.GET_SIGNING_CERTIFICATES
+        @Suppress("DEPRECATION")
+        val archiveFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            PackageManager.GET_SIGNATURES
+        }
         val archiveInfo: PackageInfo? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             pm.getPackageArchiveInfo(apkFile.absolutePath, PackageManager.PackageInfoFlags.of(archiveFlags.toLong()))
         } else {
@@ -569,8 +574,8 @@ class AppUpdateManager @Inject constructor(
             pm.getPackageInfo(context.packageName, archiveFlags)
         }
 
-        val archiveVersionCode = archiveInfo.longVersionCode
-        val installedVersionCode = installedInfo.longVersionCode
+        val archiveVersionCode = packageVersionCodeCompat(archiveInfo)
+        val installedVersionCode = packageVersionCodeCompat(installedInfo)
         if (archiveVersionCode < installedVersionCode) {
             apkFile.delete()
             return@withContext ApkVerificationResult.Failed(
@@ -802,12 +807,26 @@ class AppUpdateManager @Inject constructor(
         }
     }.getOrNull()
 
-    private fun signingDigests(info: PackageInfo): Set<String> {
-        val signingInfo = info.signingInfo ?: return emptySet()
-        val signatures = if (signingInfo.hasMultipleSigners()) {
-            signingInfo.apkContentsSigners
+    private fun packageVersionCodeCompat(info: PackageInfo): Long {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.longVersionCode
         } else {
-            signingInfo.signingCertificateHistory
+            @Suppress("DEPRECATION")
+            info.versionCode.toLong()
+        }
+    }
+
+    private fun signingDigests(info: PackageInfo): Set<String> {
+        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val signingInfo = info.signingInfo ?: return emptySet()
+            if (signingInfo.hasMultipleSigners()) {
+                signingInfo.apkContentsSigners
+            } else {
+                signingInfo.signingCertificateHistory
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            info.signatures
         }
         return signatures.orEmpty().map { sig ->
             MessageDigest.getInstance("SHA-256")
