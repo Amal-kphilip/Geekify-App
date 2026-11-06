@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -26,7 +27,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -61,11 +61,8 @@ private val VinylLime = Color(0xFFC6EA5A)
  * Animated record artwork for the expanded Now Playing screen, also serving as the continuous
  * shared artwork element during Now Playing <-> Mini-Player transitions.
  *
- * When [collapseProgress] moves from `0f` (Expanded) to `1f` (Collapsed):
- * - Decorative vinyl grooves and center spindle smoothly dissolve (`grooveAlpha -> 0f`).
- * - The tonearm smoothly lifts and fades out (`tonearmAlpha -> 0f`) so it never enters the mini-player.
- * - Disc rotation smoothly aligns along the shortest angular arc to `0°` upright without any sudden reset.
- * - Paused-state shrink and beat pulse smoothly normalize to `1.0f` to match the exact mini-player cover bounds.
+ * Reads [collapseProgress] strictly inside draw/graphicsLayer scopes and coarse [derivedStateOf]
+ * gates so transition frames never trigger recomposition.
  */
 @Composable
 fun VinylTonearmCover(
@@ -76,7 +73,7 @@ fun VinylTonearmCover(
     beatIntensity: StateFlow<Float>,
     baseScale: Float,
     modifier: Modifier = Modifier,
-    collapseProgress: Float = 0f,
+    collapseProgress: () -> Float = { 0f },
     onTonearmLanded: (String) -> Unit = {},
     discSize: Dp = 300.dp,
 ) {
@@ -89,13 +86,16 @@ fun VinylTonearmCover(
     val extraSpin = remember { Animatable(0f) }
     val spin = remember { Animatable(0f) }
     val arm = remember { Animatable(PLAY_ANGLE) }
-    // A tiny independent sway gives the tonearm a gentle tracking motion while playing.
-    // It remains separate from the main arm animation so skip/park/landing timing is preserved.
     val tonearmSway = remember { Animatable(0f) }
     var tonearmLanded by remember { mutableStateOf(true) }
 
-    val isExpandedActive = collapseProgress < 0.995f
-    val currentBeatIntensity by if (isPlaying && collapseProgress < 0.5f) {
+    val isExpandedActive by remember(collapseProgress) {
+        derivedStateOf { collapseProgress() < 0.995f }
+    }
+    val isBeatActive by remember(collapseProgress) {
+        derivedStateOf { collapseProgress() < 0.5f }
+    }
+    val currentBeatIntensity by if (isPlaying && isBeatActive) {
         beatIntensity.collectAsStateWithLifecycle()
     } else {
         remember { mutableFloatStateOf(0f) }
@@ -129,8 +129,6 @@ fun VinylTonearmCover(
     }
 
     // Slowly track from near the outer rim to just before the center, then back out.
-    // Geometry is expressed as offsets from PLAY_ANGLE; the separate track-swap arm animation
-    // still owns lift/park/landing and suppresses this sweep until the stylus has landed.
     LaunchedEffect(isPlaying, trackId, shownTrackId, tonearmLanded, isExpandedActive) {
         if (!isPlaying || !tonearmLanded || trackId != shownTrackId || !isExpandedActive) {
             tonearmSway.animateTo(
@@ -177,7 +175,7 @@ fun VinylTonearmCover(
 
         // If the track changes while collapsing, collapsed, or expanding, update destination
         // content immediately without throwing the disc sideways across the transition path.
-        if (collapseProgress > 0.08f) {
+        if (collapseProgress() > 0.08f) {
             shownUrl = coverUrl
             shownTrackId = trackId
             tonearmSway.snapTo(0f)
@@ -250,11 +248,6 @@ fun VinylTonearmCover(
     }
 
     val displayUrl = shownUrl ?: coverUrl
-    val p = collapseProgress.coerceIn(0f, 1f)
-    val smoothP = p * p * (3f - 2f * p)
-    val grooveAlpha = (1f - p * 1.85f).coerceIn(0f, 1f)
-    val tonearmAlpha = (1f - p * 2.8f).coerceIn(0f, 1f)
-    val shadowElevation = lerp(28f, 0f, p).dp
 
     Box(
         modifier = modifier,
@@ -265,6 +258,8 @@ fun VinylTonearmCover(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
+                    val p = collapseProgress().coerceIn(0f, 1f)
+                    val smoothP = p * p * (3f - 2f * p)
                     val effectiveScale = lerp(dropScale.value * beatScale, 1f, smoothP)
                     translationX = discX.value * (1f - smoothP)
                     scaleX = effectiveScale
@@ -275,12 +270,15 @@ fun VinylTonearmCover(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
+                        val p = collapseProgress().coerceIn(0f, 1f)
+                        val smoothP = p * p * (3f - 2f * p)
                         val rawAngle = ((spin.value + extraSpin.value) % 360f + 360f) % 360f
                         val shortestDelta = if (rawAngle > 180f) rawAngle - 360f else rawAngle
                         rotationZ = shortestDelta * (1f - smoothP)
+                        shadowElevation = lerp(28.dp.toPx(), 0f, p)
+                        shape = CircleShape
+                        clip = true
                     }
-                    .shadow(shadowElevation, CircleShape, ambientColor = Color.Black, spotColor = Color.Black)
-                    .clip(CircleShape)
                     .background(Color(0xFF101014)),
                 contentAlignment = Alignment.Center
             ) {
@@ -299,104 +297,108 @@ fun VinylTonearmCover(
                         modifier = Modifier.fillMaxSize(0.42f)
                     )
                 }
-                if (grooveAlpha > 0.005f) {
-                    Canvas(
-                        Modifier
-                            .fillMaxSize()
-                            .graphicsLayer { alpha = grooveAlpha }
-                    ) {
-                        val radius = size.minDimension / 2f
-                        val grooveColor = Color.Black.copy(alpha = 0.20f)
-                        for (i in 3..19) {
-                            drawCircle(
-                                color = grooveColor,
-                                radius = radius * i / 20f,
-                                style = Stroke(width = 1.dp.toPx())
-                            )
+                Canvas(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            val p = collapseProgress().coerceIn(0f, 1f)
+                            alpha = (1f - p * 1.85f).coerceIn(0f, 1f)
                         }
-                        listOf(0.56f, 0.73f, 0.87f).forEach { ratio ->
-                            drawCircle(
-                                color = Color.Black.copy(alpha = 0.38f),
-                                radius = radius * ratio,
-                                style = Stroke(width = 2.dp.toPx())
-                            )
-                        }
-                        drawArc(
-                            color = Color.White.copy(alpha = 0.13f),
-                            startAngle = 200f,
-                            sweepAngle = 32f,
-                            useCenter = true,
-                            topLeft = Offset.Zero,
-                            size = size
-                        )
-                        drawArc(
-                            color = Color.White.copy(alpha = 0.10f),
-                            startAngle = 20f,
-                            sweepAngle = 32f,
-                            useCenter = true,
-                            topLeft = Offset.Zero,
-                            size = size
-                        )
+                ) {
+                    val radius = size.minDimension / 2f
+                    val grooveColor = Color.Black.copy(alpha = 0.20f)
+                    for (i in 3..19) {
                         drawCircle(
-                            color = Color(0xFF0A0A0C),
-                            radius = radius - 3.dp.toPx(),
-                            style = Stroke(width = 6.dp.toPx())
+                            color = grooveColor,
+                            radius = radius * i / 20f,
+                            style = Stroke(width = 1.dp.toPx())
                         )
-                        drawCircle(color = Color(0xFF96969C), radius = radius * 0.10f)
-                        drawCircle(color = Color(0xFF141416), radius = radius * 0.06f)
-                        drawCircle(color = Color.White.copy(alpha = 0.32f), radius = radius * 0.018f)
                     }
+                    listOf(0.56f, 0.73f, 0.87f).forEach { ratio ->
+                        drawCircle(
+                            color = Color.Black.copy(alpha = 0.38f),
+                            radius = radius * ratio,
+                            style = Stroke(width = 2.dp.toPx())
+                        )
+                    }
+                    drawArc(
+                        color = Color.White.copy(alpha = 0.13f),
+                        startAngle = 200f,
+                        sweepAngle = 32f,
+                        useCenter = true,
+                        topLeft = Offset.Zero,
+                        size = size
+                    )
+                    drawArc(
+                        color = Color.White.copy(alpha = 0.10f),
+                        startAngle = 20f,
+                        sweepAngle = 32f,
+                        useCenter = true,
+                        topLeft = Offset.Zero,
+                        size = size
+                    )
+                    drawCircle(
+                        color = Color(0xFF0A0A0C),
+                        radius = radius - 3.dp.toPx(),
+                        style = Stroke(width = 6.dp.toPx())
+                    )
+                    drawCircle(color = Color(0xFF96969C), radius = radius * 0.10f)
+                    drawCircle(color = Color(0xFF141416), radius = radius * 0.06f)
+                    drawCircle(color = Color.White.copy(alpha = 0.32f), radius = radius * 0.018f)
                 }
             }
         }
 
         // The larger canvas deliberately overflows the disc bounds to place the pivot at the upper right.
         // Fade out cleanly during collapse so the tonearm never appears inside the mini-player.
-        if (tonearmAlpha > 0.005f) {
-            Canvas(
-                Modifier
-                    .requiredSize(discSize * 2.8f)
-                    .graphicsLayer { alpha = tonearmAlpha }
-            ) {
-                val unit = (size.width / 5.6f) / 410f
-                val pivot = center + Offset(445f * unit, -368f * unit)
-
-                fun unitVector(angle: Float): Offset = Offset(
-                    cos(Math.toRadians(angle.toDouble())).toFloat(),
-                    sin(Math.toRadians(angle.toDouble())).toFloat()
-                )
-
-                val collapseRetract = p * 18f
-                val angle = (arm.value - collapseRetract) + tonearmSway.value * (1f - p)
-                val armDirection = unitVector(angle)
-                // Lift is derived from the main animation only, not from the small playing sway.
-                val lift = (((PLAY_ANGLE - (arm.value - collapseRetract)) / (PLAY_ANGLE - PARK_ANGLE)) * 3f)
-                    .coerceIn(0f, 1f)
-
-                fun drawTonearm(offset: Offset, shadow: Boolean) {
-                    fun toneColor(color: Color) = if (shadow) Color.Black.copy(alpha = 0.35f) else color
-                    val pOffset = pivot + offset
-                    val end = pOffset + armDirection * (470f * unit)
-                    val head = end + unitVector(angle + 24f) * (85f * unit)
-                    val counterweight = pOffset - armDirection * (120f * unit)
-
-                    drawCircle(toneColor(Color(0xFF26262A)), 70f * unit, pOffset)
-                    drawCircle(toneColor(Color(0xFF46464C)), 58f * unit, pOffset)
-                    drawLine(toneColor(Color(0xFF34343A)), pOffset, counterweight, 56f * unit, StrokeCap.Round)
-                    drawLine(toneColor(VinylLime), counterweight, pOffset - armDirection * (135f * unit), 60f * unit, StrokeCap.Round)
-                    drawLine(toneColor(Color(0xFFCDCDD3)), pOffset, end, 20f * unit, StrokeCap.Round)
-                    drawLine(toneColor(Color(0xFF28282E)), end, head, 44f * unit, StrokeCap.Round)
-                    drawCircle(toneColor(VinylLime), 13f * unit, head)
-                    drawCircle(toneColor(Color(0xFF6E6E74)), 26f * unit, pOffset)
-                    drawCircle(toneColor(VinylLime), 10f * unit, pOffset)
+        Canvas(
+            Modifier
+                .requiredSize(discSize * 2.8f)
+                .graphicsLayer {
+                    val p = collapseProgress().coerceIn(0f, 1f)
+                    alpha = (1f - p * 2.8f).coerceIn(0f, 1f)
                 }
+        ) {
+            val p = collapseProgress().coerceIn(0f, 1f)
+            if (p >= 0.38f) return@Canvas
+            val unit = (size.width / 5.6f) / 410f
+            val pivot = center + Offset(445f * unit, -368f * unit)
 
-                drawTonearm(
-                    Offset((6f + 12f * lift) * unit, (10f + 34f * lift) * unit),
-                    shadow = true
-                )
-                drawTonearm(Offset.Zero, shadow = false)
+            fun unitVector(angle: Float): Offset = Offset(
+                cos(Math.toRadians(angle.toDouble())).toFloat(),
+                sin(Math.toRadians(angle.toDouble())).toFloat()
+            )
+
+            val collapseRetract = p * 18f
+            val angle = (arm.value - collapseRetract) + tonearmSway.value * (1f - p)
+            val armDirection = unitVector(angle)
+            // Lift is derived from the main animation only, not from the small playing sway.
+            val lift = (((PLAY_ANGLE - (arm.value - collapseRetract)) / (PLAY_ANGLE - PARK_ANGLE)) * 3f)
+                .coerceIn(0f, 1f)
+
+            fun drawTonearm(offset: Offset, shadow: Boolean) {
+                fun toneColor(color: Color) = if (shadow) Color.Black.copy(alpha = 0.35f) else color
+                val pOffset = pivot + offset
+                val end = pOffset + armDirection * (470f * unit)
+                val head = end + unitVector(angle + 24f) * (85f * unit)
+                val counterweight = pOffset - armDirection * (120f * unit)
+
+                drawCircle(toneColor(Color(0xFF26262A)), 70f * unit, pOffset)
+                drawCircle(toneColor(Color(0xFF46464C)), 58f * unit, pOffset)
+                drawLine(toneColor(Color(0xFF34343A)), pOffset, counterweight, 56f * unit, StrokeCap.Round)
+                drawLine(toneColor(VinylLime), counterweight, pOffset - armDirection * (135f * unit), 60f * unit, StrokeCap.Round)
+                drawLine(toneColor(Color(0xFFCDCDD3)), pOffset, end, 20f * unit, StrokeCap.Round)
+                drawLine(toneColor(Color(0xFF28282E)), end, head, 44f * unit, StrokeCap.Round)
+                drawCircle(toneColor(VinylLime), 13f * unit, head)
+                drawCircle(toneColor(Color(0xFF6E6E74)), 26f * unit, pOffset)
+                drawCircle(toneColor(VinylLime), 10f * unit, pOffset)
             }
+
+            drawTonearm(
+                Offset((6f + 12f * lift) * unit, (10f + 34f * lift) * unit),
+                shadow = true
+            )
+            drawTonearm(Offset.Zero, shadow = false)
         }
     }
 }

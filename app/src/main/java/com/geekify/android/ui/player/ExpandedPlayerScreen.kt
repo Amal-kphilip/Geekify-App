@@ -194,7 +194,15 @@ fun ExpandedPlayerScreen(
 
     val overlayInteraction = remember { MutableInteractionSource() }
     val sleepTimerBackdrop = rememberGlassBackdrop()
-    val expandedControlsInteractive = transitionState.progress < 0.18f && !transitionState.isDragging
+    val expandedControlsInteractive: () -> Boolean = {
+        transitionState.progress < 0.18f && !transitionState.isDragging
+    }
+    val isMarqueeActive by remember(transitionState) {
+        derivedStateOf { transitionState.progress < 0.02f }
+    }
+    val isSeekWaveActive by remember(transitionState) {
+        derivedStateOf { transitionState.progress < 0.5f }
+    }
 
     val clipPath = remember { Path() }
 
@@ -206,13 +214,8 @@ fun ExpandedPlayerScreen(
                     transitionState.rootBounds = coords.boundsInRoot()
                 }
             }
-            .graphicsLayer {
-                // Keep composed for instant 0-latency bounds availability, but hide completely when collapsed.
-                alpha = if (transitionState.progress >= 0.999f && !transitionState.isDragging) 0f else 1f
-            }
             .drawWithContent {
                 val p = transitionState.progress
-                if (p >= 0.999f && !transitionState.isDragging) return@drawWithContent
 
                 // Progressive ambient scrim over the underlying screen.
                 val scrimAlpha = ((1f - p) * 0.50f).coerceIn(0f, 1f)
@@ -245,47 +248,40 @@ fun ExpandedPlayerScreen(
                     )
                 }
             }
-            .then(
-                if (transitionState.isExpandedOrTransitioning) {
-                    Modifier
-                        .pointerInput(screenHeightPx) {
-                            val velocityTracker = VelocityTracker()
-                            var totalDownDrag = 0f
-                            detectVerticalDragGestures(
-                                onDragStart = {
-                                    velocityTracker.resetTracking()
-                                    totalDownDrag = 0f
-                                },
-                                onVerticalDrag = { change, dragAmount ->
-                                    change.consume()
-                                    velocityTracker.addPosition(change.uptimeMillis, change.position)
-                                    totalDownDrag = (totalDownDrag + dragAmount).coerceAtLeast(0f)
-                                    transitionState.onDragDelta(dragAmount, screenHeightPx)
-                                },
-                                onDragEnd = {
-                                    val velocityY = velocityTracker.calculateVelocity().y
-                                    transitionState.settleCollapseGesture(
-                                        totalDragDownPx = totalDownDrag,
-                                        velocityPxPerSec = velocityY,
-                                        density = density,
-                                        fallbackScreenHeightPx = screenHeightPx
-                                    )
-                                    totalDownDrag = 0f
-                                },
-                                onDragCancel = {
-                                    transitionState.expand()
-                                    totalDownDrag = 0f
-                                }
-                            )
-                        }
-                        .clickable(
-                            interactionSource = overlayInteraction,
-                            indication = null,
-                            onClick = {}
+            .pointerInput(screenHeightPx) {
+                val velocityTracker = VelocityTracker()
+                var totalDownDrag = 0f
+                detectVerticalDragGestures(
+                    onDragStart = {
+                        velocityTracker.resetTracking()
+                        totalDownDrag = 0f
+                    },
+                    onVerticalDrag = { change, dragAmount ->
+                        change.consume()
+                        velocityTracker.addPosition(change.uptimeMillis, change.position)
+                        totalDownDrag = (totalDownDrag + dragAmount).coerceAtLeast(0f)
+                        transitionState.onDragDelta(dragAmount, screenHeightPx)
+                    },
+                    onDragEnd = {
+                        val velocityY = velocityTracker.calculateVelocity().y
+                        transitionState.settleCollapseGesture(
+                            totalDragDownPx = totalDownDrag,
+                            velocityPxPerSec = velocityY,
+                            density = density,
+                            fallbackScreenHeightPx = screenHeightPx
                         )
-                } else {
-                    Modifier
-                }
+                        totalDownDrag = 0f
+                    },
+                    onDragCancel = {
+                        transitionState.expand()
+                        totalDownDrag = 0f
+                    }
+                )
+            }
+            .clickable(
+                interactionSource = overlayInteraction,
+                indication = null,
+                onClick = {}
             )
             .glassBackdropSource(sleepTimerBackdrop, enabled = showSleepTimer)
     ) {
@@ -328,7 +324,7 @@ fun ExpandedPlayerScreen(
                     CircleIconButton(
                         icon = GeekifyIcons.ArrowBack,
                         contentDescription = "Collapse",
-                        onClick = { if (expandedControlsInteractive) onDismiss() },
+                        onClick = { if (expandedControlsInteractive()) onDismiss() },
                         size = 50.dp,
                         container = Color.White.copy(alpha = 0.2f)
                     )
@@ -343,7 +339,7 @@ fun ExpandedPlayerScreen(
                     CircleIconButton(
                         icon = GeekifyIcons.Timer,
                         contentDescription = if (sleepTimerRemainingMs != null) "Sleep timer active" else "Sleep timer",
-                        onClick = { if (expandedControlsInteractive) showSleepTimer = true },
+                        onClick = { if (expandedControlsInteractive()) showSleepTimer = true },
                         size = 50.dp,
                         container = Color.White.copy(alpha = 0.2f),
                         tint = if (sleepTimerRemainingMs != null) Lime else TextPrimary
@@ -352,7 +348,7 @@ fun ExpandedPlayerScreen(
                     CircleIconButton(
                         icon = if (isLiked) GeekifyIcons.Favorite else GeekifyIcons.FavoriteBorder,
                         contentDescription = if (isLiked) "Remove from Liked Songs" else "Add to Liked Songs",
-                        onClick = { if (expandedControlsInteractive) viewModel.toggleLikeCurrent() },
+                        onClick = { if (expandedControlsInteractive()) viewModel.toggleLikeCurrent() },
                         size = 50.dp,
                         container = Color.White.copy(alpha = 0.2f),
                         tint = if (isLiked) Lime else TextPrimary
@@ -390,7 +386,6 @@ fun ExpandedPlayerScreen(
                                 translationY = tf.translationY
                                 scaleX = tf.scaleX
                                 scaleY = tf.scaleY
-                                alpha = if (p >= 0.995f) 0f else 1f
                             }
                     ) {
                         VinylTonearmCover(
@@ -400,7 +395,7 @@ fun ExpandedPlayerScreen(
                             isPlaying = state.isPlaying,
                             beatIntensity = viewModel.beatIntensity,
                             baseScale = artBaseScale,
-                            collapseProgress = transitionState.progress,
+                            collapseProgress = { transitionState.progress },
                             onTonearmLanded = viewModel::completeTonearmTransition,
                             modifier = Modifier.fillMaxSize(),
                             discSize = artSize
@@ -457,7 +452,7 @@ fun ExpandedPlayerScreen(
                                 ),
                                 color = TextPrimary,
                                 textAlign = TextAlign.Center,
-                                speedDpPerSecond = if (transitionState.progress < 0.02f) 42f else 0f
+                                speedDpPerSecond = if (isMarqueeActive) 42f else 0f
                             )
                         }
                     }
@@ -481,7 +476,7 @@ fun ExpandedPlayerScreen(
                             ),
                             color = TextSecondary,
                             textAlign = TextAlign.Center,
-                            speedDpPerSecond = if (transitionState.progress < 0.02f) 42f else 0f
+                            speedDpPerSecond = if (isMarqueeActive) 42f else 0f
                         )
                     }
                 }
@@ -518,7 +513,7 @@ fun ExpandedPlayerScreen(
                         previous = previousTrack?.title,
                         next = upcoming.getOrNull(0)?.title,
                         afterNext = upcoming.getOrNull(1)?.title,
-                        onClick = { if (expandedControlsInteractive) onQueueClick() }
+                        onClick = { if (expandedControlsInteractive()) onQueueClick() }
                     )
                 }
 
@@ -539,10 +534,10 @@ fun ExpandedPlayerScreen(
                 ) {
                     SeekSection(
                         position = viewModel.position,
-                        isPlaying = state.isPlaying && transitionState.progress < 0.5f,
+                        isPlaying = state.isPlaying && isSeekWaveActive,
                         repeat = state.repeat,
-                        onSeek = { if (expandedControlsInteractive) viewModel.seek(it) },
-                        onCycleRepeat = { if (expandedControlsInteractive) viewModel.cycleRepeat() }
+                        onSeek = { if (expandedControlsInteractive()) viewModel.seek(it) },
+                        onCycleRepeat = { if (expandedControlsInteractive()) viewModel.cycleRepeat() }
                     )
                 }
 
@@ -557,7 +552,7 @@ fun ExpandedPlayerScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
-                        onClick = { if (expandedControlsInteractive) viewModel.toggleShuffle() },
+                        onClick = { if (expandedControlsInteractive()) viewModel.toggleShuffle() },
                         modifier = Modifier.graphicsLayer {
                             val p = transitionState.progress
                             alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
@@ -586,7 +581,7 @@ fun ExpandedPlayerScreen(
                         CircleIconButton(
                             icon = GeekifyIcons.SkipPrevious,
                             contentDescription = "Previous",
-                            onClick = { if (expandedControlsInteractive) viewModel.previous() },
+                            onClick = { if (expandedControlsInteractive()) viewModel.previous() },
                             size = 54.dp,
                             iconSize = 24.dp,
                             container = Color(0xFF211F28)
@@ -620,12 +615,11 @@ fun ExpandedPlayerScreen(
                                     translationY = tf.translationY
                                     scaleX = tf.scaleX
                                     scaleY = tf.scaleY
-                                    alpha = if (p >= 0.995f) 0f else 1f
                                 }
                                 .clip(CircleShape)
                                 .background(Lime)
                                 .bouncyClickable(pressedScale = 0.92f) {
-                                    if (expandedControlsInteractive) viewModel.togglePlay()
+                                    if (expandedControlsInteractive()) viewModel.togglePlay()
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -659,12 +653,12 @@ fun ExpandedPlayerScreen(
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        val hasMiniNext = !transitionState.miniIsInline && transitionState.miniNextBounds.width > 0f
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .graphicsLayer {
                                     val p = transitionState.progress
+                                    val hasMiniNext = !transitionState.miniIsInline && transitionState.miniNextBounds.width > 0f
                                     if (hasMiniNext) {
                                         val tf = computeSharedTransform(
                                             sourceBounds = transitionState.expandedNextBounds,
@@ -677,7 +671,6 @@ fun ExpandedPlayerScreen(
                                         translationY = tf.translationY
                                         scaleX = tf.scaleX
                                         scaleY = tf.scaleY
-                                        alpha = if (p >= 0.995f) 0f else 1f
                                     } else {
                                         alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
                                         val s = lerp(1f, 0.75f, p)
@@ -687,7 +680,7 @@ fun ExpandedPlayerScreen(
                                 }
                                 .clip(CircleShape)
                                 .bouncyClickable(pressedScale = 0.92f) {
-                                    if (expandedControlsInteractive) viewModel.next()
+                                    if (expandedControlsInteractive()) viewModel.next()
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -710,7 +703,7 @@ fun ExpandedPlayerScreen(
                     }
 
                     IconButton(
-                        onClick = { if (expandedControlsInteractive) onQueueClick() },
+                        onClick = { if (expandedControlsInteractive()) onQueueClick() },
                         modifier = Modifier.graphicsLayer {
                             val p = transitionState.progress
                             alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
@@ -729,28 +722,32 @@ fun ExpandedPlayerScreen(
 
         // ---- Shared Compact Title & Artist Overlay (travels along the same trajectory into NowPlayingBar) ----
         val miniTextRect = transitionState.miniTextBounds
-        val expandedTextRect = transitionState.expandedTextBounds
         if (miniTextRect.width > 0f && miniTextRect.height > 0f) {
             val isInline = transitionState.miniIsInline
-            val localLeft = miniTextRect.left - transitionState.rootBounds.left
-            val localTop = miniTextRect.top - transitionState.rootBounds.top
             val widthDp = with(density) { miniTextRect.width.toDp() }
             val heightDp = with(density) { miniTextRect.height.toDp() }
 
             Column(
                 modifier = Modifier
-                    .offset { IntOffset(localLeft.roundToInt(), localTop.roundToInt()) }
+                    .offset {
+                        val root = transitionState.rootBounds
+                        val localLeft = transitionState.miniTextBounds.left - root.left
+                        val localTop = transitionState.miniTextBounds.top - root.top
+                        IntOffset(localLeft.roundToInt(), localTop.roundToInt())
+                    }
                     .size(width = widthDp, height = heightDp)
                     .graphicsLayer {
                         val p = transitionState.progress
-                        if (expandedTextRect.width > 0f) {
-                            translationX = (expandedTextRect.center.x - miniTextRect.center.x) * (1f - p)
-                            translationY = (expandedTextRect.center.y - miniTextRect.center.y) * (1f - p)
+                        val expRect = transitionState.expandedTextBounds
+                        val mRect = transitionState.miniTextBounds
+                        if (expRect.width > 0f && mRect.width > 0f) {
+                            translationX = (expRect.center.x - mRect.center.x) * (1f - p)
+                            translationY = (expRect.center.y - mRect.center.y) * (1f - p)
                         }
                         val s = lerp(1.36f, 1f, p)
                         scaleX = s
                         scaleY = s
-                        alpha = if (p >= 0.995f) 0f else ((p - 0.34f) / 0.50f).coerceIn(0f, 1f)
+                        alpha = ((p - 0.34f) / 0.50f).coerceIn(0f, 1f)
                     },
                 verticalArrangement = Arrangement.Center
             ) {

@@ -11,9 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineScope
@@ -45,7 +43,12 @@ class PlayerTransitionState(
     private val scope: CoroutineScope,
     initialProgress: Float = 1f
 ) {
-    private val progressAnim = Animatable(initialProgress.coerceIn(0f, 1f))
+    // Sub-pixel visibilityThreshold (0.0005f) prevents the default 0.01f (1% of screen height)
+    // snap at the end of spring animations.
+    private val progressAnim = Animatable(
+        initialValue = initialProgress.coerceIn(0f, 1f),
+        visibilityThreshold = 0.0005f
+    )
 
     /** Current normalized collapse progress in `0.0f..1.0f` (`0f` = Expanded, `1f` = Collapsed). */
     val progress: Float
@@ -80,7 +83,7 @@ class PlayerTransitionState(
     }
 
     val isExpandedOrTransitioning: Boolean by derivedStateOf {
-        progress < 0.999f || isDragging
+        progress < 0.999f || isDragging || targetExpanded
     }
 
     // ---- Measured Root-Space Layout Bounds ----
@@ -223,11 +226,12 @@ class PlayerTransitionState(
                 targetValue = 0f,
                 initialVelocity = initialVelocity,
                 animationSpec = if (reducedMotion) {
-                    spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 750f)
+                    spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 750f, visibilityThreshold = 0.0005f)
                 } else {
-                    spring(dampingRatio = 0.88f, stiffness = 420f)
+                    spring(dampingRatio = 0.88f, stiffness = 420f, visibilityThreshold = 0.0005f)
                 }
             )
+            progressAnim.snapTo(0f)
         }
     }
 
@@ -242,11 +246,12 @@ class PlayerTransitionState(
                 targetValue = 1f,
                 initialVelocity = initialVelocity,
                 animationSpec = if (reducedMotion) {
-                    spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 750f)
+                    spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 750f, visibilityThreshold = 0.0005f)
                 } else {
-                    spring(dampingRatio = 0.88f, stiffness = 420f)
+                    spring(dampingRatio = 0.88f, stiffness = 420f, visibilityThreshold = 0.0005f)
                 }
             )
+            progressAnim.snapTo(1f)
         }
     }
 

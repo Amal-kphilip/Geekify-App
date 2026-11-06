@@ -569,8 +569,9 @@ fun MainScreen(
 
       }
 
-        // Persistent Unified Expanded Player Overlay (morphs continuously to/from NowPlayingBar)
-        if (playerState.current != null) {
+        // Persistent Unified Expanded Player Overlay (mounted only while expanded or actively transitioning
+        // so invisible child pointer targets never intercept touches on the underlying screen or mini-player)
+        if (playerState.current != null && playerTransitionState.isExpandedOrTransitioning) {
             ExpandedPlayerScreen(
                 viewModel = playerViewModel,
                 transitionState = playerTransitionState,

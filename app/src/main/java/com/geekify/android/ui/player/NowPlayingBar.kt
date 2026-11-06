@@ -87,7 +87,9 @@ fun NowPlayingBar(
         onDispose { }
     }
 
-    val controlsInteractive = (transitionState?.progress ?: 1f) >= 0.85f
+    val controlsInteractive: () -> Boolean = {
+        (transitionState?.progress ?: 1f) >= 0.85f
+    }
 
     Box(
         modifier = modifier
@@ -104,9 +106,7 @@ fun NowPlayingBar(
             .trackPress(pressed)
             .bouncyClickable(
                 pressedScale = 0.985f,
-                onClick = {
-                    if (controlsInteractive) onClick()
-                }
+                onClick = onClick
             )
             .pointerInput(state.isPlaying, onDismiss, transitionState, screenHeightPx) {
                 val velocityTracker = VelocityTracker()
@@ -188,8 +188,7 @@ fun NowPlayingBar(
                         }
                     }
                     .graphicsLayer {
-                        val p = transitionState?.progress ?: 1f
-                        alpha = if (p >= 0.995f) 1f else 0f
+                        alpha = if (transitionState?.isExpandedOrTransitioning == true) 0f else 1f
                     }
                     .clip(CircleShape)
                     .background(InkElevated),
@@ -218,8 +217,7 @@ fun NowPlayingBar(
                         }
                     }
                     .graphicsLayer {
-                        val p = transitionState?.progress ?: 1f
-                        alpha = if (p >= 0.995f) 1f else 0f
+                        alpha = if (transitionState?.isExpandedOrTransitioning == true) 0f else 1f
                     },
                 verticalArrangement = Arrangement.Center
             ) {
@@ -258,7 +256,7 @@ fun NowPlayingBar(
 
                 LikeButton(
                     liked = liked,
-                    onClick = { if (controlsInteractive) viewModel.toggleLikeCurrent() },
+                    onClick = { if (controlsInteractive()) viewModel.toggleLikeCurrent() },
                     modifier = Modifier
                         .size(40.dp)
                         .graphicsLayer {
@@ -282,13 +280,12 @@ fun NowPlayingBar(
                         }
                     }
                     .graphicsLayer {
-                        val p = transitionState?.progress ?: 1f
-                        alpha = if (p >= 0.995f) 1f else 0f
+                        alpha = if (transitionState?.isExpandedOrTransitioning == true) 0f else 1f
                     }
                     .clip(CircleShape)
                     .background(Lime)
                     .bouncyClickable(pressedScale = 0.92f) {
-                        if (controlsInteractive) viewModel.togglePlay()
+                        if (controlsInteractive()) viewModel.togglePlay()
                     },
                 contentAlignment = Alignment.Center
             ) {
@@ -314,7 +311,7 @@ fun NowPlayingBar(
                 Spacer(Modifier.width(2.dp))
 
                 IconButton(
-                    onClick = { if (controlsInteractive) viewModel.next() },
+                    onClick = { if (controlsInteractive()) viewModel.next() },
                     modifier = Modifier
                         .size(40.dp)
                         .onGloballyPositioned { coords ->
@@ -323,8 +320,7 @@ fun NowPlayingBar(
                             }
                         }
                         .graphicsLayer {
-                            val p = transitionState?.progress ?: 1f
-                            alpha = if (p >= 0.995f) 1f else 0f
+                            alpha = if (transitionState?.isExpandedOrTransitioning == true) 0f else 1f
                         }
                 ) {
                     Icon(GeekifyIcons.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(22.dp))
@@ -343,7 +339,7 @@ fun NowPlayingBar(
                 )
 
                 IconButton(
-                    onClick = { if (controlsInteractive) viewModel.toggleShuffle() },
+                    onClick = { if (controlsInteractive()) viewModel.toggleShuffle() },
                     modifier = Modifier
                         .size(40.dp)
                         .graphicsLayer {
