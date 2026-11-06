@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Vendored from Kyant0/backdrop v2.0.0 (io.github.kyant0:backdrop)
  * https://github.com/Kyant0/backdrop — Copyright 2025 Kyant0, Apache License 2.0
  *
@@ -14,12 +14,14 @@ import androidx.compose.ui.graphics.Paint
 import com.geekify.android.ui.glass.backdrop.RuntimeShader
 import com.geekify.android.ui.glass.backdrop.asAndroidRuntimeShader
 
+@Suppress("DEPRECATION")
 internal fun Paint.blur(radius: Float) {
     this.asFrameworkPaint().maskFilter =
         if (radius > 0f) BlurMaskFilter(radius, BlurMaskFilter.Blur.NORMAL)
         else null
 }
 
+@Suppress("DEPRECATION")
 internal fun Paint.setRuntimeShader(runtimeShader: RuntimeShader?) {
     this.asFrameworkPaint().shader = runtimeShader?.asAndroidRuntimeShader()
 }

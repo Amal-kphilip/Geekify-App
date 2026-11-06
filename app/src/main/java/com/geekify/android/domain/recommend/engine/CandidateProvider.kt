@@ -183,7 +183,7 @@ class MusicBrainzCandidateProvider @Inject constructor(
                         .build()
                         .newCall(request)
                         .execute()
-                        .use { resp -> if (resp.isSuccessful) resp.body?.string() else null }
+                        .use { resp -> if (resp.isSuccessful) resp.body.string() else null }
                         ?: return@runCatching emptyList()
 
                     parseMusicBrainzRecordings(body, limit)

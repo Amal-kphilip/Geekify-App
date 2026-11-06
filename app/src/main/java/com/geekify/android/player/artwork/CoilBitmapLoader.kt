@@ -42,6 +42,7 @@ import kotlinx.coroutines.launch
  * for it; a slow cover for song A can never be delivered as song B's artwork.
  * All work runs off the main thread on [scope]; call [close] when the service is destroyed.
  */
+@Suppress("DEPRECATION")
 @UnstableApi
 class CoilBitmapLoader(
     private val context: Context,

@@ -65,7 +65,7 @@ class ListeningLanguageMetadataResolver @Inject constructor(
                         .execute()
                         .use { response ->
                             if (!response.isSuccessful) null
-                            else response.body?.string()?.let(LyricsLanguageResponseParser::parse)
+                            else response.body.string().let(LyricsLanguageResponseParser::parse)
                         }
                 }.getOrNull()
 

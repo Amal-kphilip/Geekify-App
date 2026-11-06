@@ -43,6 +43,7 @@ class AccountViewModel @Inject constructor(
     private val accountOperationMutex = Mutex()
 
     /** Serializes sign-in, switching and sign-out so rapid taps cannot interleave two handoffs. */
+    @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
     private fun launchAccountOperation(block: suspend () -> Unit) {
         if (!accountOperationMutex.tryLock()) return
         // ATOMIC start guarantees the coroutine enters its try/finally even if the ViewModel is

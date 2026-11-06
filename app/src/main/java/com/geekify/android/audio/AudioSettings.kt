@@ -87,8 +87,7 @@ class AudioSettingsRepository @Inject constructor(
         .distinctUntilChanged()
 
     suspend fun update(transform: (AudioSettings) -> AudioSettings): MusicResult<Unit> = safeDbCall(io) {
-        dataStore.edit { prefs -> encode(prefs, transform(decode(prefs)).sanitized()) }
-        Unit
+        val _ignored = dataStore.edit { prefs -> encode(prefs, transform(decode(prefs)).sanitized()) }
     }
 
     private fun decode(p: Preferences): AudioSettings = AudioSettings(

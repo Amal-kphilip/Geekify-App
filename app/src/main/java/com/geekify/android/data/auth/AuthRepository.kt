@@ -342,7 +342,6 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
         val name = accountAppName(uid)
         FirebaseApp.getApps(context).firstOrNull { it.name == name }
             ?: FirebaseApp.initializeApp(context, defaultApp.options, name)
-            ?: FirebaseApp.getInstance(name)
     }
 
     private fun cachedAuthForUid(uid: String): Pair<FirebaseApp, FirebaseAuth>? {
@@ -515,7 +514,6 @@ class AuthRepository @Inject constructor(@ApplicationContext private val context
     private fun validationAuth(): Pair<FirebaseApp, FirebaseAuth> {
         val name = "GeekifyValidation-${validationAppCounter.incrementAndGet()}"
         val app = FirebaseApp.initializeApp(context, FirebaseApp.getInstance().options, name)
-            ?: throw IllegalStateException("Couldn't prepare a secure account switch. Please try again.")
         return app to FirebaseAuth.getInstance(app)
     }
 

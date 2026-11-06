@@ -299,6 +299,7 @@ fun Modifier.liquidGlass(
         val shadowPaint = remember(effectiveStyle, density.density) {
             Paint().apply {
                 color = Color.Black.copy(alpha = effectiveStyle.shadowAlpha)
+                @Suppress("DEPRECATION")
                 asFrameworkPaint().maskFilter =
                     BlurMaskFilter(with(density) { effectiveStyle.shadowRadius.toPx() }, BlurMaskFilter.Blur.NORMAL)
             }
