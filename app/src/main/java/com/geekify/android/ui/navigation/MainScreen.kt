@@ -103,9 +103,10 @@ import com.geekify.android.ui.search.SearchViewModel
 import com.geekify.android.ui.theme.*
 import com.geekify.android.BuildConfig
 import com.geekify.android.ui.update.UpdateDialog
-import com.geekify.android.ui.update.UpdateStage
-import com.geekify.android.update.AppUpdateManager
-import com.geekify.android.update.AvailableUpdate
+import com.geekify.android.update.UpdateViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -123,6 +124,7 @@ fun MainScreen(
     accountViewModel: AccountViewModel = hiltViewModel(),
     libraryViewModel: LibraryViewModel = hiltViewModel(),
     settingsViewModel: SettingsViewModel = hiltViewModel(),
+    updateViewModel: UpdateViewModel = hiltViewModel(),
     startRoute: String? = null,
     onStartRouteConsumed: () -> Unit = {},
     triggerUpdateCheck: Boolean = false,
@@ -145,31 +147,31 @@ fun MainScreen(
     val likedTracks by libraryViewModel.liked.collectAsState()
     val playlists by libraryViewModel.playlists.collectAsState()
     val savedCollections by libraryViewModel.savedCollections.collectAsState()
+    val updateUiState by updateViewModel.uiState.collectAsState()
     val avatarUrl = accountState.user?.photoUrl
     val avatarName = accountState.user?.name
-    val context = LocalContext.current
-    val updateManager = remember { AppUpdateManager(context.applicationContext) }
-    val updateScope = rememberCoroutineScope()
-    var availableUpdate by remember { mutableStateOf<AvailableUpdate?>(null) }
-    var updateStage by remember { mutableStateOf(UpdateStage.Available) }
-    var downloadedApk by remember { mutableStateOf<java.io.File?>(null) }
-    // null = size unknown (indeterminate ring); otherwise the real 0f..1f download fraction.
-    var updateProgress by remember { mutableStateOf<Float?>(null) }
-    var updateError by remember { mutableStateOf<String?>(null) }
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-    var hasCheckedUpdates by remember { mutableStateOf(false) }
-    LaunchedEffect(triggerUpdateCheck) {
-        // Check once on normal launch, and again whenever the user taps an update notification.
-        if (!hasCheckedUpdates || triggerUpdateCheck) {
-            hasCheckedUpdates = true
-            availableUpdate = updateManager.findAvailableUpdate()
-            if (triggerUpdateCheck) {
-                updateStage = UpdateStage.Available
-                downloadedApk = null
-                updateProgress = null
-                updateError = null
-                onUpdateCheckConsumed()
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                updateViewModel.onAppResumed()
             }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        updateViewModel.performStartupCheckIfNeeded()
+    }
+
+    LaunchedEffect(triggerUpdateCheck) {
+        if (triggerUpdateCheck) {
+            updateViewModel.checkForUpdates(userInitiated = true)
+            onUpdateCheckConsumed()
         }
     }
 
@@ -495,18 +497,7 @@ fun MainScreen(
                             onRecentsClick = { navController.navigate(Screen.Recents.route) },
                             onHealthClick = { navController.navigate(Screen.Health.route) },
                             onCheckUpdatesClick = {
-                                updateScope.launch {
-                                    val found = updateManager.findAvailableUpdate()
-                                    if (found != null) {
-                                        availableUpdate = found
-                                        updateStage = UpdateStage.Available
-                                        downloadedApk = null
-                                        updateProgress = null
-                                        updateError = null
-                                    } else {
-                                        android.widget.Toast.makeText(context, "Geekify is up to date (v${BuildConfig.VERSION_NAME})", android.widget.Toast.LENGTH_SHORT).show()
-                                    }
-                                }
+                                updateViewModel.checkForUpdates(userInitiated = true)
                             },
                             currentUser = accountState.user
                         )
@@ -637,43 +628,30 @@ fun MainScreen(
             )
         }
 
-        availableUpdate?.let { update ->
+        if (updateUiState.isDialogVisible) {
             UpdateDialog(
-                stage = updateStage,
-                currentVersion = BuildConfig.VERSION_NAME,
-                newVersion = update.version.trimStart('v', 'V'),
-                releaseNotes = update.releaseNotes,
-                progress = updateProgress,
-                error = updateError,
-                onUpdate = {
-                    updateStage = UpdateStage.Downloading
-                    updateError = null
-                    updateProgress = null
-                    updateScope.launch {
-                        runCatching {
-                            updateManager.download(update) { updateProgress = it }
-                        }.onSuccess { apk ->
-                            downloadedApk = apk
-                            updateProgress = 1f
-                            updateStage = UpdateStage.Ready
-                        }.onFailure {
-                            updateStage = UpdateStage.Available
-                            updateError = "Couldn’t download the update. Please try again."
-                        }
-                    }
+                uiState = updateUiState,
+                onStartDownload = {
+                    updateViewModel.startDownloadFlow(
+                        bypassMeteredWarning = false,
+                        audioQualityPreference = appSettingsState.audioQuality
+                    )
                 },
-                onInstall = {
-                    downloadedApk?.let { apk ->
-                        updateStage = UpdateStage.Installing
-                        updateManager.install(apk)
-                        updateScope.launch {
-                            // If the system installer was cancelled, let the person try again.
-                            delay(3000)
-                            if (updateStage == UpdateStage.Installing) updateStage = UpdateStage.Ready
-                        }
-                    }
+                onConfirmMeteredDownload = {
+                    updateViewModel.startDownloadFlow(
+                        bypassMeteredWarning = true,
+                        audioQualityPreference = appSettingsState.audioQuality
+                    )
                 },
-                onLater = { availableUpdate = null }
+                onCancelDownload = { updateViewModel.cancelDownload() },
+                onInstall = { updateViewModel.proceedToInstall() },
+                onRetryCheck = { updateViewModel.checkForUpdates(userInitiated = true) },
+                onToggleChangelogVersion = { versionName ->
+                    updateViewModel.toggleChangelogReleaseExpanded(versionName)
+                },
+                onDismiss = { rememberSkip ->
+                    updateViewModel.dismissDialog(rememberSkipForVersion = rememberSkip)
+                }
             )
         }
 

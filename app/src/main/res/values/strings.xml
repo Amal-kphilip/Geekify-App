@@ -16,4 +16,45 @@
     <string name="add_account">Add account</string>
     <string name="switch_account">Switch account</string>
     <string name="add_or_switch_account">Add or switch account</string>
+
+    <!-- App Update Experience -->
+    <string name="update_app_name">GEEKIFY</string>
+    <string name="update_checking_title">Checking for updates…</string>
+    <string name="update_checking_subtitle">Contacting GitHub Releases</string>
+    <string name="update_available_title">Update available</string>
+    <string name="update_available_subtitle">New release ready for your device</string>
+    <string name="update_up_to_date_title">You\'re up to date</string>
+    <string name="update_up_to_date_subtitle">Geekify is running the latest stable release</string>
+    <string name="update_downloading_title">Downloading update…</string>
+    <string name="update_downloading_subtitle">Fetching signed release package</string>
+    <string name="update_verifying_title">Verifying update…</string>
+    <string name="update_verifying_subtitle">Validating SHA-256 digest &amp; package signature</string>
+    <string name="update_ready_title">Update downloaded</string>
+    <string name="update_ready_subtitle">Package verified and ready to install</string>
+    <string name="update_installing_title">Installing Geekify update…</string>
+    <string name="update_installing_subtitle">Geekify will close or restart to complete the installation.</string>
+    <string name="update_installing_permission_subtitle">Allow unknown app installations when prompted, then return to Geekify.</string>
+    <string name="update_completed_title">Geekify updated successfully</string>
+    <string name="update_completed_subtitle">Your music, playlists, and settings are ready</string>
+    <string name="update_download_failed_title">Update download failed</string>
+    <string name="update_verify_failed_title">Package verification failed</string>
+    <string name="update_install_failed_title">Installation could not start</string>
+    <string name="update_install_cancelled_title">Installation cancelled</string>
+    <string name="update_metered_warning_title">Metered connection detected</string>
+    <string name="update_metered_warning_body">You are currently on mobile data or a metered network. Downloading this update (%1$s) may use mobile data.</string>
+    <string name="update_action_download">Download &amp; Install</string>
+    <string name="update_action_download_anyway">Download on mobile data</string>
+    <string name="update_action_install">Install Update</string>
+    <string name="update_action_grant_permission">Grant Install Permission</string>
+    <string name="update_action_retry">Retry</string>
+    <string name="update_action_cancel">Cancel</string>
+    <string name="update_action_later">Later</string>
+    <string name="update_action_close">Close</string>
+    <string name="update_action_done">Done</string>
+    <string name="update_action_open_release_page">Open Release Page</string>
+    <string name="update_action_check_again">Check Again</string>
+    <string name="update_whats_new_header">What\'s new in Geekify</string>
+    <string name="update_changelog_timeline_header">Release Changelog</string>
+    <string name="update_changes_count">%1$d changes</string>
+    <string name="update_verified_badge">SHA-256 &amp; Signature Verified</string>
 </resources>
