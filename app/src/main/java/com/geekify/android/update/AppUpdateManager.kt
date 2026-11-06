@@ -679,11 +679,11 @@ class AppUpdateManager @Inject constructor(
     }
 
     private fun getFileProviderUri(apk: File): Uri {
-        return runCatching {
-            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apk)
-        }.recoverCatching {
-            FileProvider.getUriForFile(context, "${context.packageName}.provider", apk)
-        }.getOrThrow()
+        return FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            apk
+        )
     }
 
     fun isNetworkAvailable(): Boolean = runCatching {
