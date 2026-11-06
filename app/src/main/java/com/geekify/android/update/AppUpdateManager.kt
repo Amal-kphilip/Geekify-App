@@ -679,11 +679,42 @@ class AppUpdateManager @Inject constructor(
     }
 
     private fun getFileProviderUri(apk: File): Uri {
-        return FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            apk
-        )
+        val primaryAuthority = "${context.packageName}.fileprovider"
+        runCatching {
+            return FileProvider.getUriForFile(context, primaryAuthority, apk)
+        }
+
+        // Dynamically inspect any registered ContentProvider authorities for this package
+        val packageInfo = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getPackageInfo(
+                    context.packageName,
+                    PackageManager.PackageInfoFlags.of(PackageManager.GET_PROVIDERS.toLong())
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_PROVIDERS)
+            }
+        }.getOrNull()
+
+        val providerAuthorities = packageInfo?.providers?.mapNotNull { it.authority } ?: emptyList()
+        for (auth in providerAuthorities) {
+            for (single in auth.split(";")) {
+                val candidate = single.trim()
+                if (candidate.isNotEmpty()) {
+                    val resolved = runCatching {
+                        FileProvider.getUriForFile(context, candidate, apk)
+                    }.getOrNull()
+                    if (resolved != null) return resolved
+                }
+            }
+        }
+
+        return runCatching {
+            FileProvider.getUriForFile(context, "${context.packageName}.provider", apk)
+        }.getOrElse {
+            FileProvider.getUriForFile(context, primaryAuthority, apk)
+        }
     }
 
     fun isNetworkAvailable(): Boolean = runCatching {

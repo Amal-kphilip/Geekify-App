@@ -44,10 +44,19 @@ import com.geekify.android.ui.glass.LocalGlassDim
 import com.geekify.android.ui.glass.consumeTaps
 import com.geekify.android.ui.glass.liquidGlass
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import com.geekify.android.ui.components.CircleIconButton
 import com.geekify.android.ui.components.TrackRow
+import com.geekify.android.ui.components.bestArtworkUrl
+import com.geekify.android.ui.components.rememberArtColor
+import com.geekify.android.ui.theme.InkBackground
+import com.geekify.android.ui.theme.InkElevated
 import com.geekify.android.ui.theme.Lime
 import com.geekify.android.ui.theme.TextMuted
 import com.geekify.android.ui.theme.TextPrimary
@@ -124,9 +133,13 @@ fun QueueScreen(
     // closes the queue first and never pops a screen underneath it.
     BackHandler(onBack = onBack)
 
-    // One glass container floating over the dimmed app; the song rows inside stay clean (no per-row glass cards).
+    val currentTrack = state.current
+    val thumbUrl = currentTrack?.thumbnails?.bestArtworkUrl()
+    val artColor by rememberArtColor(thumbUrl, fallback = InkElevated)
+    val sheetShape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
+
+    // A rich opaque glass sheet floating over the dimmed underlying player.
     // The scrim consumes taps so nothing behind the queue can be tapped. The full overlay follows the finger.
-    CompositionLocalProvider(LocalGlassDim provides 0.42f) {
     Box(
         Modifier
             .fillMaxSize()
@@ -134,23 +147,64 @@ fun QueueScreen(
                 translationY = dismissOffset.value
                 alpha = 1f - (dismissOffset.value / screenHeightPx).coerceIn(0f, 1f) * 0.5f
             }
-            .background(Color.Black.copy(alpha = 0.42f))
+            .background(Color.Black.copy(alpha = 0.60f))
             .consumeTaps()
     ) {
       Box(
         Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .padding(top = 8.dp)
-            .liquidGlass(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp), GlassStyle.Panel)
+            .padding(top = 10.dp)
+            .shadow(
+                elevation = 28.dp,
+                shape = sheetShape,
+                ambientColor = Color.Black.copy(alpha = 0.7f),
+                spotColor = Color.Black.copy(alpha = 0.7f)
+            )
+            .clip(sheetShape)
+            .background(InkBackground)
+            .border(
+                width = 1.dp,
+                brush = Brush.verticalGradient(
+                    listOf(
+                        Color.White.copy(alpha = 0.20f),
+                        Color.White.copy(alpha = 0.05f),
+                        Color.Transparent
+                    )
+                ),
+                shape = sheetShape
+            )
       ) {
+        // Ambient artwork glow washing down from top of the queue sheet
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(300.dp)
+                .background(
+                    Brush.verticalGradient(
+                        0f to artColor.copy(alpha = 0.35f),
+                        0.5f to artColor.copy(alpha = 0.08f),
+                        1f to Color.Transparent
+                    )
+                )
+        )
+
+        // Drag handle pill centered at top
+        Box(
+            modifier = Modifier
+                .padding(top = 10.dp)
+                .align(Alignment.TopCenter)
+                .size(width = 38.dp, height = 4.dp)
+                .background(Color.White.copy(alpha = 0.28f), CircleShape)
+        )
+
         Scaffold(
             containerColor = Color.Transparent,
             topBar = {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 8.dp)
+                        .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 8.dp)
                         // The header also acts as a grab surface, including when the queue is empty.
                         .pointerInput(screenHeightPx, dismissThresholdPx) {
                             detectVerticalDragGestures(
@@ -314,7 +368,6 @@ fun QueueScreen(
             }
         }
       }
-    }
     }
 }
 

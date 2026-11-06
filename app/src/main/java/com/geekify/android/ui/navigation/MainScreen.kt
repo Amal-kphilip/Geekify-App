@@ -341,7 +341,7 @@ fun MainScreen(
     ) {
     Box(modifier = Modifier.fillMaxSize().background(InkBackground)) {
       // ---- SCENE: everything that sits underneath popups / dialogs / panels ----
-      Box(modifier = Modifier.fillMaxSize().glassBackdropSource(sceneBackdrop, enabled = overlayHost.entries.isNotEmpty() || showQueue).background(InkBackground)) {
+      Box(modifier = Modifier.fillMaxSize().glassBackdropSource(sceneBackdrop, enabled = overlayHost.entries.isNotEmpty()).background(InkBackground)) {
         // Main content stays clean, sharp and opaque. It is only RECORDED so the floating bars can sample it.
         Box(modifier = Modifier.fillMaxSize().glassBackdropSource(contentBackdrop).nestedScroll(scrollConnection).background(InkBackground)) {
                 NavHost(
@@ -574,20 +574,20 @@ fun MainScreen(
 
       } // end SCENE
 
-      CompositionLocalProvider(LocalGlassBackdrop provides sceneBackdrop) {
-        // Queue Overlay (a glass container over the dimmed scene)
-        AnimatedVisibility(
-            visible = showQueue,
-            enter = slideInVertically(tween(380, easing = FastOutSlowInEasing), initialOffsetY = { it }) + fadeIn(tween(250)),
-            exit = slideOutVertically(tween(320, easing = FastOutSlowInEasing), targetOffsetY = { it }) + fadeOut(tween(250)),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            QueueScreen(
-                viewModel = playerViewModel,
-                onBack = { showQueue = false }
-            )
-        }
+      // Queue Overlay (rich dark modal sheet over ExpandedPlayerScreen)
+      AnimatedVisibility(
+          visible = showQueue,
+          enter = slideInVertically(tween(380, easing = FastOutSlowInEasing), initialOffsetY = { it }) + fadeIn(tween(250)),
+          exit = slideOutVertically(tween(320, easing = FastOutSlowInEasing), targetOffsetY = { it }) + fadeOut(tween(250)),
+          modifier = Modifier.fillMaxSize()
+      ) {
+          QueueScreen(
+              viewModel = playerViewModel,
+              onBack = { showQueue = false }
+          )
+      }
 
+      CompositionLocalProvider(LocalGlassBackdrop provides sceneBackdrop) {
         // Create playlist (from the "Create" tab)
         if (showCreatePlaylist) {
             val createVm: LibraryViewModel = hiltViewModel()
