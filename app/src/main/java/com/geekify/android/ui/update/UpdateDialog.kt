@@ -341,13 +341,13 @@ private fun UpdateDialogHeader(
             ) { title ->
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontSize = 20.sp,
-                        lineHeight = 24.sp,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = 18.sp,
+                        lineHeight = 22.sp,
                         fontWeight = FontWeight.ExtraBold
                     ),
                     color = TextPrimary,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
@@ -1977,6 +1977,12 @@ private fun UpdateDialogFooter(
  */
 @Composable
 private fun GeekifyAppIconBadge(sizeDp: Int) {
+    val context = LocalContext.current
+    val iconRes = remember(context) {
+        val currentId = com.geekify.android.appicon.AppIconManager.currentIcon(context)
+        com.geekify.android.appicon.AppIconManager.options.firstOrNull { it.id == currentId }?.previewRes
+            ?: R.drawable.ic_geekify_default_preview
+    }
     Box(
         modifier = Modifier
             .size(sizeDp.dp)
@@ -1986,7 +1992,7 @@ private fun GeekifyAppIconBadge(sizeDp: Int) {
         contentAlignment = Alignment.Center
     ) {
         Image(
-            painter = painterResource(id = R.drawable.ic_geekify_default_preview),
+            painter = painterResource(id = iconRes),
             contentDescription = stringResource(R.string.update_app_name),
             contentScale = ContentScale.Crop,
             modifier = Modifier

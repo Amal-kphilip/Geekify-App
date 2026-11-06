@@ -648,11 +648,7 @@ class AppUpdateManager @Inject constructor(
                 targetVersionCode = targetVersionCode,
                 fromVersionName = currentVersionName
             )
-            val uri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.provider",
-                apk
-            )
+            val uri = getFileProviderUri(apk)
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, "application/vnd.android.package-archive")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -673,17 +669,21 @@ class AppUpdateManager @Inject constructor(
             openUnknownSourcesSettings()
             return
         }
-        val uri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.provider",
-            apk
-        )
+        val uri = getFileProviderUri(apk)
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)
+    }
+
+    private fun getFileProviderUri(apk: File): Uri {
+        return runCatching {
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apk)
+        }.recoverCatching {
+            FileProvider.getUriForFile(context, "${context.packageName}.provider", apk)
+        }.getOrThrow()
     }
 
     fun isNetworkAvailable(): Boolean = runCatching {

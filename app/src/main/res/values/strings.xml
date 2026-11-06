@@ -38,7 +38,7 @@
     <string name="update_completed_subtitle">Your music, playlists, and settings are ready</string>
     <string name="update_download_failed_title">Update download failed</string>
     <string name="update_verify_failed_title">Package verification failed</string>
-    <string name="update_install_failed_title">Installation could not start</string>
+    <string name="update_install_failed_title">Installation failed</string>
     <string name="update_install_cancelled_title">Installation cancelled</string>
     <string name="update_metered_warning_title">Metered connection detected</string>
     <string name="update_metered_warning_body">You are currently on mobile data or a metered network. Downloading this update (%1$s) may use mobile data.</string>
