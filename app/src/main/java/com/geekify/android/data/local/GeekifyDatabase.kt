@@ -187,16 +187,32 @@ data class RecommendationImpressionEntity(
     val position: Int,
     val sourceSeed: String?,
     val score: Double,
-    val shownAt: Long = System.currentTimeMillis()
+    val shownAt: Long = System.currentTimeMillis(),
+    val candidateSource: String? = null,
+    val modelVersion: String = "v2.4-hybrid",
+    val experimentGroup: String = "CONTROL"
 )
 
 enum class RecommendationOutcomeEvent {
+    IMPRESSION,
+    MIX_CARD_IMPRESSION,
+    MIX_OPENED,
+    TRACK_SELECTED,
     PLAYED,
+    PLAYED_30S,
+    PLAYED_50_PERCENT,
     COMPLETED,
+    SKIPPED_UNDER_10S,
     SKIPPED_EARLY,
+    SKIPPED_FULL,
+    REPLAYED,
     LIKED,
+    UNLIKED,
     ADDED_TO_PLAYLIST,
+    REMOVED_FROM_PLAYLIST,
+    SAVED_ALBUM_OR_ARTIST,
     DISMISSED,
+    HIDDEN,
     IGNORED
 }
 
@@ -220,7 +236,86 @@ data class RecommendationOutcomeEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     val impressionId: Long,
     val event: String,
-    val at: Long = System.currentTimeMillis()
+    val at: Long = System.currentTimeMillis(),
+    val accountId: String? = null,
+    val playDurationMs: Long = 0L,
+    val dedupeKey: String? = null
+)
+
+@Entity(
+    tableName = "track_features",
+    indices = [
+        Index(value = ["normalizedIdentity"]),
+        Index(value = ["language"]),
+        Index(value = ["updatedAt"])
+    ]
+)
+data class TrackFeatureEntity(
+    @PrimaryKey val videoId: String,
+    val normalizedIdentity: String,
+    val isrc: String? = null,
+    val mbRecordingId: String? = null,
+    val recordingVariant: String = "ORIGINAL",
+    val language: String? = null,
+    val languageConfidence: Double = 1.0,
+    val genresJson: String = "{}",
+    val moodsJson: String = "{}",
+    val audioEmbeddingJson: String = "[]",
+    val lyricsEmbeddingJson: String = "[]",
+    val featureSource: String = "METADATA_STRUCTURAL_PROJECTION",
+    val tempoBpm: Double? = null,
+    val energy: Double? = null,
+    val acousticness: Double? = null,
+    val valence: Double? = null,
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(
+    tableName = "user_preference_profiles",
+    indices = [Index(value = ["updatedAt"])]
+)
+data class UserPreferenceProfileEntity(
+    @PrimaryKey val accountId: String,
+    val tasteVectorJson: String = "[]",
+    val artistAffinitiesJson: String = "{}",
+    val genreAffinitiesJson: String = "{}",
+    val moodAffinitiesJson: String = "{}",
+    val languageAffinitiesJson: String = "{}",
+    val contextAffinitiesJson: String = "{}",
+    val negativeSignalsJson: String = "{}",
+    val explorationTolerance: Double = 0.25,
+    val modelVersion: String = "v2.4-hybrid",
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(
+    tableName = "experiment_assignments",
+    indices = [Index(value = ["experimentId", "treatmentGroup"])]
+)
+data class ExperimentAssignmentEntity(
+    @PrimaryKey val accountId: String,
+    val experimentId: String,
+    val treatmentGroup: String,
+    val assignedAt: Long = System.currentTimeMillis(),
+    val killSwitchActive: Boolean = false
+)
+
+@Entity(
+    tableName = "collaborative_interactions",
+    indices = [
+        Index(value = ["videoId", "timestampMs"]),
+        Index(value = ["anonUserHash", "timestampMs"]),
+        Index(value = ["artistKey"])
+    ]
+)
+data class CollaborativeInteractionEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val anonUserHash: String,
+    val videoId: String,
+    val artistKey: String,
+    val interactionType: String,
+    val weight: Double,
+    val timestampMs: Long = System.currentTimeMillis()
 )
 
 @Entity(
@@ -493,15 +588,64 @@ interface RecommendationLogDao {
     suspend fun countOutcomes(): Int
 }
 
+@Dao
+interface RecommendationEngineDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertTrackFeature(feature: TrackFeatureEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertTrackFeatures(features: List<TrackFeatureEntity>)
+
+    @Query("SELECT * FROM track_features WHERE videoId = :videoId")
+    suspend fun getTrackFeature(videoId: String): TrackFeatureEntity?
+
+    @Query("SELECT * FROM track_features WHERE videoId IN (:videoIds)")
+    suspend fun getTrackFeatures(videoIds: List<String>): List<TrackFeatureEntity>
+
+    @Query("DELETE FROM track_features WHERE updatedAt < :before")
+    suspend fun pruneTrackFeaturesBefore(before: Long): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertUserProfile(profile: UserPreferenceProfileEntity)
+
+    @Query("SELECT * FROM user_preference_profiles WHERE accountId = :accountId")
+    suspend fun getUserProfile(accountId: String): UserPreferenceProfileEntity?
+
+    @Query("DELETE FROM user_preference_profiles WHERE accountId = :accountId")
+    suspend fun deleteUserProfile(accountId: String)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertExperimentAssignment(assignment: ExperimentAssignmentEntity)
+
+    @Query("SELECT * FROM experiment_assignments WHERE accountId = :accountId")
+    suspend fun getExperimentAssignment(accountId: String): ExperimentAssignmentEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCollaborativeInteraction(interaction: CollaborativeInteractionEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCollaborativeInteractions(interactions: List<CollaborativeInteractionEntity>)
+
+    @Query("SELECT * FROM collaborative_interactions WHERE timestampMs >= :since ORDER BY timestampMs DESC LIMIT :limit")
+    suspend fun getRecentCollaborativeInteractions(since: Long, limit: Int = 5000): List<CollaborativeInteractionEntity>
+
+    @Query("DELETE FROM collaborative_interactions WHERE anonUserHash = :anonUserHash")
+    suspend fun deleteCollaborativeInteractionsForUser(anonUserHash: String)
+
+    @Query("DELETE FROM collaborative_interactions WHERE timestampMs < :before")
+    suspend fun pruneCollaborativeInteractionsBefore(before: Long): Int
+}
+
 // ---- Database ----
 
 @Database(
     entities = [
         LikedTrackEntity::class, HistoryTrackEntity::class, PlaylistEntity::class, PlaylistTrackEntity::class, PlayStatEntity::class,
         TrackEntity::class, AlbumEntity::class, ArtistEntity::class, CachedShelfEntity::class, ListeningSessionEntity::class,
-        RecentSearchEntity::class, RecommendationImpressionEntity::class, RecommendationOutcomeEntity::class
+        RecentSearchEntity::class, RecommendationImpressionEntity::class, RecommendationOutcomeEntity::class,
+        TrackFeatureEntity::class, UserPreferenceProfileEntity::class, ExperimentAssignmentEntity::class, CollaborativeInteractionEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -515,6 +659,7 @@ abstract class GeekifyDatabase : RoomDatabase() {
     abstract fun shelfCacheDao(): ShelfCacheDao
     abstract fun recentSearchDao(): RecentSearchDao
     abstract fun recommendationLogDao(): RecommendationLogDao
+    abstract fun recommendationEngineDao(): RecommendationEngineDao
 }
 
 /** v2 -> v3: adds the offline catalog (tracks, albums, artists) and the cached home shelves. Nothing is dropped. */
@@ -652,5 +797,60 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
         )
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_recommendation_outcomes_impressionId` ON `recommendation_outcomes` (`impressionId`)")
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_recommendation_outcomes_at` ON `recommendation_outcomes` (`at`)")
+    }
+}
+
+/** v8 -> v9: adds provenance/experiment columns and tables for track features, user preference profiles, experiments, and collaborative interactions. */
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `recommendation_impressions` ADD COLUMN `candidateSource` TEXT")
+        db.execSQL("ALTER TABLE `recommendation_impressions` ADD COLUMN `modelVersion` TEXT NOT NULL DEFAULT 'v2.4-hybrid'")
+        db.execSQL("ALTER TABLE `recommendation_impressions` ADD COLUMN `experimentGroup` TEXT NOT NULL DEFAULT 'CONTROL'")
+
+        db.execSQL("ALTER TABLE `recommendation_outcomes` ADD COLUMN `accountId` TEXT")
+        db.execSQL("ALTER TABLE `recommendation_outcomes` ADD COLUMN `playDurationMs` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE `recommendation_outcomes` ADD COLUMN `dedupeKey` TEXT")
+
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `track_features` (" +
+                "`videoId` TEXT NOT NULL, `normalizedIdentity` TEXT NOT NULL, `isrc` TEXT, `mbRecordingId` TEXT, " +
+                "`recordingVariant` TEXT NOT NULL, `language` TEXT, `languageConfidence` REAL NOT NULL, " +
+                "`genresJson` TEXT NOT NULL, `moodsJson` TEXT NOT NULL, `audioEmbeddingJson` TEXT NOT NULL, " +
+                "`lyricsEmbeddingJson` TEXT NOT NULL, `featureSource` TEXT NOT NULL, `tempoBpm` REAL, " +
+                "`energy` REAL, `acousticness` REAL, `valence` REAL, `updatedAt` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`videoId`))"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_track_features_normalizedIdentity` ON `track_features` (`normalizedIdentity`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_track_features_language` ON `track_features` (`language`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_track_features_updatedAt` ON `track_features` (`updatedAt`)")
+
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `user_preference_profiles` (" +
+                "`accountId` TEXT NOT NULL, `tasteVectorJson` TEXT NOT NULL, `artistAffinitiesJson` TEXT NOT NULL, " +
+                "`genreAffinitiesJson` TEXT NOT NULL, `moodAffinitiesJson` TEXT NOT NULL, " +
+                "`languageAffinitiesJson` TEXT NOT NULL, `contextAffinitiesJson` TEXT NOT NULL, " +
+                "`negativeSignalsJson` TEXT NOT NULL, `explorationTolerance` REAL NOT NULL, " +
+                "`modelVersion` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`accountId`))"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_user_preference_profiles_updatedAt` ON `user_preference_profiles` (`updatedAt`)")
+
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `experiment_assignments` (" +
+                "`accountId` TEXT NOT NULL, `experimentId` TEXT NOT NULL, `treatmentGroup` TEXT NOT NULL, " +
+                "`assignedAt` INTEGER NOT NULL, `killSwitchActive` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`accountId`))"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_experiment_assignments_experimentId_treatmentGroup` ON `experiment_assignments` (`experimentId`, `treatmentGroup`)")
+
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `collaborative_interactions` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `anonUserHash` TEXT NOT NULL, " +
+                "`videoId` TEXT NOT NULL, `artistKey` TEXT NOT NULL, `interactionType` TEXT NOT NULL, " +
+                "`weight` REAL NOT NULL, `timestampMs` INTEGER NOT NULL)"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_collaborative_interactions_videoId_timestampMs` ON `collaborative_interactions` (`videoId`, `timestampMs`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_collaborative_interactions_anonUserHash_timestampMs` ON `collaborative_interactions` (`anonUserHash`, `timestampMs`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_collaborative_interactions_artistKey` ON `collaborative_interactions` (`artistKey`)")
     }
 }

@@ -155,6 +155,8 @@ class PlaybackService : MediaSessionService() {
     private var lastListeningUpdatedAt = 0L
     private var activeListeningMs = 0L
     private var lastListeningCheckpointMs = 0L
+    private var logged30sThreshold = false
+    private var logged50PercentThreshold = false
     private var restoredPositionUsed = false
     @Volatile private var accountTransitionInProgress = false
     @Volatile private var transitionWasPlaying = false
@@ -411,6 +413,36 @@ class PlaybackService : MediaSessionService() {
                         if (activeListeningMs - lastListeningCheckpointMs >= LISTENING_CHECKPOINT_MS) {
                             checkpointListeningSession()
                             lastListeningCheckpointMs = activeListeningMs
+                        }
+                        if (!logged30sThreshold && activeListeningMs >= 30_000L && !appSettings.state.value.pauseListenHistory) {
+                            logged30sThreshold = true
+                            val vid = activeListeningTrack?.videoId
+                            if (vid != null) {
+                                listeningPersistenceScope.launch {
+                                    runCatching {
+                                        recommendationLogRepository.recordOutcome(
+                                            videoId = vid,
+                                            event = com.geekify.android.data.local.RecommendationOutcomeEvent.PLAYED_30S,
+                                            playDurationMs = activeListeningMs
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        if (!logged50PercentThreshold && dur > 0L && activeListeningMs >= dur / 2L && !appSettings.state.value.pauseListenHistory) {
+                            logged50PercentThreshold = true
+                            val vid = activeListeningTrack?.videoId
+                            if (vid != null) {
+                                listeningPersistenceScope.launch {
+                                    runCatching {
+                                        recommendationLogRepository.recordOutcome(
+                                            videoId = vid,
+                                            event = com.geekify.android.data.local.RecommendationOutcomeEvent.PLAYED_50_PERCENT,
+                                            playDurationMs = activeListeningMs
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                     if (!playCounted) {
@@ -1135,14 +1167,18 @@ class PlaybackService : MediaSessionService() {
         lastListeningUpdatedAt = activeListeningStartedAt
         activeListeningMs = 0L
         lastListeningCheckpointMs = 0L
+        logged30sThreshold = false
+        logged50PercentThreshold = false
 
-        listeningPersistenceScope.launch {
-            try {
-                recommendationLogRepository.recordOutcome(
-                    track.videoId,
-                    com.geekify.android.data.local.RecommendationOutcomeEvent.PLAYED
-                )
-            } catch (_: Exception) {}
+        if (!appSettings.state.value.pauseListenHistory) {
+            listeningPersistenceScope.launch {
+                try {
+                    recommendationLogRepository.recordOutcome(
+                        track.videoId,
+                        com.geekify.android.data.local.RecommendationOutcomeEvent.PLAYED
+                    )
+                } catch (_: Exception) {}
+            }
         }
     }
 
@@ -1220,11 +1256,16 @@ class PlaybackService : MediaSessionService() {
                     try {
                         val event = when {
                             meaningfulCompletion -> com.geekify.android.data.local.RecommendationOutcomeEvent.COMPLETED
+                            skipped && activeListeningMs < 10_000L -> com.geekify.android.data.local.RecommendationOutcomeEvent.SKIPPED_UNDER_10S
                             skipped && activeListeningMs < playThreshold -> com.geekify.android.data.local.RecommendationOutcomeEvent.SKIPPED_EARLY
                             else -> null
                         }
                         if (event != null) {
-                            recommendationLogRepository.recordOutcome(track.videoId, event)
+                            recommendationLogRepository.recordOutcome(
+                                videoId = track.videoId,
+                                event = event,
+                                playDurationMs = activeListeningMs
+                            )
                         }
                     } catch (_: Exception) {}
                 }
@@ -1236,6 +1277,8 @@ class PlaybackService : MediaSessionService() {
         lastListeningUpdatedAt = 0L
         activeListeningMs = 0L
         lastListeningCheckpointMs = 0L
+        logged30sThreshold = false
+        logged50PercentThreshold = false
         return persistenceJob
     }
 

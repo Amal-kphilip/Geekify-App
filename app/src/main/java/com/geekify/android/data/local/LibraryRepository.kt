@@ -56,6 +56,14 @@ class LibraryRepository @Inject constructor(
             }
             prefs[savedKey] = savedJson.encodeToString(updated)
         }
+        if (nowSaved) {
+            runCatching {
+                recommendationLog.get().recordOutcome(
+                    collection.id,
+                    RecommendationOutcomeEvent.SAVED_ALBUM_OR_ARTIST
+                )
+            }
+        }
         return nowSaved
     }
 
@@ -79,6 +87,12 @@ class LibraryRepository @Inject constructor(
     suspend fun toggleLike(track: Track) {
         if (likedDao.isLiked(track.videoId)) {
             likedDao.delete(track.toLiked())
+            runCatching {
+                recommendationLog.get().recordOutcome(
+                    track.videoId,
+                    RecommendationOutcomeEvent.UNLIKED
+                )
+            }
         } else {
             likedDao.insert(track.toLiked())
             runCatching {

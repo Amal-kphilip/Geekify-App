@@ -1,5 +1,6 @@
 package com.geekify.android.data.local
 
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -7,11 +8,16 @@ import javax.inject.Singleton
 class RecommendationLogRepository @Inject constructor(
     private val dao: RecommendationLogDao
 ) {
+    private val recentOutcomeDedupe = ConcurrentHashMap<String, Long>()
+
     data class ImpressionItem(
         val videoId: String,
         val position: Int,
         val sourceSeed: String?,
-        val score: Double
+        val score: Double,
+        val candidateSource: String? = null,
+        val modelVersion: String = "v2.4-hybrid",
+        val experimentGroup: String = "CONTROL"
     )
 
     suspend fun recordImpressions(
@@ -31,7 +37,10 @@ class RecommendationLogRepository @Inject constructor(
                 position = item.position,
                 sourceSeed = item.sourceSeed,
                 score = item.score,
-                shownAt = shownAt
+                shownAt = shownAt,
+                candidateSource = item.candidateSource,
+                modelVersion = item.modelVersion,
+                experimentGroup = item.experimentGroup
             )
         }
         return dao.insertImpressions(entities)
@@ -41,14 +50,28 @@ class RecommendationLogRepository @Inject constructor(
         videoId: String,
         event: RecommendationOutcomeEvent,
         at: Long = System.currentTimeMillis(),
-        lookbackMs: Long = 30L * 24 * 60 * 60_000L
+        lookbackMs: Long = 30L * 24 * 60 * 60_000L,
+        accountId: String? = null,
+        playDurationMs: Long = 0L,
+        requireMatchingAccount: Boolean = false
     ): Long? {
         val impression = dao.findRecentImpressionForVideo(videoId, at - lookbackMs) ?: return null
+        if (requireMatchingAccount && impression.accountId != accountId) {
+            return null
+        }
+        val dedupeKey = "${impression.id}:${event.name}:${at / 5_000L}"
+        val previousAt = recentOutcomeDedupe.putIfAbsent(dedupeKey, at)
+        if (previousAt != null && (at - previousAt) < 5_000L) {
+            return null
+        }
         return dao.insertOutcome(
             RecommendationOutcomeEntity(
                 impressionId = impression.id,
                 event = event.name,
-                at = at
+                at = at,
+                accountId = accountId ?: impression.accountId,
+                playDurationMs = playDurationMs,
+                dedupeKey = dedupeKey
             )
         )
     }

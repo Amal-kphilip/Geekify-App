@@ -17,11 +17,12 @@ import timber.log.Timber
 @InstallIn(SingletonComponent::class)
 interface RecommendationPruneEntryPoint {
     fun recommendationLogRepository(): RecommendationLogRepository
+    fun recommendationEngineDao(): com.geekify.android.data.local.RecommendationEngineDao
 }
 
 /**
- * Background worker to enforce the 30-day retention policy on recommendation impressions
- * and their cascading outcomes. Scheduled on app start.
+ * Background worker to enforce the 30-day retention policy on recommendation impressions,
+ * cascading outcomes, cached track features, and collaborative interactions. Scheduled on app start.
  */
 class RecommendationPruneWorker(
     context: Context,
@@ -32,9 +33,12 @@ class RecommendationPruneWorker(
         return try {
             val entry = EntryPointAccessors.fromApplication(applicationContext, RecommendationPruneEntryPoint::class.java)
             val repo = entry.recommendationLogRepository()
+            val engineDao = entry.recommendationEngineDao()
             val thirtyDaysAgo = System.currentTimeMillis() - THIRTY_DAYS_MS
             val pruned = repo.pruneOlderThan(thirtyDaysAgo)
-            Timber.d("RecommendationPruneWorker: pruned $pruned stale recommendation impressions")
+            val prunedFeatures = runCatching { engineDao.pruneTrackFeaturesBefore(thirtyDaysAgo) }.getOrDefault(0)
+            val prunedCollab = runCatching { engineDao.pruneCollaborativeInteractionsBefore(thirtyDaysAgo) }.getOrDefault(0)
+            Timber.d("RecommendationPruneWorker: pruned $pruned impressions, $prunedFeatures features, $prunedCollab collab rows")
             Result.success()
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e

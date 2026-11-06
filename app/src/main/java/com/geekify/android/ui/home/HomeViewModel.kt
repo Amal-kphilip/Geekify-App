@@ -15,6 +15,8 @@ import com.geekify.android.domain.listening.ListeningLanguageMetadataResolver
 import com.geekify.android.domain.recommend.DailyPicksSampler
 import com.geekify.android.domain.recommend.RecommendationMemory
 import com.geekify.android.domain.recommend.Recommender
+import com.geekify.android.domain.recommend.engine.CandidateScoreDiagnostics
+import com.geekify.android.domain.recommend.engine.HybridRecommendationPipeline
 import kotlin.random.Random
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +31,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Calendar
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 
 data class HomeUiState(
@@ -56,13 +59,19 @@ class HomeViewModel @Inject constructor(
     private val shelfCache: ShelfCacheRepository,
     private val appSettings: com.geekify.android.settings.AppSettingsRepository,
     private val recommendationLog: com.geekify.android.data.local.RecommendationLogRepository,
-    private val languageMetadataResolver: ListeningLanguageMetadataResolver
+    private val languageMetadataResolver: ListeningLanguageMetadataResolver,
+    private val hybridPipeline: HybridRecommendationPipeline,
+    private val engineDao: com.geekify.android.data.local.RecommendationEngineDao
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
+    private val _lastDiagnostics = MutableStateFlow<Map<String, CandidateScoreDiagnostics>>(emptyMap())
+    val lastDiagnostics: StateFlow<Map<String, CandidateScoreDiagnostics>> = _lastDiagnostics.asStateFlow()
+
     private var allShelves: List<Shelf> = emptyList()
+    private val refreshGeneration = AtomicLong(0L)
     /** The feed as the screen renders it: Loading, Success(shelves) or Error. Cached shelves count as Success. */
     val feedState: StateFlow<UiState<List<Shelf>>> = _uiState
         .map { s ->
@@ -218,6 +227,7 @@ class HomeViewModel @Inject constructor(
     }
 
     fun loadHome(forceRefresh: Boolean = false) {
+        val currentGeneration = refreshGeneration.incrementAndGet()
         if (forceRefresh) {
             dailyPicksSeed = Random.nextLong()
             lastMixBuild = 0L
@@ -232,7 +242,7 @@ class HomeViewModel @Inject constructor(
             // 2. Load home feed
             when (val result = musicSource.home(forceRefresh = forceRefresh)) {
                 is MusicResult.Success -> {
-                    if (requestedAccountId != recommendationAccountId) return@launch
+                    if (requestedAccountId != recommendationAccountId || currentGeneration != refreshGeneration.get()) return@launch
                     liveFeedLoaded = true
                     allShelves = result.value.shelves
                     applyFilter(_uiState.value.selectedFilter)
@@ -241,6 +251,7 @@ class HomeViewModel @Inject constructor(
                         // refresh indicator and top carousel update smoothly together.
                         withTimeoutOrNull(8_000L) { mixes.join() }
                     }
+                    if (requestedAccountId != recommendationAccountId || currentGeneration != refreshGeneration.get()) return@launch
                     syncRegionalMixAndDailyRecommendations()
                     _uiState.update { it.copy(isLoading = false, fromCache = false) }
                     shelfCache.save(result.value.shelves, key = homeCacheKey(requestedAccountId))
@@ -248,7 +259,7 @@ class HomeViewModel @Inject constructor(
                     // The feed is already usable; the mixes update when their background job finishes.
                     if (mixes.isCompleted && _uiState.value.mixes.isEmpty()) buildStarterMix()
                     mixes.invokeOnCompletion {
-                        if (requestedAccountId != recommendationAccountId) return@invokeOnCompletion
+                        if (requestedAccountId != recommendationAccountId || currentGeneration != refreshGeneration.get()) return@invokeOnCompletion
                         if (_uiState.value.mixes.isEmpty()) {
                             viewModelScope.launch { runCatching { buildStarterMix() } }
                         } else {
@@ -257,7 +268,7 @@ class HomeViewModel @Inject constructor(
                     }
                 }
                 is MusicResult.Failure -> {
-                    if (requestedAccountId != recommendationAccountId) return@launch
+                    if (requestedAccountId != recommendationAccountId || currentGeneration != refreshGeneration.get()) return@launch
                     // Keep this account's cached shelves; the screen shows a retry banner.
                     _uiState.update { it.copy(isLoading = false, error = result.message) }
                 }
@@ -459,153 +470,31 @@ class HomeViewModel @Inject constructor(
         // Offline or rate limited: keep whatever mixes are already on screen.
         if (relatedMap.isEmpty() || accountId != recommendationAccountId) return@withContext
 
-        val discoveryExclude = (likedTracks + recentTracks + playlistTracks).map { it.videoId }.toMutableSet().apply {
-            addAll(frequent.map { it.videoId })
-        }
-        val heavilySkippedIds = sessionSignals
-            .filter { it.skipRate >= 0.6 && it.completionRate < 0.35 }
-            .map { it.videoId }
-            .toSet()
-        val strictExclude = recentTracks.take(5).map { it.videoId }.toSet() + heavilySkippedIds
-
         val shownCounts = runCatching { recommendationLog.getImpressionCountsSince(sevenDaysAgo) }.getOrDefault(emptyMap())
 
-        val (mixResults, _) = Recommender.buildMixes(
-            liked = liked,
-            recent = recent,
-            related = relatedMap,
-            videoId = { it.videoId },
-            artist = { it.artist },
-            artistDisplay = { it.artist },
-            title = { it.title },
-            thumbs = { it.thumbnails },
-            duration = { it.duration },
-            durationSeconds = { it.durationSeconds },
-            explicit = { it.explicit },
-            type = { it.type },
-            frequent = frequent,
-            playlist = playlist,
+        val pipelineOutput = hybridPipeline.execute(
+            accountId = accountId,
+            likedTracks = likedTracks,
+            recentTracks = recentTracks,
+            playlistTracks = playlistTracks,
+            frequentSignals = frequent,
             savedArtists = savedArtists,
-            exclude = discoveryExclude,
-            shown = memory.snapshot(accountId),
+            sessionSignals = sessionSignals,
+            relatedBySeed = relatedMap,
+            activeSeeds = seeds,
+            shownVideoIds = memory.snapshot(accountId),
             shownCounts = shownCounts,
-            album = { it.album },
-            seeds = seeds,
-            sessions = sessionSignals,
             hourOfDay = hourOfDay,
             preferredContentLanguage = preferredContentLanguage,
-            nowMs = nowMs,
-            languageOverrides = languageOverridesSnapshot
+            languageOverrides = languageOverridesSnapshot,
+            pauseListenHistory = settings.pauseListenHistory,
+            engineDao = engineDao,
+            nowMs = nowMs
         )
 
-        val mixResultSources = mixResults.associate { it.id to it.sources }
-        val allKnownTracksById = (likedTracks + recentTracks + playlistTracks + relatedMap.values.flatten())
-            .associateBy { it.videoId }
-        val tracksById = relatedMap.values.flatten().associateBy { it.videoId }
-
-        // High-affinity familiar "anchor" tracks (liked, playlist, frequent/recent not in immediate last 5 or heavily skipped)
-        val anchorTracksPool = (likedTracks + playlistTracks + recentTracks.drop(5))
-            .distinctBy { it.videoId }
-            .filter { it.videoId !in strictExclude }
-            .sortedByDescending { weights[it.videoId] ?: 0.0 }
-
-        val mixes = mixResults.mapNotNull { mr ->
-            val discoveryTracks = mr.videoIds.mapNotNull { tracksById[it] ?: allKnownTracksById[it] }
-            val tracks = when {
-                mr.id == "for-you" -> {
-                    Recommender.blendAnchorTracks(
-                        discoveryTracks = discoveryTracks,
-                        anchorCandidates = anchorTracksPool.take(12),
-                        videoId = { it.videoId },
-                        artist = { it.artist },
-                        targetCount = 30,
-                        anchorInterval = 4
-                    )
-                }
-                mr.id.startsWith("daily-mix-") -> {
-                    val langTag = mr.title.substringAfter("• ").trim()
-                    val langAnchors = anchorTracksPool.filter { t ->
-                        Recommender.resolveLanguage(t.videoId, t.title, t.artist, languageOverridesSnapshot)
-                            ?.equals(langTag, ignoreCase = true) == true
-                    }.take(10)
-                    Recommender.blendAnchorTracks(
-                        discoveryTracks = discoveryTracks,
-                        anchorCandidates = langAnchors,
-                        videoId = { it.videoId },
-                        artist = { it.artist },
-                        targetCount = 24,
-                        anchorInterval = 4
-                    )
-                }
-                else -> discoveryTracks
-            }
-            if (tracks.isNotEmpty()) {
-                Mix(
-                    id = mr.id,
-                    title = mr.title,
-                    subtitle = mr.subtitle,
-                    tracks = tracks
-                )
-            } else null
-        }.toMutableList()
-
-        // "On Repeat": heavy-rotation tracks from recent days paired with top sonic matches
-        val onRepeatFavorites = buildList {
-            val heavyIds = sessionSignals
-                .filter { it.recentPlays7d >= 2 && it.skipRate < 0.5 }
-                .sortedByDescending { it.recentPlays7d * (0.5 + it.completionRate) }
-                .map { it.videoId }
-            val topStatIds = frequentStats.sortedByDescending { it.plays }.map { it.videoId }
-            (heavyIds + topStatIds + recentTracks.take(10).map { it.videoId } + likedTracks.take(10).map { it.videoId })
-                .distinct()
-                .mapNotNull { allKnownTracksById[it] }
-                .take(12)
-                .let(::addAll)
-        }
-        if (onRepeatFavorites.size >= 4) {
-            val companionTracks = mixes.firstOrNull { it.id == "for-you" }?.tracks.orEmpty().take(12)
-            val blendedOnRepeat = buildList {
-                val maxIdx = maxOf(onRepeatFavorites.size, companionTracks.size)
-                for (i in 0 until maxIdx) {
-                    onRepeatFavorites.getOrNull(i)?.let(::add)
-                    companionTracks.getOrNull(i)?.let(::add)
-                }
-            }.distinctBy { it.videoId }.take(24)
-            if (blendedOnRepeat.size >= 8) {
-                mixes.add(
-                    Mix(
-                        id = "on-repeat",
-                        title = "On Repeat",
-                        subtitle = "Songs you can't stop playing right now",
-                        tracks = blendedOnRepeat
-                    )
-                )
-            }
-        }
-
-        // "Repeat Rewind": beloved older favorites not in the very latest session
-        val immediateRecentIds = recentTracks.take(6).map { it.videoId }.toSet()
-        val rewindFavorites = (likedTracks.drop(3) + playlistTracks + recentTracks.drop(8))
-            .filter { it.videoId !in immediateRecentIds }
-            .distinctBy { it.videoId }
-            .take(14)
-        if (rewindFavorites.size >= 5) {
-            val freshCompanions = relatedMap.values.flatten()
-                .filter { it.videoId !in immediateRecentIds }
-                .distinctBy { it.videoId }
-                .take(10)
-            val rewindTracks = (rewindFavorites + freshCompanions).distinctBy { it.videoId }.take(22)
-            if (rewindTracks.size >= 8) {
-                mixes.add(
-                    Mix(
-                        id = "repeat-rewind",
-                        title = "Repeat Rewind",
-                        subtitle = "Past favorites worth spinning again",
-                        tracks = rewindTracks
-                    )
-                )
-            }
-        }
+        _lastDiagnostics.value = pipelineOutput.diagnostics
+        val mixResultSources = pipelineOutput.mixSources
+        val mixes = pipelineOutput.mixes.toMutableList()
 
         val regionalMix = buildRegionalPulseMix()
         if (regionalMix != null) {
@@ -621,11 +510,15 @@ class HomeViewModel @Inject constructor(
         mixes.forEach { mix ->
             val sourceMap = mixResultSources[mix.id]
             val items = mix.tracks.mapIndexed { idx, tr ->
+                val diag = pipelineOutput.diagnostics[tr.videoId]
                 com.geekify.android.data.local.RecommendationLogRepository.ImpressionItem(
                     videoId = tr.videoId,
                     position = idx,
                     sourceSeed = sourceMap?.get(tr.videoId),
-                    score = 0.0
+                    score = diag?.finalScore ?: 0.0,
+                    candidateSource = "YOUTUBE_MUSIC_RELATED",
+                    modelVersion = pipelineOutput.modelVersion,
+                    experimentGroup = pipelineOutput.experimentGroup.name
                 )
             }
             recommendationLog.recordImpressions(accountId, requestId, mix.id, items, nowShownAt)

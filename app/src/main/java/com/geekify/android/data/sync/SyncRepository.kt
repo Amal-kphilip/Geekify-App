@@ -65,7 +65,8 @@ class SyncRepository @Inject constructor(
     private val history: HistoryRepository,
     private val listeningStats: ListeningStatsRepository,
     private val queueManager: QueueManager,
-    private val dataStore: DataStore<Preferences>
+    private val dataStore: DataStore<Preferences>,
+    private val engineDao: com.geekify.android.data.local.RecommendationEngineDao
 ) {
     companion object {
         private const val PUSH_DELAY_MS = 2_000L
@@ -873,6 +874,7 @@ class SyncRepository @Inject constructor(
     }
 
     private suspend fun clearLocalAndSignOut(signOutFirebaseSession: Boolean) {
+        val departingUid = auth.currentUid() ?: auth.user.value?.uid ?: activeUid
         stopSync()
         SyncWorker.cancel(context)
         if (signOutFirebaseSession) auth.signOut()
@@ -884,6 +886,15 @@ class SyncRepository @Inject constructor(
         applyCloud(CloudData(emptyList(), emptyList(), emptyList(), emptyList()), wipeHistory = true)
         history.clearStats()
         listeningStats.clear()
+        if (!departingUid.isNullOrBlank()) {
+            runCatching {
+                engineDao.deleteUserProfile(departingUid)
+                if (signOutFirebaseSession) {
+                    val anonHash = com.geekify.android.domain.recommend.engine.CollaborativeRecommendationEngine().anonymizeUserId(departingUid)
+                    engineDao.deleteCollaborativeInteractionsForUser(anonHash)
+                }
+            }
+        }
         dataStore.edit {
             it.remove(KEY_LAST_UID)
             it.remove(KEY_SYNC_DIRTY)
