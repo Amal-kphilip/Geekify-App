@@ -456,9 +456,9 @@ object ListeningLanguageClassifier {
 
             val ranked = romanizedRules.map { rule ->
                 var score = 0.0
-                score += rule.anchors.count { it in tokens } * 4.0
-                score += rule.strongWords.count { it in tokens } * 2.0
-                score += rule.supportingWords.count { it in tokens } * 1.0
+                score += tokens.count { it in rule.anchors } * 4.0
+                score += tokens.count { it in rule.strongWords } * 2.0
+                score += tokens.count { it in rule.supportingWords } * 1.0
                 score += rule.anchorPhraseRegexes.count { regex ->
                     regex.containsMatchIn(normalizedTitle)
                 } * 4.0
@@ -574,6 +574,7 @@ object ListeningLanguageClassifier {
         if (title.isBlank()) return null
         val normTitle = normalizeLatinText(title)
         for (item in compiledLanguageAliases) {
+            if (!normTitle.contains(item.normalizedAlias)) continue
             if (normTitle == item.normalizedAlias || item.taggedRegex.containsMatchIn(title)) {
                 return item.language
             }
@@ -659,8 +660,9 @@ object ListeningStatsCalculator {
             )
         }
 
-        val topTracks = monthly.groupBy { it.videoId }.map { (id, rows) ->
-            val newest = rows.maxByOrNull { it.startedAt } ?: return@map null
+        val monthlyByVideoId = monthly.groupBy { it.videoId }
+        val topTracks = monthlyByVideoId.mapNotNull { (id, rows) ->
+            val newest = rows.maxByOrNull { it.startedAt } ?: return@mapNotNull null
             TrackListeningTotal(
                 videoId = id,
                 title = newest.title,
@@ -668,7 +670,7 @@ object ListeningStatsCalculator {
                 listenedMs = rows.sumOf { it.listenedMs },
                 sessions = rows.size
             )
-        }.filterNotNull().sortedWith(compareByDescending<TrackListeningTotal> { it.listenedMs }.thenBy { it.title.lowercase(Locale.ROOT) }).take(5)
+        }.sortedWith(compareByDescending<TrackListeningTotal> { it.listenedMs }.thenBy { it.title.lowercase(Locale.ROOT) }).take(5)
 
         data class MutableArtist(var name: String, var listenedMs: Long = 0L, var sessions: Int = 0)
         val artistTotals = linkedMapOf<String, MutableArtist>()
@@ -685,12 +687,17 @@ object ListeningStatsCalculator {
             .take(5)
 
         // A source-provided language (or language inferred from lyrics script) is more
-        // reliable than a title-only estimate. Keep the existing classifier as fallback.
-        val languageTotals = monthly.groupBy { session ->
-            languageOverrides[session.videoId]
-                ?: ListeningLanguageClassifier.classify(session.title, session.artist)
+        // reliable than a title-only estimate. Classify once per unique videoId rather than per session.
+        val languageMsByTag = linkedMapOf<String, Long>()
+        monthlyByVideoId.forEach { (videoId, rows) ->
+            val sample = rows.first()
+            val language = languageOverrides[videoId]
+                ?: ListeningLanguageClassifier.classify(sample.title, sample.artist)
+            val totalMs = rows.sumOf { it.listenedMs }
+            languageMsByTag[language] = (languageMsByTag[language] ?: 0L) + totalMs
         }
-            .map { (language, rows) -> LanguageListeningTotal(language, rows.sumOf { it.listenedMs }) }
+        val languageTotals = languageMsByTag
+            .map { (language, totalMs) -> LanguageListeningTotal(language, totalMs) }
             .sortedByDescending { it.listenedMs }
             .take(6)
 
