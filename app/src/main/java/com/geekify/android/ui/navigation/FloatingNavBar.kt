@@ -43,6 +43,7 @@ import com.geekify.android.ui.glass.liquidGlass
 import com.geekify.android.ui.glass.rememberReducedMotion
 import com.geekify.android.ui.glass.trackPress
 import com.geekify.android.ui.player.NowPlayingBar
+import com.geekify.android.ui.player.PlayerTransitionState
 import com.geekify.android.ui.player.PlayerViewModel
 import com.geekify.android.ui.theme.Lime
 import kotlin.math.abs
@@ -180,11 +181,14 @@ fun AdaptiveBottomBar(
     onSearch: () -> Unit,
     onLibrary: () -> Unit,
     onCreate: () -> Unit,
+    transitionState: PlayerTransitionState? = null,
     modifier: Modifier = Modifier
 ) {
     val playerState by playerViewModel.state.collectAsState()
     val hasPlayer = playerState.current != null && !miniPlayerDismissed
     val isInline = scrollConnection.isInline
+    val density = LocalDensity.current
+    val navSlidePx = with(density) { 24.dp.toPx() }
     val activeTabAction = when {
         currentRoute == Screen.Search.route -> onSearch
         currentRoute == Screen.Library.route || libraryDetailActive -> onLibrary
@@ -223,28 +227,47 @@ fun AdaptiveBottomBar(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    ActiveTabCircleButton(
-                        currentRoute = currentRoute,
-                        libraryDetailActive = libraryDetailActive,
-                        size = 56.dp,
-                        onClick = {
-                            scrollConnection.expand()
-                            activeTabAction()
+                    Box(
+                        modifier = Modifier.graphicsLayer {
+                            val p = transitionState?.progress ?: 1f
+                            val navAlpha = ((p - 0.35f) / 0.65f).coerceIn(0f, 1f)
+                            alpha = navAlpha
+                            translationY = (1f - navAlpha) * navSlidePx
                         }
-                    )
+                    ) {
+                        ActiveTabCircleButton(
+                            currentRoute = currentRoute,
+                            libraryDetailActive = libraryDetailActive,
+                            size = 56.dp,
+                            onClick = {
+                                scrollConnection.expand()
+                                activeTabAction()
+                            }
+                        )
+                    }
                     NowPlayingBar(
                         viewModel = playerViewModel,
                         isInline = true,
+                        transitionState = transitionState,
                         onClick = onOpenExpandedPlayer,
                         onDismiss = onDismissMiniPlayer,
                         modifier = Modifier.weight(1f)
                     )
                     if (showSeparateSearchAction) {
-                        SearchCircleButton(
-                            isSelected = false,
-                            size = 56.dp,
-                            onClick = onSearch
-                        )
+                        Box(
+                            modifier = Modifier.graphicsLayer {
+                                val p = transitionState?.progress ?: 1f
+                                val navAlpha = ((p - 0.35f) / 0.65f).coerceIn(0f, 1f)
+                                alpha = navAlpha
+                                translationY = (1f - navAlpha) * navSlidePx
+                            }
+                        ) {
+                            SearchCircleButton(
+                                isSelected = false,
+                                size = 56.dp,
+                                onClick = onSearch
+                            )
+                        }
                     }
                 }
             } else if (inline && !playing) {
@@ -284,6 +307,7 @@ fun AdaptiveBottomBar(
                         NowPlayingBar(
                             viewModel = playerViewModel,
                             isInline = false,
+                            transitionState = transitionState,
                             onClick = onOpenExpandedPlayer,
                             onDismiss = onDismissMiniPlayer
                         )
@@ -291,7 +315,13 @@ fun AdaptiveBottomBar(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(64.dp),
+                            .height(64.dp)
+                            .graphicsLayer {
+                                val p = transitionState?.progress ?: 1f
+                                val navAlpha = ((p - 0.35f) / 0.65f).coerceIn(0f, 1f)
+                                alpha = navAlpha
+                                translationY = (1f - navAlpha) * navSlidePx
+                            },
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {

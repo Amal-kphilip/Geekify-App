@@ -97,6 +97,7 @@ import com.geekify.android.ui.player.ExpandedPlayerScreen
 import com.geekify.android.ui.player.NowPlayingBar
 import com.geekify.android.ui.player.PlayerViewModel
 import com.geekify.android.ui.player.QueueScreen
+import com.geekify.android.ui.player.rememberPlayerTransitionState
 import com.geekify.android.ui.search.SearchScreen
 import com.geekify.android.ui.search.SearchViewModel
 import com.geekify.android.ui.theme.*
@@ -130,7 +131,8 @@ fun MainScreen(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    var showExpandedPlayer by remember { mutableStateOf(false) }
+    val playerTransitionState = rememberPlayerTransitionState()
+    val reducedMotion = rememberReducedMotion()
     var showQueue by remember { mutableStateOf(false) }
     var showAccountSheet by remember { mutableStateOf(false) }
     var showCreatePlaylist by remember { mutableStateOf(false) }
@@ -555,33 +557,26 @@ fun MainScreen(
                     onDismissMiniPlayer = {
                         if (!playerState.isPlaying) miniPlayerDismissed = true
                     },
-                    onOpenExpandedPlayer = { showExpandedPlayer = true },
+                    onOpenExpandedPlayer = { playerTransitionState.expand(reducedMotion = reducedMotion) },
                     onHome = { navigateToTab(Screen.Home.route) },
                     onSearch = { navigateToTab(Screen.Search.route) },
                     onLibrary = { navigateToTab(Screen.Library.route) },
-                    onCreate = { showCreatePlaylist = true }
+                    onCreate = { showCreatePlaylist = true },
+                    transitionState = playerTransitionState
                 )
             }
         }
 
       }
 
-        // Fullscreen Expanded Player Overlay
-        AnimatedVisibility(
-            visible = showExpandedPlayer,
-            enter = slideInVertically(tween(380, easing = FastOutSlowInEasing), initialOffsetY = { it }) + fadeIn(tween(250)),
-            // Do not slide the touch layer away while it is fading. That left exposed areas
-            // where a second tap could activate cards on the screen behind the player.
-            exit = fadeOut(tween(180)),
-            modifier = Modifier.fillMaxSize()
-        ) {
+        // Persistent Unified Expanded Player Overlay (morphs continuously to/from NowPlayingBar)
+        if (playerState.current != null) {
             ExpandedPlayerScreen(
                 viewModel = playerViewModel,
-                onDismiss = { showExpandedPlayer = false },
-                onQueueClick = {
-                    showExpandedPlayer = false
-                    showQueue = true
-                }
+                transitionState = playerTransitionState,
+                isQueueVisible = showQueue,
+                onDismiss = { playerTransitionState.collapse(reducedMotion = reducedMotion) },
+                onQueueClick = { showQueue = true }
             )
         }
 
@@ -597,10 +592,7 @@ fun MainScreen(
         ) {
             QueueScreen(
                 viewModel = playerViewModel,
-                onBack = {
-                    showQueue = false
-                    showExpandedPlayer = true
-                }
+                onBack = { showQueue = false }
             )
         }
 

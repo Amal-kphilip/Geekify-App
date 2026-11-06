@@ -137,6 +137,34 @@ class ListeningStatsCalculatorTest {
         assertEquals("Punjabi", ListeningLanguageClassifier.classify("Softly", "Karan Aujla"))
     }
 
+    @Test
+    fun `calculating stats across 2000 listening sessions completes in under 150ms`() {
+        val largeHistory = (1..2000).map { i ->
+            session(
+                id = "sess-$i",
+                videoId = "vid-${i % 150}",
+                title = "Track Title ${i % 150}",
+                artist = when (i % 5) {
+                    0 -> "Sushin Shyam, Dabzee"
+                    1 -> "Anirudh Ravichander"
+                    2 -> "Arijit Singh, Pritam"
+                    3 -> "Sid Sriram"
+                    else -> "Independent Band ${i % 40}"
+                },
+                startedAt = now - (i % 25) * DAY,
+                listenedMs = 180_000L
+            )
+        }
+        val startNs = System.nanoTime()
+        val snapshot = ListeningStatsCalculator.calculate(largeHistory, now, ZoneOffset.UTC)
+        val elapsedMs = (System.nanoTime() - startNs) / 1_000_000L
+
+        assertTrue("Expected stats calculation on 2000 rows to take < 150ms, took ${elapsedMs}ms", elapsedMs < 150L)
+        assertTrue(snapshot.hasData)
+        assertEquals(5, snapshot.topTracks.size)
+        assertEquals(5, snapshot.topArtists.size)
+    }
+
     private fun session(
         id: String,
         videoId: String,

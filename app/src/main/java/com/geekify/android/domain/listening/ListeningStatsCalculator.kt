@@ -45,7 +45,18 @@ object ListeningLanguageClassifier {
         val anchorPhrases: Set<String> = emptySet(),
         val morphSuffixes: Set<String> = emptySet(),
         val morphSubstrings: Set<String> = emptySet()
-    )
+    ) {
+        val anchorPhraseRegexes: List<Regex> = anchorPhrases.map { phrase ->
+            Regex("(?:^|\\s)${Regex.escape(phrase)}(?:$|\\s)")
+        }
+    }
+
+    private val latinTokenRegex = Regex("[a-z0-9]+(?:'[a-z0-9]+)?")
+    private val nonLatinAlnumRegex = Regex("[^a-z0-9']+")
+    private val artistSplitRegex = Regex("(?i)\\s*(?:,|&|/|•|\\||;|\\bfeat\\.?\\b|\\bft\\.?\\b|\\bx\\b|\\bwith\\b)\\s*")
+    private val classifyCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val artistLangCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private const val NO_ARTIST_LANG = "__NONE__"
 
     /*
      * Layer 3: Expanded Romanized vocabulary + phonetic/morphological rules.
@@ -379,10 +390,53 @@ object ListeningLanguageClassifier {
         "German" to listOf("german")
     )
 
+    private val primaryArtistRegexes: List<Pair<Regex, String>> = primaryArtistTaxonomy.entries
+        .filter { it.key.length >= 4 }
+        .map { (knownName, lang) ->
+            Regex("(?:^|\\s)${Regex.escape(knownName)}(?:$|\\s)") to lang
+        }
+
+    private val polyglotSingerRegexes: List<Pair<Regex, String>> = polyglotPlaybackSingers.entries
+        .filter { it.key.length >= 5 }
+        .map { (singerName, lang) ->
+            Regex("(?:^|\\s)${Regex.escape(singerName)}(?:$|\\s)") to lang
+        }
+
+    private data class CompiledLanguageAlias(
+        val language: String,
+        val normalizedAlias: String,
+        val taggedRegex: Regex
+    )
+
+    private val compiledLanguageAliases: List<CompiledLanguageAlias> = languageAliases.flatMap { (language, aliases) ->
+        aliases.map { alias ->
+            val escaped = Regex.escape(alias)
+            CompiledLanguageAlias(
+                language = language,
+                normalizedAlias = normalizeLatinText(alias),
+                taggedRegex = Regex(
+                    "(?i)(?:\\[\\s*$escaped\\s*]|\\(\\s*$escaped\\s*\\)|" +
+                        "\\b(?:language|lyrics?|audio|version|song)\\s*(?:in|[:=-])?\\s+$escaped\\b|" +
+                        "\\b$escaped\\s+(?:song|version|audio|lyrics?|language)\\b|" +
+                        "(?:^|[-–—|•])\\s*$escaped\\s*$)"
+                )
+            )
+        }
+    }
+
     fun classify(title: String?, artist: String?): String {
         val trackTitle = title.orEmpty().trim()
         val trackArtist = artist.orEmpty().trim()
+        val cacheKey = "$trackTitle\u0000$trackArtist"
+        classifyCache[cacheKey]?.let { return it }
 
+        val computed = computeClassification(trackTitle, trackArtist)
+        if (classifyCache.size > 4_000) classifyCache.clear()
+        classifyCache[cacheKey] = computed
+        return computed
+    }
+
+    private fun computeClassification(trackTitle: String, trackArtist: String): String {
         // Layer 1: Explicit title / metadata language tags
         explicitLanguageTag(trackTitle)?.let { return it }
 
@@ -395,7 +449,7 @@ object ListeningLanguageClassifier {
         // Layer 3: Upgraded Romanized lexical + phonetic morphology scoring
         val normalizedTitle = normalizeLatinText(trackTitle)
         if (normalizedTitle.isNotBlank()) {
-            val tokens = Regex("[a-z0-9]+(?:'[a-z0-9]+)?").findAll(normalizedTitle)
+            val tokens = latinTokenRegex.findAll(normalizedTitle)
                 .map { it.value.trim('\'') }
                 .filter { it.isNotBlank() }
                 .toSet()
@@ -405,8 +459,8 @@ object ListeningLanguageClassifier {
                 score += rule.anchors.count { it in tokens } * 4.0
                 score += rule.strongWords.count { it in tokens } * 2.0
                 score += rule.supportingWords.count { it in tokens } * 1.0
-                score += rule.anchorPhrases.count { phrase ->
-                    Regex("(?:^|\\s)${Regex.escape(phrase)}(?:$|\\s)").containsMatchIn(normalizedTitle)
+                score += rule.anchorPhraseRegexes.count { regex ->
+                    regex.containsMatchIn(normalizedTitle)
                 } * 4.0
 
                 val unmatchedTokens = tokens.filter { it.length >= 5 && it !in rule.anchors }
@@ -447,8 +501,20 @@ object ListeningLanguageClassifier {
      */
     fun resolveArtistLanguage(artist: String?): String? {
         if (artist.isNullOrBlank()) return null
+        val key = artist.trim()
+        artistLangCache[key]?.let { cached ->
+            return if (cached == NO_ARTIST_LANG) null else cached
+        }
+
+        val resolved = computeArtistLanguage(key)
+        if (artistLangCache.size > 4_000) artistLangCache.clear()
+        artistLangCache[key] = resolved ?: NO_ARTIST_LANG
+        return resolved
+    }
+
+    private fun computeArtistLanguage(artist: String): String? {
         val credits = artist
-            .split(Regex("(?i)\\s*(?:,|&|/|•|\\||;|\\bfeat\\.?\\b|\\bft\\.?\\b|\\bx\\b|\\bwith\\b)\\s*"))
+            .split(artistSplitRegex)
             .map { normalizeLatinText(it) }
             .filter { it.isNotBlank() }
 
@@ -457,8 +523,8 @@ object ListeningLanguageClassifier {
             primaryArtistTaxonomy[credit]?.let { return it }
         }
         val normalizedFull = normalizeLatinText(artist)
-        for ((knownName, lang) in primaryArtistTaxonomy) {
-            if (knownName.length >= 4 && Regex("(?:^|\\s)${Regex.escape(knownName)}(?:$|\\s)").containsMatchIn(normalizedFull)) {
+        for ((regex, lang) in primaryArtistRegexes) {
+            if (regex.containsMatchIn(normalizedFull)) {
                 return lang
             }
         }
@@ -467,8 +533,8 @@ object ListeningLanguageClassifier {
         for (credit in credits) {
             polyglotPlaybackSingers[credit]?.let { return it }
         }
-        for ((singerName, lang) in polyglotPlaybackSingers) {
-            if (singerName.length >= 5 && Regex("(?:^|\\s)${Regex.escape(singerName)}(?:$|\\s)").containsMatchIn(normalizedFull)) {
+        for ((regex, lang) in polyglotSingerRegexes) {
+            if (regex.containsMatchIn(normalizedFull)) {
                 return lang
             }
         }
@@ -506,18 +572,10 @@ object ListeningLanguageClassifier {
 
     private fun explicitLanguageTag(title: String): String? {
         if (title.isBlank()) return null
-        languageAliases.forEach { (language, aliases) ->
-            aliases.forEach { alias ->
-                val escaped = Regex.escape(alias)
-                val tagged = Regex(
-                    "(?i)(?:\\[\\s*$escaped\\s*]|\\(\\s*$escaped\\s*\\)|" +
-                        "\\b(?:language|lyrics?|audio|version|song)\\s*(?:in|[:=-])?\\s+$escaped\\b|" +
-                        "\\b$escaped\\s+(?:song|version|audio|lyrics?|language)\\b|" +
-                        "(?:^|[-–—|•])\\s*$escaped\\s*$)"
-                )
-                if (tagged.containsMatchIn(title) || normalizeLatinText(title) == normalizeLatinText(alias)) {
-                    return language
-                }
+        val normTitle = normalizeLatinText(title)
+        for (item in compiledLanguageAliases) {
+            if (normTitle == item.normalizedAlias || item.taggedRegex.containsMatchIn(title)) {
+                return item.language
             }
         }
         return null
@@ -540,7 +598,7 @@ object ListeningLanguageClassifier {
         return normalized
             .filter { java.lang.Character.getType(it) != java.lang.Character.NON_SPACING_MARK.toInt() }
             .lowercase(Locale.ROOT)
-            .replace(Regex("[^a-z0-9']+"), " ")
+            .replace(nonLatinAlnumRegex, " ")
             .trim()
     }
 }

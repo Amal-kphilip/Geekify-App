@@ -7,38 +7,43 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil3.compose.AsyncImage
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
 import com.geekify.android.player.PlaybackPosition
-import kotlinx.coroutines.flow.StateFlow
-import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.components.bestArtworkUrl
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.glass.GlassStyle
-import com.geekify.android.ui.glass.LocalGlassBackdrop
 import com.geekify.android.ui.glass.liquidGlass
 import com.geekify.android.ui.glass.trackPress
 import com.geekify.android.ui.theme.*
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Floating mini player: a frosted capsule with the cover, title / artist, a lime play button,
@@ -46,12 +51,17 @@ import com.geekify.android.ui.theme.*
  *
  * Supports [isInline] mode: collapses to a compact pill that sits between the active tab
  * circle and the search circle in the adaptive bottom bar.
+ *
+ * Coordinates with [transitionState] so its artwork, title/artist, Play/Pause button, Next button,
+ * and outer capsule serve as the exact measured destination of the Now Playing collapse/expand
+ * shared transformation.
  */
 @Composable
 fun NowPlayingBar(
     viewModel: PlayerViewModel,
     modifier: Modifier = Modifier,
     isInline: Boolean = false,
+    transitionState: PlayerTransitionState? = null,
     onClick: () -> Unit,
     onDismiss: () -> Unit = {}
 ) {
@@ -59,40 +69,102 @@ fun NowPlayingBar(
     val liked by viewModel.isCurrentLiked.collectAsStateWithLifecycle()
     val track = state.current ?: return
 
-    val thumbUrl = track.thumbnails.bestArtworkUrl(480)
+    // Use the same resolved artwork URL as ExpandedPlayerScreen so Coil reuses the exact
+    // decoded in-memory bitmap across both player states without reloading.
+    val thumbUrl = track.thumbnails.bestArtworkUrl()
     val pressed = remember { mutableStateOf(false) }
     val pressAnim by animateFloatAsState(if (pressed.value) 1f else 0f, label = "miniPress")
-    val dismissThresholdPx = with(LocalDensity.current) { 72.dp.toPx() }
+    val density = LocalDensity.current
+    val dismissThresholdPx = with(density) { 72.dp.toPx() }
+    val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
     val shape = if (isInline) RoundedCornerShape(28.dp) else RoundedCornerShape(32.dp)
+
+    DisposableEffect(isInline, transitionState) {
+        transitionState?.miniIsInline = isInline
+        if (isInline) {
+            transitionState?.miniNextBounds = Rect.Zero
+        }
+        onDispose { }
+    }
+
+    val controlsInteractive = (transitionState?.progress ?: 1f) >= 0.85f
 
     Box(
         modifier = modifier
             .fillMaxWidth()
             .then(if (isInline) Modifier.height(56.dp) else Modifier.height(64.dp))
+            .onGloballyPositioned { coords ->
+                if (coords.isAttached) {
+                    transitionState?.miniContainerBounds = coords.boundsInRoot()
+                    transitionState?.miniIsInline = isInline
+                }
+            }
             // Floating glass surface only: the cover, title, artist and controls inside it stay sharp and opaque.
             .liquidGlass(shape, GlassStyle.Floating, pressProgress = { pressAnim })
             .trackPress(pressed)
-            .bouncyClickable(pressedScale = 0.985f, onClick = onClick)
-            .pointerInput(state.isPlaying, onDismiss) {
-                if (!state.isPlaying) {
-                    var totalDownDrag = 0f
-                    detectVerticalDragGestures(
-                        onVerticalDrag = { change, dragAmount ->
+            .bouncyClickable(
+                pressedScale = 0.985f,
+                onClick = {
+                    if (controlsInteractive) onClick()
+                }
+            )
+            .pointerInput(state.isPlaying, onDismiss, transitionState, screenHeightPx) {
+                val velocityTracker = VelocityTracker()
+                var totalDownDrag = 0f
+                var totalUpDrag = 0f
+                var isExpandingGesture = false
+
+                detectVerticalDragGestures(
+                    onDragStart = {
+                        velocityTracker.resetTracking()
+                        totalDownDrag = 0f
+                        totalUpDrag = 0f
+                        isExpandingGesture = false
+                    },
+                    onVerticalDrag = { change, dragAmount ->
+                        velocityTracker.addPosition(change.uptimeMillis, change.position)
+                        if (transitionState != null && (dragAmount < -1f || isExpandingGesture || transitionState.progress < 0.995f)) {
+                            isExpandingGesture = true
+                            change.consume()
+                            if (dragAmount < 0f) {
+                                totalUpDrag += -dragAmount
+                            } else {
+                                totalUpDrag = (totalUpDrag - dragAmount).coerceAtLeast(0f)
+                            }
+                            transitionState.onDragDelta(dragAmount, screenHeightPx)
+                        } else if (!state.isPlaying) {
                             if (dragAmount > 0f) {
                                 totalDownDrag += dragAmount
                             } else if (totalDownDrag > 0f) {
                                 totalDownDrag = 0f
                             }
-                        },
-                        onDragEnd = {
-                            if (totalDownDrag >= dismissThresholdPx) {
-                                onDismiss()
-                            }
-                            totalDownDrag = 0f
-                        },
-                        onDragCancel = { totalDownDrag = 0f }
-                    )
-                }
+                        }
+                    },
+                    onDragEnd = {
+                        if (isExpandingGesture && transitionState != null) {
+                            val velocityY = velocityTracker.calculateVelocity().y
+                            transitionState.settleExpandGesture(
+                                totalDragUpPx = totalUpDrag,
+                                velocityPxPerSec = velocityY,
+                                density = density,
+                                fallbackScreenHeightPx = screenHeightPx
+                            )
+                        } else if (!state.isPlaying && totalDownDrag >= dismissThresholdPx) {
+                            onDismiss()
+                        }
+                        totalDownDrag = 0f
+                        totalUpDrag = 0f
+                        isExpandingGesture = false
+                    },
+                    onDragCancel = {
+                        if (isExpandingGesture && transitionState != null) {
+                            transitionState.collapse()
+                        }
+                        totalDownDrag = 0f
+                        totalUpDrag = 0f
+                        isExpandingGesture = false
+                    }
+                )
             }
     ) {
         Row(
@@ -110,28 +182,45 @@ fun NowPlayingBar(
             Box(
                 modifier = Modifier
                     .size(artSize)
+                    .onGloballyPositioned { coords ->
+                        if (coords.isAttached) {
+                            transitionState?.miniArtBounds = coords.boundsInRoot()
+                        }
+                    }
+                    .graphicsLayer {
+                        val p = transitionState?.progress ?: 1f
+                        alpha = if (p >= 0.995f) 1f else 0f
+                    }
                     .clip(CircleShape)
                     .background(InkElevated),
                 contentAlignment = Alignment.Center
             ) {
-                Crossfade(targetState = thumbUrl, animationSpec = tween(300), label = "miniArt") { url ->
-                    if (url != null) {
-                        AsyncImage(
-                            model = url,
-                            contentDescription = track.title,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Icon(GeekifyIcons.MusicNote, contentDescription = null, tint = TextSecondary)
-                    }
+                if (thumbUrl != null) {
+                    AsyncImage(
+                        model = thumbUrl,
+                        contentDescription = track.title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(GeekifyIcons.MusicNote, contentDescription = null, tint = TextSecondary)
                 }
             }
 
             Spacer(Modifier.width(if (isInline) 10.dp else 12.dp))
 
             Column(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .onGloballyPositioned { coords ->
+                        if (coords.isAttached) {
+                            transitionState?.miniTextBounds = coords.boundsInRoot()
+                        }
+                    }
+                    .graphicsLayer {
+                        val p = transitionState?.progress ?: 1f
+                        alpha = if (p >= 0.995f) 1f else 0f
+                    },
                 verticalArrangement = Arrangement.Center
             ) {
                 Text(
@@ -141,7 +230,12 @@ fun NowPlayingBar(
                     lineHeight = if (isInline) 17.sp else 20.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.onGloballyPositioned { coords ->
+                        if (coords.isAttached) {
+                            transitionState?.miniTitleBounds = coords.boundsInRoot()
+                        }
+                    }
                 )
                 Spacer(Modifier.height(if (isInline) 1.dp else 2.dp))
                 Text(
@@ -150,7 +244,12 @@ fun NowPlayingBar(
                     fontSize = if (isInline) 11.sp else 13.sp,
                     lineHeight = if (isInline) 14.sp else 16.sp,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.onGloballyPositioned { coords ->
+                        if (coords.isAttached) {
+                            transitionState?.miniArtistBounds = coords.boundsInRoot()
+                        }
+                    }
                 )
             }
 
@@ -159,8 +258,13 @@ fun NowPlayingBar(
 
                 LikeButton(
                     liked = liked,
-                    onClick = { viewModel.toggleLikeCurrent() },
-                    modifier = Modifier.size(40.dp),
+                    onClick = { if (controlsInteractive) viewModel.toggleLikeCurrent() },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .graphicsLayer {
+                            val p = transitionState?.progress ?: 1f
+                            alpha = ((p - 0.62f) / 0.38f).coerceIn(0f, 1f)
+                        },
                     size = 22.dp
                 )
             } else {
@@ -172,9 +276,20 @@ fun NowPlayingBar(
             Box(
                 modifier = Modifier
                     .size(playSize)
+                    .onGloballyPositioned { coords ->
+                        if (coords.isAttached) {
+                            transitionState?.miniPlayBounds = coords.boundsInRoot()
+                        }
+                    }
+                    .graphicsLayer {
+                        val p = transitionState?.progress ?: 1f
+                        alpha = if (p >= 0.995f) 1f else 0f
+                    }
                     .clip(CircleShape)
                     .background(Lime)
-                    .bouncyClickable(pressedScale = 0.92f) { viewModel.togglePlay() },
+                    .bouncyClickable(pressedScale = 0.92f) {
+                        if (controlsInteractive) viewModel.togglePlay()
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 if (state.isBuffering) {
@@ -198,7 +313,20 @@ fun NowPlayingBar(
             if (!isInline) {
                 Spacer(Modifier.width(2.dp))
 
-                IconButton(onClick = { viewModel.next() }, modifier = Modifier.size(40.dp)) {
+                IconButton(
+                    onClick = { if (controlsInteractive) viewModel.next() },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .onGloballyPositioned { coords ->
+                            if (coords.isAttached) {
+                                transitionState?.miniNextBounds = coords.boundsInRoot()
+                            }
+                        }
+                        .graphicsLayer {
+                            val p = transitionState?.progress ?: 1f
+                            alpha = if (p >= 0.995f) 1f else 0f
+                        }
+                ) {
                     Icon(GeekifyIcons.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(22.dp))
                 }
 
@@ -207,10 +335,22 @@ fun NowPlayingBar(
                         .padding(horizontal = 4.dp)
                         .width(1.dp)
                         .height(22.dp)
+                        .graphicsLayer {
+                            val p = transitionState?.progress ?: 1f
+                            alpha = ((p - 0.65f) / 0.35f).coerceIn(0f, 1f)
+                        }
                         .background(Color.White.copy(alpha = 0.22f))
                 )
 
-                IconButton(onClick = { viewModel.toggleShuffle() }, modifier = Modifier.size(40.dp)) {
+                IconButton(
+                    onClick = { if (controlsInteractive) viewModel.toggleShuffle() },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .graphicsLayer {
+                            val p = transitionState?.progress ?: 1f
+                            alpha = ((p - 0.65f) / 0.35f).coerceIn(0f, 1f)
+                        }
+                ) {
                     Icon(
                         GeekifyIcons.Shuffle,
                         contentDescription = "Shuffle",
@@ -226,7 +366,12 @@ fun NowPlayingBar(
         MiniProgressLine(
             position = viewModel.position,
             isInline = isInline,
-            modifier = Modifier.align(Alignment.BottomCenter)
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .graphicsLayer {
+                    val p = transitionState?.progress ?: 1f
+                    alpha = ((p - 0.60f) / 0.40f).coerceIn(0f, 1f)
+                }
         )
     }
 }

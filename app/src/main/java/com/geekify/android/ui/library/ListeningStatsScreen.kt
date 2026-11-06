@@ -38,6 +38,7 @@ import com.geekify.android.domain.listening.ListeningStatsCalculator
 import com.geekify.android.domain.listening.ListeningStatsSnapshot
 import com.geekify.android.ui.components.LocalBottomInset
 import com.geekify.android.ui.components.IosSettingsPageScaffold
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -45,9 +46,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 
 @HiltViewModel
@@ -56,32 +59,39 @@ class ListeningStatsViewModel @Inject constructor(
     private val languageMetadataResolver: ListeningLanguageMetadataResolver
 ) : ViewModel() {
     private val languageOverrides = MutableStateFlow<Map<String, String>>(emptyMap())
+    private val attemptedResolutionIds = ConcurrentHashMap.newKeySet<String>()
 
     val stats: StateFlow<ListeningStatsSnapshot> = combine(
-        repository.observeSessions().onEach { rows ->
-            resolveAmbiguousTrackLanguages(rows)
-        },
+        repository.observeSessions(),
         languageOverrides
     ) { rows, overrides ->
+        scheduleAmbiguousLanguageResolution(rows, overrides)
         ListeningStatsCalculator.calculate(rows, languageOverrides = overrides)
-    }.stateIn(
-        viewModelScope,
-        SharingStarted.WhileSubscribed(5_000L),
-        ListeningStatsCalculator.calculate(emptyList())
-    )
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000L),
+            ListeningStatsSnapshot()
+        )
 
-    private fun resolveAmbiguousTrackLanguages(rows: List<com.geekify.android.data.local.ListeningSessionEntity>) {
-        val currentOverrides = languageOverrides.value
+    private fun scheduleAmbiguousLanguageResolution(
+        rows: List<com.geekify.android.data.local.ListeningSessionEntity>,
+        currentOverrides: Map<String, String>
+    ) {
         val candidates = rows
-            .filter { it.listenedMs >= 10_000L && it.videoId !in currentOverrides }
+            .asSequence()
+            .filter { it.listenedMs >= 10_000L && it.videoId !in currentOverrides && it.videoId !in attemptedResolutionIds }
             .distinctBy { it.videoId }
             .filter { session ->
                 val direct = ListeningLanguageClassifier.classify(session.title, session.artist)
                 direct == "Unknown" || direct.startsWith("Latin script")
             }
             .take(8)
+            .toList()
         if (candidates.isEmpty()) return
-        viewModelScope.launch {
+        candidates.forEach { attemptedResolutionIds.add(it.videoId) }
+        viewModelScope.launch(Dispatchers.IO) {
             val resolvedPairs = coroutineScope {
                 candidates.map { session ->
                     async {
