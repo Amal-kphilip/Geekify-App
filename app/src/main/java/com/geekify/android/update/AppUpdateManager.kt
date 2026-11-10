@@ -769,6 +769,14 @@ class AppUpdateManager @Inject constructor(
         return pending.equals(versionName.trim().removePrefix("v"), ignoreCase = true)
     }
 
+    fun hasPendingOrDismissedUpdateFor(versionCode: Int, versionName: String?): Boolean {
+        if (versionName != null && (hasPendingInstallFor(versionName) || isVersionDismissed(versionName))) {
+            return true
+        }
+        val pendingCode = prefs.getInt(KEY_PENDING_INSTALL_VERSION_CODE, 0)
+        return pendingCode > 0 && versionCode in 1..pendingCode
+    }
+
     /**
      * Checks if the app was just updated to the version that was previously staged for installation.
      * If matched, clears the pending install record, cleans up staged APKs, and returns [CompletedUpdateInfo].

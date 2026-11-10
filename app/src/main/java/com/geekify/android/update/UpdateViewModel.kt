@@ -4,6 +4,8 @@ import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.geekify.android.BuildConfig
+import com.geekify.android.notifications.GeekifyNotifier
+import com.geekify.android.notifications.NotificationStore
 import com.geekify.android.settings.AudioQualityPreference
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -78,7 +80,9 @@ data class UpdateUiState(
  */
 @Singleton
 class UpdateSessionCoordinator @Inject constructor(
-    private val updateManager: AppUpdateManager
+    private val updateManager: AppUpdateManager,
+    private val notificationStore: NotificationStore,
+    private val notifier: GeekifyNotifier
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -88,6 +92,19 @@ class UpdateSessionCoordinator @Inject constructor(
     private var checkJob: Job? = null
     private var downloadJob: Job? = null
     private var startupCheckPerformed = false
+
+    private fun markUpdateNotificationHandled(versionCode: Int, dismissed: Boolean = false) {
+        notifier.cancelUpdate()
+        if (versionCode <= 0) return
+        scope.launch {
+            notificationStore.updateState { current ->
+                current.copy(
+                    updateShownForVersion = maxOf(current.updateShownForVersion, versionCode),
+                    dismissedVersion = if (dismissed) maxOf(current.dismissedVersion, versionCode) else current.dismissedVersion
+                )
+            }
+        }
+    }
 
     fun performStartupCheckIfNeeded() {
         if (startupCheckPerformed) return
@@ -99,6 +116,7 @@ class UpdateSessionCoordinator @Inject constructor(
             installedVersionCode = BuildConfig.VERSION_CODE
         )
         if (completed != null) {
+            markUpdateNotificationHandled(BuildConfig.VERSION_CODE, dismissed = true)
             scope.launch {
                 val recent = updateManager.fetchRecentChangelog(BuildConfig.VERSION_NAME)
                 _uiState.update { current ->
@@ -170,6 +188,7 @@ class UpdateSessionCoordinator @Inject constructor(
             }.getOrNull()
 
             if (update != null) {
+                markUpdateNotificationHandled(update.versionCode)
                 val existingApk = updateManager.getExistingVerifiedApk(update)
                 val initialExpanded = setOf(update.versionName)
                 _uiState.update { current ->
@@ -193,19 +212,22 @@ class UpdateSessionCoordinator @Inject constructor(
                         errorMessage = null
                     )
                 }
-            } else if (userInitiated) {
-                val timeline = updateManager.fetchRecentChangelog(BuildConfig.VERSION_NAME)
-                val firstExpanded = timeline.firstOrNull()?.versionName?.let { setOf(it) }.orEmpty()
-                _uiState.update { current ->
-                    current.copy(
-                        isDialogVisible = true,
-                        state = UpdateState.UP_TO_DATE,
-                        availableUpdate = null,
-                        recentChangelog = timeline,
-                        expandedChangelogVersions = firstExpanded,
-                        errorTitle = null,
-                        errorMessage = null
-                    )
+            } else {
+                markUpdateNotificationHandled(BuildConfig.VERSION_CODE, dismissed = true)
+                if (userInitiated) {
+                    val timeline = updateManager.fetchRecentChangelog(BuildConfig.VERSION_NAME)
+                    val firstExpanded = timeline.firstOrNull()?.versionName?.let { setOf(it) }.orEmpty()
+                    _uiState.update { current ->
+                        current.copy(
+                            isDialogVisible = true,
+                            state = UpdateState.UP_TO_DATE,
+                            availableUpdate = null,
+                            recentChangelog = timeline,
+                            expandedChangelogVersions = firstExpanded,
+                            errorTitle = null,
+                            errorMessage = null
+                        )
+                    }
                 }
             }
         }
@@ -397,6 +419,7 @@ class UpdateSessionCoordinator @Inject constructor(
 
         val targetVersionName = update?.versionName ?: current.targetVersionName
         val targetVersionCode = update?.versionCode ?: ReleaseParserVersionCodeFallback(targetVersionName)
+        markUpdateNotificationHandled(targetVersionCode, dismissed = true)
 
         when (
             val launchResult = updateManager.launchInstaller(
@@ -456,6 +479,7 @@ class UpdateSessionCoordinator @Inject constructor(
             installedVersionCode = BuildConfig.VERSION_CODE
         )
         if (completed != null) {
+            markUpdateNotificationHandled(BuildConfig.VERSION_CODE, dismissed = true)
             _uiState.update {
                 it.copy(
                     state = UpdateState.COMPLETED,
@@ -513,10 +537,16 @@ class UpdateSessionCoordinator @Inject constructor(
 
     fun dismissDialog(rememberSkipForVersion: Boolean = false) {
         val current = _uiState.value
+        val available = current.availableUpdate
+        if (available != null) {
+            markUpdateNotificationHandled(available.versionCode, dismissed = rememberSkipForVersion)
+        } else {
+            notifier.cancelUpdate()
+        }
         if (rememberSkipForVersion &&
             (current.state == UpdateState.UPDATE_AVAILABLE || current.state == UpdateState.METERED_WARNING)
         ) {
-            current.availableUpdate?.versionName?.let(updateManager::dismissVersion)
+            available?.versionName?.let(updateManager::dismissVersion)
         }
         _uiState.update { it.copy(isDialogVisible = false) }
     }

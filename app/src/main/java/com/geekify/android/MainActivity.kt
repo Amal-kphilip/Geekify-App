@@ -66,6 +66,8 @@ class MainActivity : ComponentActivity() {
         }
         requestedRoute = intent?.getStringExtra(GeekifyNotifier.EXTRA_ROUTE)
         triggerUpdateCheck = intent?.getBooleanExtra(GeekifyNotifier.EXTRA_TRIGGER_UPDATE_CHECK, false) == true
+        intent?.removeExtra(GeekifyNotifier.EXTRA_ROUTE)
+        intent?.removeExtra(GeekifyNotifier.EXTRA_TRIGGER_UPDATE_CHECK)
 
         // Android 13+: without this the playback notification (and lock-screen controls) stay hidden.
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -102,20 +104,23 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        setIntent(intent)
         requestedRoute = intent.getStringExtra(GeekifyNotifier.EXTRA_ROUTE)
         triggerUpdateCheck = intent.getBooleanExtra(GeekifyNotifier.EXTRA_TRIGGER_UPDATE_CHECK, false)
+        intent.removeExtra(GeekifyNotifier.EXTRA_ROUTE)
+        intent.removeExtra(GeekifyNotifier.EXTRA_TRIGGER_UPDATE_CHECK)
+        setIntent(intent)
     }
 
     override fun onStart() {
         super.onStart()
         AppForeground.isVisible = true
+        val now = System.currentTimeMillis()
+        NotificationWorker.cancelKick(this)
         lifecycleScope.launch {
-            UpdatePushSubscription.sync(this@MainActivity, notificationStore.prefsNow().updates)
-            val now = System.currentTimeMillis()
-            notificationStore.updateState { it.copy(lastOpenedAt = now) }
-            // If the user has just installed the announced version, its notification must disappear.
+            // If the user has just installed the announced version, its notification must disappear immediately.
             notificationCoordinator.reconcile()
+            notificationStore.updateState { it.copy(lastOpenedAt = now) }
+            UpdatePushSubscription.sync(this@MainActivity, notificationStore.prefsNow().updates)
         }
     }
 

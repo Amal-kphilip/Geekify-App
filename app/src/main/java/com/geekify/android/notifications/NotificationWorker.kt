@@ -19,7 +19,11 @@ class NotificationWorker(context: Context, params: WorkerParameters) : Coroutine
     override suspend fun doWork(): Result {
         val entry = EntryPointAccessors.fromApplication(applicationContext, NotificationEntryPoint::class.java)
         return try {
-            entry.coordinator().runOnce()
+            val coordinator = entry.coordinator()
+            coordinator.runOnce()
+            coordinator.nextFollowupDelayMs()?.let { delayMs ->
+                scheduleFollowup(applicationContext, delayMs)
+            }
             Result.success()
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
@@ -43,12 +47,30 @@ class NotificationWorker(context: Context, params: WorkerParameters) : Coroutine
         fun schedule(context: Context) {
             if (!periodicEnqueued.compareAndSet(false, true)) return
             val request = PeriodicWorkRequestBuilder<NotificationWorker>(SCHEDULE_INTERVAL_HOURS, TimeUnit.HOURS)
-                .setConstraints(networkConstraints)
+                .setInitialDelay(1, TimeUnit.HOURS)
                 .build()
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                 UNIQUE_NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
+                ExistingPeriodicWorkPolicy.UPDATE,
                 request
+            )
+        }
+
+        fun cancelKick(context: Context) {
+            runCatching {
+                WorkManager.getInstance(context).cancelUniqueWork(KICK_NAME)
+            }
+        }
+
+        fun scheduleFollowup(context: Context, delayMs: Long) {
+            val safeDelayMs = delayMs.coerceAtLeast(60_000L)
+            val followupRequest = OneTimeWorkRequestBuilder<NotificationWorker>()
+                .setInitialDelay(safeDelayMs, TimeUnit.MILLISECONDS)
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                ENGAGEMENT_FOLLOWUP_NAME,
+                ExistingWorkPolicy.REPLACE,
+                followupRequest
             )
         }
 
@@ -64,20 +86,12 @@ class NotificationWorker(context: Context, params: WorkerParameters) : Coroutine
                 .build()
             wm.enqueueUniqueWork(
                 KICK_NAME,
-                ExistingWorkPolicy.KEEP,
+                ExistingWorkPolicy.REPLACE,
                 immediateRequest
             )
 
             val followupDelayMs = NotificationPolicy.ENGAGEMENT_QUIET_AFTER_OPEN_MS + 60_000L
-            val followupRequest = OneTimeWorkRequestBuilder<NotificationWorker>()
-                .setInitialDelay(followupDelayMs, TimeUnit.MILLISECONDS)
-                .setConstraints(networkConstraints)
-                .build()
-            wm.enqueueUniqueWork(
-                ENGAGEMENT_FOLLOWUP_NAME,
-                ExistingWorkPolicy.REPLACE,
-                followupRequest
-            )
+            scheduleFollowup(context, followupDelayMs)
         }
     }
 }

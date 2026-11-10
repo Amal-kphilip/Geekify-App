@@ -84,7 +84,19 @@ class NotificationPolicyTest {
     }
 
     @Test fun weeklyCapStopsSoftNotifications() {
-        val s = NotificationState(allSentAt = listOf(now - 2 * DAY_MS, now - 4 * DAY_MS), softSentAt = listOf(now - 2 * DAY_MS, now - 4 * DAY_MS))
+        val sentTimes = (1..NotificationPolicy.MAX_SOFT_PER_WEEK).map { now - it * NotificationPolicy.MIN_GAP_MS }
+        val s = NotificationState(allSentAt = sentTimes, softSentAt = sentTimes)
         assertTrue(decide(Kind.ENGAGEMENT, s) is Decision.Deny)
+    }
+
+    @Test fun initialEngagementAndFeatureAllowedAfterReconcile() {
+        val reconciled = NotificationState(
+            tipHandledForVersion = installed,
+            lastOpenedAt = now - 5_000L,
+            allSentAt = emptyList(),
+            softSentAt = emptyList()
+        )
+        assertEquals(Decision.Allow, decide(Kind.ENGAGEMENT, reconciled))
+        assertEquals(Decision.Allow, decide(Kind.FEATURE, reconciled))
     }
 }

@@ -11,13 +11,13 @@ object NotificationPolicy {
     const val WEEK_MS = 7 * DAY_MS
 
     /** Soft notifications are spaced out. Update alerts are version-gated and take priority over tips. */
-    const val MIN_GAP_MS = DAY_MS
-    /** Tips + engagement together: at most 2 in any rolling 7 days. Update notices are one-per-version and not counted here. */
-    const val MAX_SOFT_PER_WEEK = 2
+    const val MIN_GAP_MS = 12 * HOUR_MS
+    /** Tips + engagement together: at most 6 in any rolling 7 days. Update notices are one-per-version and not counted here. */
+    const val MAX_SOFT_PER_WEEK = 6
     /** No "come back" style message if the app was opened in the last 6 hours. */
     const val ENGAGEMENT_QUIET_AFTER_OPEN_MS = 6 * HOUR_MS
-    /** No tip within a day of the user having the app open. */
-    const val TIP_QUIET_AFTER_OPEN_MS = DAY_MS
+    /** No tip within 6 hours of the user having the app open. */
+    const val TIP_QUIET_AFTER_OPEN_MS = 6 * HOUR_MS
 
     enum class Kind { UPDATE, FEATURE, ENGAGEMENT }
 
@@ -62,23 +62,25 @@ object NotificationPolicy {
             Kind.FEATURE -> {
                 if (!i.prefs.tips) return Decision.Deny("tips turned off")
                 if (isUpdatePending(i.prefs, s, i.installedVersionCode)) return Decision.Deny("update notification has priority")
-                val firstTipPending = s.tipHandledForVersion < i.installedVersionCode ||
-                    (s.tipHandledForVersion == i.installedVersionCode && s.allSentAt.isEmpty())
+                val firstTipPending = s.tipHandledForVersion == i.installedVersionCode &&
+                    s.allSentAt.isEmpty() && s.softSentAt.isEmpty()
                 if (!firstTipPending && i.now - s.lastOpenedAt < TIP_QUIET_AFTER_OPEN_MS) return Decision.Deny("app opened recently")
             }
             Kind.ENGAGEMENT -> {
                 if (!i.prefs.engagement) return Decision.Deny("engagement notifications turned off")
                 if (isUpdatePending(i.prefs, s, i.installedVersionCode)) return Decision.Deny("update notification has priority")
-                if (i.now - s.lastOpenedAt < ENGAGEMENT_QUIET_AFTER_OPEN_MS) return Decision.Deny("app opened recently")
+                val firstEngagementPending = s.tipHandledForVersion == i.installedVersionCode &&
+                    s.allSentAt.isEmpty() && s.softSentAt.isEmpty()
+                if (!firstEngagementPending && i.now - s.lastOpenedAt < ENGAGEMENT_QUIET_AFTER_OPEN_MS) return Decision.Deny("app opened recently")
             }
         }
 
         // App updates are time-sensitive and independently deduplicated by version. A recent
         // welcome/tip notification must not suppress a newly published version announcement.
         if (i.kind != Kind.UPDATE) {
-            val lastAny = s.allSentAt.maxOrNull() ?: 0L
+            val lastAny = maxOf(s.allSentAt.maxOrNull() ?: 0L, s.softSentAt.maxOrNull() ?: 0L)
             if (i.now - lastAny < MIN_GAP_MS) {
-                return Decision.Deny("a notification was already sent in the last 24 h")
+                return Decision.Deny("a notification was already sent in the last 12 h")
             }
 
             val softThisWeek = s.softSentAt.count { i.now - it < WEEK_MS }

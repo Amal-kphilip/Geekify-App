@@ -20,20 +20,44 @@ interface NotificationEntryPoint {
     fun notifier(): GeekifyNotifier
 }
 
-/** Handles "Later" and swipe-away on the update notification: remember the dismissed version, never nag for it again. */
+/**
+ * Handles:
+ * 1. "Later" and swipe-away on the update notification: remember the dismissed version, never nag for it again.
+ * 2. ACTION_MY_PACKAGE_REPLACED: immediately clear any active update notification as soon as the APK update installs.
+ */
 class NotificationActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != GeekifyNotifier.ACTION_DISMISS_UPDATE) return
-        val code = intent.getIntExtra(GeekifyNotifier.EXTRA_VERSION_CODE, 0)
-        if (code <= 0) return
         val entry = EntryPointAccessors.fromApplication(context.applicationContext, NotificationEntryPoint::class.java)
-        entry.notifier().cancelUpdate()
-        val pending = goAsync()
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            try {
-                entry.store().updateState { it.copy(dismissedVersion = maxOf(it.dismissedVersion, code)) }
-            } finally {
-                pending.finish()
+        when (intent.action) {
+            Intent.ACTION_MY_PACKAGE_REPLACED -> {
+                entry.notifier().cancelUpdate()
+                NotificationWorker.schedule(context.applicationContext)
+                val pending = goAsync()
+                CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                    try {
+                        entry.coordinator().reconcile()
+                    } finally {
+                        pending.finish()
+                    }
+                }
+            }
+            GeekifyNotifier.ACTION_DISMISS_UPDATE -> {
+                val code = intent.getIntExtra(GeekifyNotifier.EXTRA_VERSION_CODE, 0)
+                if (code <= 0) return
+                entry.notifier().cancelUpdate()
+                val pending = goAsync()
+                CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                    try {
+                        entry.store().updateState {
+                            it.copy(
+                                updateShownForVersion = maxOf(it.updateShownForVersion, code),
+                                dismissedVersion = maxOf(it.dismissedVersion, code)
+                            )
+                        }
+                    } finally {
+                        pending.finish()
+                    }
+                }
             }
         }
     }

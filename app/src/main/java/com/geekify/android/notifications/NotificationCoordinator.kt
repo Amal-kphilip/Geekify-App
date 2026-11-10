@@ -4,13 +4,14 @@ import com.geekify.android.BuildConfig
 import com.geekify.android.data.local.HistoryRepository
 import com.geekify.android.data.local.LibraryRepository
 import com.geekify.android.player.PlayerController
+import com.geekify.android.update.AppUpdateManager
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
  * One pass of "should Geekify say anything right now?". Called by the periodic worker and follow-up kicks.
- * Order = priority: update first, then the what's-new tip, then personalized library/listening engagement,
- * then rotating feature tips. At most ONE notification is posted per pass.
+ * Order = priority: update first, then alternating personalized library/listening engagement and
+ * rotating feature tips. At most ONE notification is posted per pass.
  */
 @Singleton
 class NotificationCoordinator @Inject constructor(
@@ -19,9 +20,13 @@ class NotificationCoordinator @Inject constructor(
     private val notifier: GeekifyNotifier,
     private val history: HistoryRepository,
     private val library: LibraryRepository,
-    private val playerController: PlayerController
+    private val playerController: PlayerController,
+    private val updateManager: AppUpdateManager
 ) {
-    private val installed = BuildConfig.VERSION_CODE
+    private val installed: Int = maxOf(
+        BuildConfig.VERSION_CODE,
+        ReleaseParser.versionCodeFor(BuildConfig.VERSION_NAME) ?: 0
+    )
 
     private data class FeatureTip(val id: String, val title: String, val body: String, val route: String?)
 
@@ -43,166 +48,193 @@ class NotificationCoordinator @Inject constructor(
             title = "Tune your sound with the Equalizer",
             body = "Customize 5-band EQ, bass presets, playback speed, pitch, and volume normalization.",
             route = "audio_settings"
+        ),
+        FeatureTip(
+            id = "tip_daily_picks",
+            title = "Fresh Daily Picks are ready",
+            body = "Jump into Geekify for personalized mixes and recommendations tailored to your taste.",
+            route = "home"
         )
     )
 
     suspend fun runOnce(now: Long = System.currentTimeMillis(), appInForeground: Boolean = AppForeground.isVisible) {
         // 1. Refresh the cached release info (rate limited inside) and drop an update notice that is now obsolete.
-        var state = checker.refreshIfDue(now)
-        reconcile(state)
-
+        val refreshed = checker.refreshIfDue(now)
+        reconcile(refreshed)
+        var state = store.stateNow()
         val prefs = store.prefsNow()
 
-        // 2. Update notification.
-        if (allowed(NotificationPolicy.Kind.UPDATE, now, prefs, state, appInForeground, NotificationChannels.UPDATES)) {
+        // 2. Update notification (never post if already handled/pending in AppUpdateManager or already installed).
+        val handledInAppUpdater = state.latestVersionCode > installed &&
+            updateManager.hasPendingOrDismissedUpdateFor(state.latestVersionCode, state.latestVersionName)
+        if (handledInAppUpdater) {
+            notifier.cancelUpdate()
+            if (state.updateShownForVersion < state.latestVersionCode) {
+                store.updateState {
+                    it.copy(
+                        updateShownForVersion = maxOf(it.updateShownForVersion, state.latestVersionCode),
+                        dismissedVersion = maxOf(it.dismissedVersion, state.latestVersionCode)
+                    )
+                }
+                state = store.stateNow()
+            }
+        } else if (allowed(NotificationPolicy.Kind.UPDATE, now, prefs, state, appInForeground, NotificationChannels.UPDATES)) {
             val name = state.latestVersionName
             val url = state.latestReleaseUrl
             if (name != null && url != null && notifier.postUpdate(ReleaseInfo(name, state.latestVersionCode, url))) {
                 store.updateState {
-                    it.copy(updateShownForVersion = state.latestVersionCode, allSentAt = it.allSentAt.logged(now))
+                    it.copy(updateShownForVersion = maxOf(it.updateShownForVersion, state.latestVersionCode))
                 }
                 return
             }
         }
 
-        // First run: give the existing Tips notification path one real, one-time notification.
-        // It is only posted after the app is backgrounded and only when Tips are enabled.
-        state = store.stateNow()
-        val firstTipPending =
-            state.tipHandledForVersion == 0 ||
-                (state.tipHandledForVersion == installed && state.allSentAt.isEmpty())
-        if (firstTipPending &&
-            allowed(NotificationPolicy.Kind.FEATURE, now, prefs, state, appInForeground, NotificationChannels.TIPS)
-        ) {
+        // 3. Engaging notifications: alternate between personalized listening reminders and rotating feature tips
+        // so both library/recent song nudges and feature discovery tips are delivered reliably.
+        val canEngage = allowed(NotificationPolicy.Kind.ENGAGEMENT, now, prefs, state, appInForeground, NotificationChannels.TIPS)
+        val canTip = allowed(NotificationPolicy.Kind.FEATURE, now, prefs, state, appInForeground, NotificationChannels.TIPS)
+
+        val prevId = state.lastEngagementTrackId
+        val lastWasEngagementTrack = prevId != null && !prevId.startsWith("tip_")
+
+        if (lastWasEngagementTrack && canTip) {
+            if (postNextFeatureTip(state, now)) return
+        }
+
+        if (canEngage) {
+            if (postPersonalizedEngagement(state, now)) return
+        }
+
+        if (canTip) {
+            postNextFeatureTip(state, now)
+        }
+    }
+
+    private suspend fun postPersonalizedEngagement(state: NotificationState, now: Long): Boolean {
+        val recent = history.allTimed().map { it.first }.distinctBy { it.videoId }
+        val previousTrackId = state.lastEngagementTrackId
+        val playCounts = history.topPlayed(limit = 40).associateBy { it.videoId }
+
+        val candidatePool = if (recent.isNotEmpty()) {
+            recent
+        } else {
+            (library.likedOnce() + library.playlistsOnce().flatMap { it.tracks }).distinctBy { it.videoId }
+        }
+
+        if (candidatePool.isNotEmpty()) {
+            val repeatCandidates = candidatePool.filter { track ->
+                (playCounts[track.videoId]?.plays ?: 0) >= EngagementMessageFactory.REPEAT_PLAY_THRESHOLD
+            }
+            val poolToRotate = repeatCandidates.ifEmpty { candidatePool }
+            val prevIdx = poolToRotate.indexOfFirst { it.videoId == previousTrackId }
+            val selected = if (prevIdx >= 0 && poolToRotate.size > 1) {
+                poolToRotate[(prevIdx + 1) % poolToRotate.size]
+            } else {
+                poolToRotate.firstOrNull { track -> track.videoId != previousTrackId }
+                    ?: poolToRotate.first()
+            }
+
+            val plays = playCounts[selected.videoId]?.plays
+                ?: if (recent.isEmpty()) EngagementMessageFactory.REPEAT_PLAY_THRESHOLD else 1
+            val message = EngagementMessageFactory.create(selected, plays)
+            val targetRoute = if (recent.isNotEmpty()) "recents" else "library"
             if (notifier.postTip(
-                    "Welcome to Geekify",
-                    "Your music is ready. Tap to open Geekify.",
-                    route = null,
-                    notificationId = GeekifyNotifier.TIP_NOTIFICATION_ID
+                    message.title,
+                    message.body,
+                    route = targetRoute,
+                    notificationId = GeekifyNotifier.ENGAGEMENT_NOTIFICATION_ID
                 )
             ) {
                 store.updateState {
                     it.copy(
-                        tipHandledForVersion = installed,
+                        tipHandledForVersion = maxOf(it.tipHandledForVersion, installed),
+                        lastEngagementTrackId = message.trackId,
                         allSentAt = it.allSentAt.logged(now),
                         softSentAt = it.softSentAt.logged(now)
                     )
                 }
-                return
+                return true
             }
-        } else if (firstTipPending && !prefs.tips) {
-            store.updateState { it.copy(tipHandledForVersion = installed) }
-            state = store.stateNow()
-        }
-
-        // 3. "What's new" once after the app was updated.
-        if (state.tipHandledForVersion in 1 until installed &&
-            allowed(NotificationPolicy.Kind.FEATURE, now, prefs, state, appInForeground, NotificationChannels.TIPS)
-        ) {
+        } else {
             if (notifier.postTip(
-                    "Geekify updated to v${BuildConfig.VERSION_NAME}",
-                    "See what's new in your music experience.",
-                    route = null,
-                    notificationId = GeekifyNotifier.TIP_NOTIFICATION_ID
-                )
-            ) {
-                store.updateState {
-                    it.copy(tipHandledForVersion = installed, allSentAt = it.allSentAt.logged(now), softSentAt = it.softSentAt.logged(now))
-                }
-                return
-            }
-        } else if (state.tipHandledForVersion in 1 until installed && !prefs.tips) {
-            // Tips are off: mark the version handled so it is not announced later if the user turns tips back on.
-            store.updateState { it.copy(tipHandledForVersion = installed) }
-            state = store.stateNow()
-        }
-
-        // 4. Locally personalized listening reminder. Uses on-device history/play counts first,
-        // falls back to liked/playlist tracks, and finally a discovery prompt if the library is brand new.
-        if (allowed(NotificationPolicy.Kind.ENGAGEMENT, now, prefs, state, appInForeground, NotificationChannels.TIPS)) {
-            val recent = history.allTimed().map { it.first }
-            val previousTrackId = state.lastEngagementTrackId
-            val playCounts = history.topPlayed(limit = 40).associateBy { it.videoId }
-
-            val candidatePool = if (recent.isNotEmpty()) {
-                recent
-            } else {
-                (library.likedOnce() + library.playlistsOnce().flatMap { it.tracks }).distinctBy { it.videoId }
-            }
-
-            if (candidatePool.isNotEmpty()) {
-                val selected = candidatePool.firstOrNull { track ->
-                    track.videoId != previousTrackId && (playCounts[track.videoId]?.plays ?: 0) >= 3
-                } ?: candidatePool.firstOrNull { track -> track.videoId != previousTrackId }
-                    ?: candidatePool.first()
-
-                val plays = playCounts[selected.videoId]?.plays ?: if (recent.isEmpty()) 3 else 1
-                val message = EngagementMessageFactory.create(selected, plays)
-                val targetRoute = if (recent.isNotEmpty()) "recents" else "library"
-                if (notifier.postTip(
-                        message.title,
-                        message.body,
-                        route = targetRoute,
-                        notificationId = GeekifyNotifier.ENGAGEMENT_NOTIFICATION_ID
-                    )
-                ) {
-                    store.updateState {
-                        it.copy(
-                            lastEngagementTrackId = message.trackId,
-                            allSentAt = it.allSentAt.logged(now),
-                            softSentAt = it.softSentAt.logged(now)
-                        )
-                    }
-                    return
-                }
-            } else {
-                if (notifier.postTip(
-                        "Your music space is waiting",
-                        "Jump back into Geekify to discover trending songs, mixes, and playlists.",
-                        route = "home",
-                        notificationId = GeekifyNotifier.ENGAGEMENT_NOTIFICATION_ID
-                    )
-                ) {
-                    store.updateState {
-                        it.copy(
-                            lastEngagementTrackId = "discovery_prompt",
-                            allSentAt = it.allSentAt.logged(now),
-                            softSentAt = it.softSentAt.logged(now)
-                        )
-                    }
-                    return
-                }
-            }
-        }
-
-        // 5. Periodic rotating feature tip when Tips are enabled and no other notification was sent.
-        if (allowed(NotificationPolicy.Kind.FEATURE, now, prefs, state, appInForeground, NotificationChannels.TIPS)) {
-            val prevId = state.lastEngagementTrackId
-            val nextTip = featureTips.firstOrNull { it.id != prevId } ?: featureTips.first()
-            if (notifier.postTip(
-                    nextTip.title,
-                    nextTip.body,
-                    route = nextTip.route,
-                    notificationId = GeekifyNotifier.TIP_NOTIFICATION_ID
+                    "Your music space is waiting",
+                    "Jump back into Geekify to discover trending songs, mixes, and playlists.",
+                    route = "home",
+                    notificationId = GeekifyNotifier.ENGAGEMENT_NOTIFICATION_ID
                 )
             ) {
                 store.updateState {
                     it.copy(
-                        tipHandledForVersion = installed,
-                        lastEngagementTrackId = nextTip.id,
+                        tipHandledForVersion = maxOf(it.tipHandledForVersion, installed),
+                        lastEngagementTrackId = "discovery_prompt",
                         allSentAt = it.allSentAt.logged(now),
                         softSentAt = it.softSentAt.logged(now)
                     )
                 }
+                return true
             }
         }
+        return false
+    }
+
+    private suspend fun postNextFeatureTip(state: NotificationState, now: Long): Boolean {
+        val prevId = state.lastEngagementTrackId
+        val prevTipIdx = featureTips.indexOfFirst { it.id == prevId }
+        val nextTip = if (prevTipIdx >= 0) {
+            featureTips[(prevTipIdx + 1) % featureTips.size]
+        } else {
+            featureTips[(state.softSentAt.size / 2) % featureTips.size]
+        }
+        if (notifier.postTip(
+                nextTip.title,
+                nextTip.body,
+                route = nextTip.route,
+                notificationId = GeekifyNotifier.TIP_NOTIFICATION_ID
+            )
+        ) {
+            store.updateState {
+                it.copy(
+                    tipHandledForVersion = maxOf(it.tipHandledForVersion, installed),
+                    lastEngagementTrackId = nextTip.id,
+                    allSentAt = it.allSentAt.logged(now),
+                    softSentAt = it.softSentAt.logged(now)
+                )
+            }
+            return true
+        }
+        return false
+    }
+
+    /**
+     * Computes the delay in milliseconds until the next soft notification check should run.
+     */
+    suspend fun nextFollowupDelayMs(now: Long = System.currentTimeMillis()): Long? {
+        val prefs = store.prefsNow()
+        if (!prefs.engagement && !prefs.tips) return null
+        val state = store.stateNow()
+        val lastSoft = maxOf(state.allSentAt.maxOrNull() ?: 0L, state.softSentAt.maxOrNull() ?: 0L)
+        val quietRemaining = if (state.lastOpenedAt > 0L) {
+            (NotificationPolicy.ENGAGEMENT_QUIET_AFTER_OPEN_MS - (now - state.lastOpenedAt)).coerceAtLeast(0L)
+        } else {
+            0L
+        }
+        val gapRemaining = if (lastSoft > 0L) {
+            (NotificationPolicy.MIN_GAP_MS - (now - lastSoft)).coerceAtLeast(0L)
+        } else {
+            0L
+        }
+        val waitMs = maxOf(quietRemaining, gapRemaining, NotificationPolicy.ENGAGEMENT_QUIET_AFTER_OPEN_MS)
+        return waitMs + 60_000L
     }
 
     /**
      * Handles a verified stable-release announcement delivered by FCM.
      */
     suspend fun handlePushedRelease(release: ReleaseInfo, now: Long = System.currentTimeMillis()) {
-        if (release.versionCode <= installed) {
+        if (release.versionCode <= installed ||
+            AppForeground.isVisible ||
+            updateManager.hasPendingOrDismissedUpdateFor(release.versionCode, release.versionName)
+        ) {
             reconcile()
             return
         }
@@ -235,8 +267,7 @@ class NotificationCoordinator @Inject constructor(
         if (notifier.postUpdate(release)) {
             store.updateState {
                 it.copy(
-                    updateShownForVersion = maxOf(it.updateShownForVersion, release.versionCode),
-                    allSentAt = it.allSentAt.logged(now)
+                    updateShownForVersion = maxOf(it.updateShownForVersion, release.versionCode)
                 )
             }
         }
@@ -268,11 +299,28 @@ class NotificationCoordinator @Inject constructor(
         }
     }
 
-    /** Called when the app starts: if the user has installed the announced version, its notification must go away. */
+    /** Called when the app starts or package is replaced: if the user has installed the announced version, its notification must go away. */
     suspend fun reconcile() = reconcile(store.stateNow())
 
-    private fun reconcile(state: NotificationState) {
-        if (state.updateShownForVersion in 1..installed) notifier.cancelUpdate()
+    private suspend fun reconcile(state: NotificationState) {
+        if (state.updateShownForVersion in 1..installed || state.latestVersionCode <= installed) {
+            notifier.cancelUpdate()
+        }
+        if (state.tipHandledForVersion < installed ||
+            state.updateShownForVersion < installed ||
+            state.dismissedVersion < installed
+        ) {
+            val upgradedVersion = state.tipHandledForVersion < installed
+            store.updateState { current ->
+                current.copy(
+                    updateShownForVersion = maxOf(current.updateShownForVersion, installed),
+                    dismissedVersion = maxOf(current.dismissedVersion, installed),
+                    tipHandledForVersion = maxOf(current.tipHandledForVersion, installed),
+                    allSentAt = if (upgradedVersion) emptyList() else current.allSentAt,
+                    softSentAt = if (upgradedVersion) emptyList() else current.softSentAt
+                )
+            }
+        }
     }
 
     private fun allowed(
