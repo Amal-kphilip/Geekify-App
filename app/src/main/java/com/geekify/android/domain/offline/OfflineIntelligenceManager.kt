@@ -1,6 +1,8 @@
 package com.geekify.android.domain.offline
 
 import android.content.Context
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.cache.SimpleCache
 import com.geekify.android.data.local.LibraryRepository
 import com.geekify.android.data.model.Track
@@ -12,6 +14,7 @@ import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
+@OptIn(UnstableApi::class)
 @Singleton
 class OfflineIntelligenceManager @Inject constructor(
     @ApplicationContext private val context: Context,
