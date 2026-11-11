@@ -200,9 +200,10 @@ object SearchRelevance {
         tracks: List<Track>,
         favoriteArtists: Set<String> = emptySet()
     ): List<Track> {
+        val uniqueTracks = tracks.distinctBy { it.videoId }
         val normalizedFavorites = favoriteArtists.map { normalize(it) }.toSet()
 
-        val scored = tracks.withIndex().map { indexed ->
+        val scored = uniqueTracks.withIndex().map { indexed ->
             val track = indexed.value
             val isFav = normalizedFavorites.any { fav ->
                 val trackArtist = normalize(track.artist)
@@ -222,7 +223,7 @@ object SearchRelevance {
 
         // Deduplicate the same song across versions (e.g. "Espresso" and "Espresso (Official Video)")
         // while preserving distinct songs or identical test tracks without version markers.
-        val signaturesWithVersions = tracks.filter { hasVersionMarker(it.title) }
+        val signaturesWithVersions = uniqueTracks.filter { hasVersionMarker(it.title) }
             .map { "${normalize(cleanTitle(it.title))}::${normalize(it.artist)}" }
             .toSet()
 
@@ -244,14 +245,63 @@ object SearchRelevance {
         }
     }
 
+    /**
+     * Merges paginated tracks into existing results while preventing duplicate videoIds
+     * and duplicate version-marked song signatures.
+     */
+    fun mergePaginatedTracks(
+        query: String,
+        existing: List<Track>,
+        incoming: List<Track>,
+        favoriteArtists: Set<String> = emptySet()
+    ): List<Track> {
+        if (incoming.isEmpty()) return existing
+        val existingIds = existing.asSequence().map { it.videoId }.toHashSet()
+        val existingSignatures = existing.asSequence()
+            .mapNotNull { track ->
+                val normTitle = normalize(cleanTitle(track.title))
+                val normArtist = normalize(track.artist)
+                if (normTitle.isBlank() || normTitle == "unknown") null else "$normTitle::$normArtist"
+            }
+            .toHashSet()
+        val existingHasVersionBySig = existing.asSequence()
+            .filter { hasVersionMarker(it.title) }
+            .map { "${normalize(cleanTitle(it.title))}::${normalize(it.artist)}" }
+            .toHashSet()
+
+        val rankedIncoming = rankTracks(query, incoming.filterNot { it.videoId in existingIds }, favoriteArtists)
+        val result = ArrayList<Track>(existing.size + rankedIncoming.size)
+        result.addAll(existing)
+
+        for (track in rankedIncoming) {
+            if (!existingIds.add(track.videoId)) continue
+            val normTitle = normalize(cleanTitle(track.title))
+            val normArtist = normalize(track.artist)
+            if (normTitle.isNotBlank() && normTitle != "unknown") {
+                val sig = "$normTitle::$normArtist"
+                val hasVersion = hasVersionMarker(track.title) || sig in existingHasVersionBySig
+                if (hasVersion && sig in existingSignatures) {
+                    continue
+                }
+                existingSignatures.add(sig)
+                if (hasVersionMarker(track.title)) {
+                    existingHasVersionBySig.add(sig)
+                }
+            }
+            result.add(track)
+        }
+        return result
+    }
+
     fun rankCards(
         query: String,
         cards: List<Card>,
         favoriteArtists: Set<String> = emptySet()
     ): List<Card> {
+        val uniqueCards = cards.distinctBy { it.id }
         val normalizedFavorites = favoriteArtists.map { normalize(it) }.toSet()
 
-        val scored = cards.withIndex().map { indexed ->
+        val scored = uniqueCards.withIndex().map { indexed ->
             val card = indexed.value
             val isFav = normalizedFavorites.any { fav ->
                 val cardTitle = normalize(card.title)

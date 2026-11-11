@@ -106,6 +106,48 @@ android {
     }
 }
 
+val validateReleaseSigning = tasks.register("validateReleaseSigning") {
+    group = "verification"
+    description = "Verifies that release signing credentials are configured before building a release artifact."
+    doLast {
+        val releaseSigning = android.signingConfigs.findByName("release")
+        val injectedStoreFile = providers.gradleProperty("android.injected.signing.store.file").orNull
+        val injectedStorePassword = providers.gradleProperty("android.injected.signing.store.password").orNull
+        val injectedKeyAlias = providers.gradleProperty("android.injected.signing.key.alias").orNull
+        val injectedKeyPassword = providers.gradleProperty("android.injected.signing.key.password").orNull
+
+        val hasInjectedSigning = !injectedStoreFile.isNullOrBlank() &&
+            !injectedStorePassword.isNullOrBlank() &&
+            !injectedKeyAlias.isNullOrBlank() &&
+            !injectedKeyPassword.isNullOrBlank() &&
+            file(injectedStoreFile).exists()
+
+        val configuredStoreFile = releaseSigning?.storeFile
+        val hasReleaseSigningConfig = configuredStoreFile != null &&
+            configuredStoreFile.exists() &&
+            !releaseSigning.storePassword.isNullOrBlank() &&
+            !releaseSigning.keyAlias.isNullOrBlank() &&
+            !releaseSigning.keyPassword.isNullOrBlank()
+
+        if (!hasReleaseSigningConfig && !hasInjectedSigning) {
+            throw GradleException(
+                "Release signing configuration is missing or incomplete. " +
+                    "Configure ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD " +
+                    "(or provide keystore.properties in the project root) before building a release artifact."
+            )
+        }
+    }
+}
+
+tasks.matching { task ->
+    task.name == "assembleRelease" ||
+        task.name == "bundleRelease" ||
+        task.name == "packageRelease" ||
+        task.name == "packageReleaseBundle"
+}.configureEach {
+    dependsOn(validateReleaseSigning)
+}
+
 dependencies {
     // Core / lifecycle
     implementation("androidx.core:core-ktx:1.17.0")

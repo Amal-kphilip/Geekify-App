@@ -73,6 +73,8 @@ class LibraryRepository @Inject constructor(
     }
 
     val liked: Flow<List<Track>> = likedDao.all().map { it.map(LikedTrackEntity::toTrack) }
+    val likedVideoIds: Flow<Set<String>> = likedDao.observeVideoIds().map { it.toSet() }
+    suspend fun likedVideoIdsOnce(): Set<String> = likedDao.allVideoIdsOnce().toSet()
 
     /** All playlists with their songs (so lists can show a cover and a real song count). */
     val playlists: Flow<List<LocalPlaylist>> = combine(dao.allPlaylists(), dao.allTracks()) { pls, tracks ->

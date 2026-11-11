@@ -163,6 +163,22 @@ class PlaybackService : MediaSessionService() {
     private var transitionOriginalVolume = 1f
     /** Invalidates resolver, retry, autoplay and watchdog work across account boundaries. */
     private val playbackGeneration = AtomicLong(0L)
+    @Volatile private var networkWarmedUp = false
+    @Volatile private var cachedQueueRankingSignals: com.geekify.android.domain.listening.QueueRankingSignals? = null
+    private var lastPrefetchedVideoIds: List<String> = emptyList()
+
+    private fun ensureWarmUpTriggered() {
+        if (networkWarmedUp) return
+        networkWarmedUp = true
+        scope.launch(Dispatchers.IO) {
+            runCatching { innerTube.warmUp() }
+            runCatching { streamResolver.warmUp() }
+        }
+    }
+
+    private fun invalidateQueueRankingCache() {
+        cachedQueueRankingSignals = null
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -170,12 +186,6 @@ class PlaybackService : MediaSessionService() {
 
         createPlaybackNotificationChannel()
         registerConnectivityMonitor()
-
-        // Warm the InnerTube API session and the player-config/cipher extractor off the playback path.
-        scope.launch(Dispatchers.IO) {
-            innerTube.warmUp()
-            streamResolver.warmUp()
-        }
 
         // Media3 owns the media notification (same id/channel as the early placeholder below). Artwork comes from
         // the session's BitmapLoader (Coil-backed, see CoilBitmapLoader), so the cover is cached, downsampled and
@@ -267,11 +277,11 @@ class PlaybackService : MediaSessionService() {
             .distinctUntilChanged()
             .onEach { (_, shuffle) -> updateMediaNotificationButtons(shuffle = shuffle) }
             .launchIn(scope)
-        libraryRepository.liked
-            .map { tracks -> tracks.asSequence().map { it.videoId }.toSet() }
+        libraryRepository.likedVideoIds
             .distinctUntilChanged()
             .onEach { ids ->
                 likedVideoIds = ids
+                invalidateQueueRankingCache()
                 updateMediaNotificationButtons()
             }
             .launchIn(scope)
@@ -376,7 +386,7 @@ class PlaybackService : MediaSessionService() {
                         finishListeningSession(completed = true)
                         // Forget the finished play so a replay (repeat, or play again) is recorded again.
                         lastPlayingVideoId = null
-                        queueManager.next()
+                        handleTrackEnded()
                     }
                     else -> Unit
                 }
@@ -580,6 +590,13 @@ class PlaybackService : MediaSessionService() {
                     markFailed = recovery.markFailed
                 )
             }
+            if (online && currentTrack != null && appSettings.state.value.autoplayRelated) {
+                val s = queueManager.state.value
+                val upcoming = s.queue.size - s.index - 1
+                if (upcoming < 2 && s.repeat == RepeatMode.OFF && !s.shuffle && autoplayJob?.isActive != true) {
+                    startAutoplay(currentTrack)
+                }
+            }
         }
     }
 
@@ -659,8 +676,10 @@ class PlaybackService : MediaSessionService() {
                 try {
                     when (customCommand) {
                         likeCommand -> queueManager.state.value.current?.let { track ->
-                            libraryRepository.toggleLike(track)
-                            syncRepository.get().pushNow()
+                            withContext(Dispatchers.IO) {
+                                libraryRepository.toggleLike(track)
+                                syncRepository.get().pushNow()
+                            }
                         }
                         shuffleCommand -> queueManager.toggleShuffle()
                     }
@@ -713,6 +732,7 @@ class PlaybackService : MediaSessionService() {
             .distinctUntilChanged()
             .drop(1)
             .onEach {
+                lastPrefetchedVideoIds = emptyList()
                 streamResolver.clearCache()
                 val currentTrack = queueManager.state.value.current
                 if (currentTrack != null && player.currentMediaItem != null) {
@@ -842,10 +862,14 @@ class PlaybackService : MediaSessionService() {
         }
         restoredPositionUsed = true
         if (autoPlay) queueManager.setBuffering(true)
+        ensureWarmUpTriggered()
         loadJob = scope.launch {
             try {
-                val stream = streamResolver.resolve(track.videoId)
-                if (accountTransitionInProgress || generation != playbackGeneration.get() ||
+                val stream = withContext(Dispatchers.IO) {
+                    streamResolver.resolve(track.videoId)
+                }
+                if (!isActive || accountTransitionInProgress || generation != playbackGeneration.get() ||
+                    loadingId != track.videoId || loadingGeneration != generation ||
                     queueManager.state.value.current?.videoId != track.videoId
                 ) return@launch
                 audioEffects.setTrackLoudness(stream.loudnessDb)
@@ -972,12 +996,13 @@ class PlaybackService : MediaSessionService() {
         loadingGeneration = -1L
         player.stop()
         queueManager.setBuffering(true)
+        ensureWarmUpTriggered()
 
         var launchedJob: Job? = null
         launchedJob = scope.launch {
             try {
                 delay(400L * attempt)
-                if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
+                if (!isActive || accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
                 val stillOnline = isCurrentlyConnected()
                 retryCoordinator.onConnectivityChanged(stillOnline, track.videoId) {}
                 if (retryCoordinator.deferIfOffline(track, resumeAt, wasPlaying, markFailed)) {
@@ -985,8 +1010,10 @@ class PlaybackService : MediaSessionService() {
                     queueManager.setError("No internet connection. Playback will resume when back online.")
                     return@launch
                 }
-                val stream = streamResolver.resolve(track.videoId, forceRefresh = true)
-                if (accountTransitionInProgress || generation != playbackGeneration.get() ||
+                val stream = withContext(Dispatchers.IO) {
+                    streamResolver.resolve(track.videoId, forceRefresh = true)
+                }
+                if (!isActive || accountTransitionInProgress || generation != playbackGeneration.get() ||
                     queueManager.state.value.current?.videoId != track.videoId
                 ) return@launch
                 audioEffects.setTrackLoudness(stream.loudnessDb)
@@ -1100,18 +1127,105 @@ class PlaybackService : MediaSessionService() {
     private fun startPrefetch(currentId: String) {
         if (accountTransitionInProgress) return
         val generation = playbackGeneration.get()
+        val s = queueManager.state.value
+        val nextIds = buildList {
+            s.queue.getOrNull(s.index + 1)?.videoId?.let { add(it) }
+            s.queue.getOrNull(s.index + 2)?.videoId?.let { add(it) }
+        }.filter { it != currentId }.distinct()
+        if (nextIds.isEmpty() || nextIds == lastPrefetchedVideoIds) return
+        lastPrefetchedVideoIds = nextIds
+        ensureWarmUpTriggered()
         prefetchJob?.cancel()
-        prefetchJob = scope.launch {
-            // No artificial delay: resolving a URL is a tiny request, and having the next songs
-            // ready is what makes "next" and auto-advance start instantly.
-            val s = queueManager.state.value
-            val nextIds = buildList {
-                s.queue.getOrNull(s.index + 1)?.videoId?.let { add(it) }
-                s.queue.getOrNull(s.index + 2)?.videoId?.let { add(it) }
-            }.filter { it != currentId }
+        prefetchJob = scope.launch(Dispatchers.IO) {
             if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
             streamResolver.prefetch(nextIds)
         }
+    }
+
+    private suspend fun resolveQueueRankingSignals(): com.geekify.android.domain.listening.QueueRankingSignals {
+        val now = System.currentTimeMillis()
+        cachedQueueRankingSignals?.let { cached ->
+            if (now - cached.builtAtMs <= 60_000L) {
+                return cached
+            }
+        }
+        val (sessions, plays, liked) = withContext(Dispatchers.IO) {
+            val s = listeningStatsRepository.latest(500)
+            val p = historyRepository.topPlayed(250)
+            val l = libraryRepository.likedOnce()
+            Triple(s, p, l)
+        }
+        return withContext(Dispatchers.Default) {
+            SmartQueueRanker.buildSignals(
+                sessions = sessions,
+                playCounts = plays,
+                likedTracks = liked,
+                now = now
+            )
+        }.also { cachedQueueRankingSignals = it }
+    }
+
+    private fun handleTrackEnded() {
+        val s = queueManager.state.value
+        if (s.hasNext || s.repeat != RepeatMode.OFF) {
+            queueManager.next()
+            return
+        }
+        val currentTrack = s.current
+        if (currentTrack != null && appSettings.state.value.autoplayRelated && !s.shuffle) {
+            queueManager.setBuffering(true)
+            val generation = playbackGeneration.get()
+            scope.launch {
+                val activeAutoplay = autoplayJob
+                if (activeAutoplay != null && activeAutoplay.isActive) {
+                    activeAutoplay.join()
+                } else {
+                    fetchAndAppendAutoplay(currentTrack, generation)
+                }
+                if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
+                queueManager.setBuffering(false)
+                queueManager.next()
+            }
+        } else {
+            queueManager.next()
+        }
+    }
+
+    private suspend fun fetchAndAppendAutoplay(track: Track, generation: Long): Boolean {
+        val result = withContext(Dispatchers.IO) {
+            musicSource.related(track.videoId)
+        }
+        if (accountTransitionInProgress || generation != playbackGeneration.get()) return false
+        if (result !is com.geekify.android.data.source.MusicResult.Success) return false
+        val latestQueue = queueManager.state.value
+        val latestUpcoming = latestQueue.queue.size - latestQueue.index - 1
+        if (latestQueue.current?.videoId != track.videoId ||
+            latestQueue.repeat != RepeatMode.OFF ||
+            latestQueue.shuffle ||
+            latestUpcoming >= 2
+        ) {
+            return latestUpcoming > 0
+        }
+        val queuedIds = latestQueue.queue.map { it.videoId }.toSet()
+        val candidates = result.value.filter { it.videoId !in queuedIds }
+        if (candidates.isEmpty()) return false
+        val signals = resolveQueueRankingSignals()
+        if (accountTransitionInProgress || generation != playbackGeneration.get()) return false
+        val ranked = SmartQueueRanker.rankAsync(
+            candidates = candidates,
+            current = latestQueue.current ?: track,
+            signals = signals,
+            upcoming = latestQueue.queue.drop(latestQueue.index + 1),
+            dispatcher = Dispatchers.Default
+        )
+        if (accountTransitionInProgress || generation != playbackGeneration.get()) return false
+        if (ranked.isEmpty()) return false
+        queueManager.appendRelated(
+            ranked.map { it.track },
+            ranked.associate { it.track.videoId to it.reason }
+        )
+        startPrefetch(track.videoId)
+        return true
     }
 
     /**
@@ -1127,36 +1241,7 @@ class PlaybackService : MediaSessionService() {
         if (upcoming >= 2 || s.repeat != RepeatMode.OFF || s.shuffle) return
         autoplayJob?.cancel()
         autoplayJob = scope.launch {
-            val result = musicSource.related(track.videoId)
-            if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
-            if (result is com.geekify.android.data.source.MusicResult.Success) {
-                val latestQueue = queueManager.state.value
-                val latestUpcoming = latestQueue.queue.size - latestQueue.index - 1
-                if (latestQueue.current?.videoId != track.videoId || latestQueue.repeat != RepeatMode.OFF || latestQueue.shuffle || latestUpcoming >= 2) {
-                    return@launch
-                }
-                val queuedIds = latestQueue.queue.map { it.videoId }.toSet()
-                val candidates = result.value.filter { it.videoId !in queuedIds }
-                if (candidates.isEmpty()) return@launch
-                val sessions = listeningStatsRepository.latest(2_000)
-                if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
-                val plays = historyRepository.topPlayed(500)
-                if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
-                val liked = libraryRepository.likedOnce()
-                if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
-                val ranked = SmartQueueRanker.rank(
-                    candidates = candidates,
-                    current = latestQueue.current ?: track,
-                    sessions = sessions,
-                    playCounts = plays,
-                    likedTracks = liked,
-                    upcoming = latestQueue.queue.drop(latestQueue.index + 1)
-                )
-                queueManager.appendRelated(
-                    ranked.map { it.track },
-                    ranked.associate { it.track.videoId to it.reason }
-                )
-            }
+            fetchAndAppendAutoplay(track, generation)
         }
     }
 
@@ -1248,6 +1333,7 @@ class PlaybackService : MediaSessionService() {
                 skipped = skipped && !meaningfulCompletion
             )
             if (!appSettings.state.value.pauseListenHistory) {
+                invalidateQueueRankingCache()
                 // This job waits for all previous periodic checkpoints, then writes and uploads the
                 // final cumulative record. Account handoff joins it before clearing Room or changing UID.
                 persistenceJob = enqueueListeningPersistence(record, pushToCloud = true)
@@ -1357,6 +1443,8 @@ class PlaybackService : MediaSessionService() {
             playerActivelyPlaying.value = false
             placeholderShown = false
             lastPlayingVideoId = null
+            lastPrefetchedVideoIds = emptyList()
+            invalidateQueueRankingCache()
             listenedMs = 0L
             playCounted = false
             activeListeningSessionId = null

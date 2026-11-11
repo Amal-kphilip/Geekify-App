@@ -78,6 +78,52 @@ class SmartQueueRankerTest {
         assertFalse(rank.any { it.track.videoId == "current" })
     }
 
+    @Test
+    fun `rankAsync executes on background dispatcher and produces identical ranking to pre-aggregated signals`() = kotlinx.coroutines.runBlocking {
+        val current = track("current", "Current", "Artist A")
+        val liked = track("liked", "Liked song", "Artist B")
+        val familiar = track("familiar", "Familiar song", "Artist C")
+        val sessions = listOf(
+            session("f1", familiar, listened = 180_000L, completed = true)
+        )
+        val playCounts = listOf(PlayStat("familiar", "Familiar song", "Artist C", 4, 10L))
+        val signals = SmartQueueRanker.buildSignals(
+            sessions = sessions,
+            playCounts = playCounts,
+            likedTracks = listOf(liked),
+            now = 100L
+        )
+
+        var executedThreadName: String? = null
+        val customDispatcher = object : kotlinx.coroutines.CoroutineDispatcher() {
+            override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) {
+                executedThreadName = "CustomQueueRankerWorker"
+                block.run()
+            }
+        }
+
+        val asyncRanked = SmartQueueRanker.rankAsync(
+            candidates = listOf(familiar, liked, current),
+            current = current,
+            signals = signals,
+            upcoming = emptyList(),
+            dispatcher = customDispatcher
+        )
+        val syncRanked = SmartQueueRanker.rank(
+            candidates = listOf(familiar, liked, current),
+            current = current,
+            sessions = sessions,
+            playCounts = playCounts,
+            likedTracks = listOf(liked),
+            upcoming = emptyList(),
+            now = 100L
+        )
+
+        assertEquals("CustomQueueRankerWorker", executedThreadName)
+        assertEquals(syncRanked.map { it.track.videoId }, asyncRanked.map { it.track.videoId })
+        assertEquals(syncRanked.map { it.reason }, asyncRanked.map { it.reason })
+    }
+
     private fun track(id: String, title: String, artist: String) =
         Track(videoId = id, title = title, artist = artist)
 

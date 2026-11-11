@@ -247,19 +247,32 @@ class AudioEmbeddingService @Inject constructor(
     }
 }
 
+enum class LyricsRepresentationSource {
+    /** Keyword lexicon + character 3-gram projection over an authorized lyric snippet (not deep NLP comprehension). */
+    AUTHORIZED_LYRICS_LEXICON_HASH,
+    /** Keyword lexicon + character 3-gram projection derived strictly from title/artist/album metadata (no lyrics text). */
+    METADATA_LEXICON_PROJECTION
+}
+
 /**
- * Multilingual semantic lyrics & thematic representation engine (`FloatArray(32)`).
+ * Multilingual thematic lexicon & character n-gram representation service (`FloatArray(32)`).
  *
- * Maps authorized lyric snippets or multilingual title/metadata themes across Malayalam, Tamil,
- * Hindi, Telugu, Kannada, Punjabi, English, Korean, Japanese, and Spanish into a shared 32-D
- * semantic space so songs about nostalgia/longing, romance, heartbreak, motivation, celebration,
- * or nature match across languages without storing copyrighted full lyrics.
+ * Note: This service performs deterministic keyword-lexicon matching and character 3-gram
+ * hashing over track metadata (or optional authorized lyric snippets). It does NOT perform
+ * deep natural-language lyric comprehension or full-song lyric analysis.
  */
 @Singleton
 class LyricsSemanticService @Inject constructor() {
     companion object {
         const val SEMANTIC_DIM = 32
     }
+
+    fun resolveRepresentationSource(authorizedLyricsSnippet: String? = null): LyricsRepresentationSource =
+        if (!authorizedLyricsSnippet.isNullOrBlank()) {
+            LyricsRepresentationSource.AUTHORIZED_LYRICS_LEXICON_HASH
+        } else {
+            LyricsRepresentationSource.METADATA_LEXICON_PROJECTION
+        }
 
     private val wordRegex = Regex("[\\p{L}\\p{N}_-]+")
 

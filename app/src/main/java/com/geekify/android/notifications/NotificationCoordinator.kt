@@ -299,6 +299,20 @@ class NotificationCoordinator @Inject constructor(
         }
     }
 
+    /**
+     * Synchronizes FCM topic subscription state when Firebase rotates or refreshes the registration
+     * token. Never logs or uploads raw tokens or personal listening data to Firebase.
+     */
+    suspend fun onFcmTokenRefreshed(
+        token: String,
+        syncTopicSubscription: (updatesEnabled: Boolean) -> Unit
+    ): Boolean {
+        if (token.isBlank()) return false
+        val prefs = store.prefsNow()
+        syncTopicSubscription(prefs.updates)
+        return true
+    }
+
     /** Called when the app starts or package is replaced: if the user has installed the announced version, its notification must go away. */
     suspend fun reconcile() = reconcile(store.stateNow())
 

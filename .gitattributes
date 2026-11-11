@@ -1,0 +1,21 @@
+# Exclude signing keys, credentials, local config, and build outputs from git archives
+*.keystore export-ignore
+*.jks export-ignore
+*.p12 export-ignore
+*.pfx export-ignore
+*.pem export-ignore
+*.der export-ignore
+release-signing.keystore export-ignore
+**/release-signing.keystore export-ignore
+keystore.properties export-ignore
+**/keystore.properties export-ignore
+local.properties export-ignore
+**/local.properties export-ignore
+app/google-services.json export-ignore
+**/google-services.json export-ignore
+build/ export-ignore
+app/build/ export-ignore
+innertube/build/ export-ignore
+.gradle/ export-ignore
+.kotlin/ export-ignore
+.idea/ export-ignore

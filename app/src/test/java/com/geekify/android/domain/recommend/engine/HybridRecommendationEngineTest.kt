@@ -545,12 +545,175 @@ class HybridRecommendationEngineTest {
         assertNotNull("User 32-D preference profile must be persisted in Room", cachedProfile)
     }
 
+    // -----------------------------------------------------------------------
+    // 9. Phase 1 Stabilization Tests: Cache Hit/Miss, Invalidation, Dedup & Fallback Honesty
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun `fallback neural model explicitly reports untrained status with zero validation metrics`() {
+        val neural = NeuralRecommendationEngine()
+        val meta = neural.currentModelMetadata()
+
+        assertTrue("Untrained default model must explicitly report isFallback = true", meta.isFallback)
+        assertFalse("Untrained default model must report isTrained = false", meta.isTrained)
+        assertEquals(0, meta.trainSamples)
+        assertEquals(0.0, meta.validationLoss, 1e-9)
+        assertEquals(0.0, meta.validationAccuracy, 1e-9)
+        assertTrue(meta.statusSummary.startsWith("UNTRAINED_FALLBACK_PRIOR"))
+        assertTrue(neural.isUsingFallbackModel())
+
+        val lyricsService = LyricsSemanticService()
+        assertEquals(
+            LyricsRepresentationSource.METADATA_LEXICON_PROJECTION,
+            lyricsService.resolveRepresentationSource(null)
+        )
+        assertEquals(
+            LyricsRepresentationSource.AUTHORIZED_LYRICS_LEXICON_HASH,
+            lyricsService.resolveRepresentationSource("Mazha nila pranayam")
+        )
+    }
+
+    @Test
+    fun `hybrid pipeline reads cached features on second run and invalidates stale or mismatched entries`() = runBlocking {
+        val classificationService = MusicClassificationService()
+        val contextEngine = RecommendationContextEngine(classificationService)
+        val audioService = AudioEmbeddingService(classificationService)
+        val lyricsService = LyricsSemanticService()
+        val collabEngine = CollaborativeRecommendationEngine()
+        val neuralEngine = NeuralRecommendationEngine()
+        val expManager = RecommendationExperimentManager()
+
+        val pipeline = HybridRecommendationPipeline(
+            classificationService = classificationService,
+            contextEngine = contextEngine,
+            audioEmbeddingService = audioService,
+            lyricsSemanticService = lyricsService,
+            collaborativeEngine = collabEngine,
+            neuralEngine = neuralEngine,
+            experimentManager = expManager
+        )
+
+        val sharedTrack = Track(
+            videoId = "dup_track_1",
+            title = "Illuminati",
+            artist = "Sushin Shyam",
+            durationSeconds = 215
+        )
+        val candTrack = Track(
+            videoId = "cand_track_2",
+            title = "Cherathukal",
+            artist = "Sushin Shyam",
+            durationSeconds = 205
+        )
+        val nowMs = 1_700_000_500_000L
+
+        // Run 1: Cold cache -> all misses, duplicate track across liked/recent/related computed only once
+        val run1 = pipeline.execute(
+            accountId = "user_cache_test",
+            likedTracks = listOf(sharedTrack),
+            recentTracks = listOf(sharedTrack),
+            playlistTracks = listOf(sharedTrack),
+            frequentSignals = listOf(Recommender.PlayedSignal(sharedTrack.videoId, sharedTrack.artist, sharedTrack.title, plays = 6)),
+            savedArtists = listOf("Sushin Shyam"),
+            sessionSignals = emptyList(),
+            relatedBySeed = mapOf(sharedTrack.videoId to listOf(sharedTrack, candTrack)),
+            activeSeeds = listOf(sharedTrack.videoId),
+            shownVideoIds = emptySet(),
+            shownCounts = emptyMap(),
+            hourOfDay = 20,
+            preferredContentLanguage = "Malayalam",
+            languageOverrides = emptyMap(),
+            pauseListenHistory = false,
+            engineDao = fakeDao,
+            nowMs = nowMs
+        )
+
+        assertEquals("Cold run should have 0 cache hits", 0, run1.featureCacheHits)
+        assertEquals("Duplicate track across liked, recent, playlist, and related must be computed only once", 2, run1.featureCacheMisses)
+        assertEquals(2, pipeline.totalFeatureComputations())
+        assertTrue("Untrained fallback status must be exposed honestly in pipeline output", run1.isFallbackModel)
+        assertTrue("Collaborative interactions should be persisted in Room", fakeDao.interactionCount() > 0)
+
+        // Run 2: Warm cache with fresh pipeline instance (empty in-memory map, reads from Room DAO)
+        val pipelineWarm = HybridRecommendationPipeline(
+            classificationService = classificationService,
+            contextEngine = contextEngine,
+            audioEmbeddingService = audioService,
+            lyricsSemanticService = lyricsService,
+            collaborativeEngine = collabEngine,
+            neuralEngine = neuralEngine,
+            experimentManager = expManager
+        )
+        val run2 = pipelineWarm.execute(
+            accountId = "user_cache_test",
+            likedTracks = listOf(sharedTrack),
+            recentTracks = listOf(sharedTrack),
+            playlistTracks = emptyList(),
+            frequentSignals = listOf(Recommender.PlayedSignal(sharedTrack.videoId, sharedTrack.artist, sharedTrack.title, plays = 6)),
+            savedArtists = listOf("Sushin Shyam"),
+            sessionSignals = emptyList(),
+            relatedBySeed = mapOf(sharedTrack.videoId to listOf(candTrack)),
+            activeSeeds = listOf(sharedTrack.videoId),
+            shownVideoIds = emptySet(),
+            shownCounts = emptyMap(),
+            hourOfDay = 20,
+            preferredContentLanguage = "Malayalam",
+            languageOverrides = emptyMap(),
+            pauseListenHistory = false,
+            engineDao = fakeDao,
+            nowMs = nowMs + 1_000L
+        )
+
+        assertEquals("Warm run must hit Room feature cache for both tracks", 2, run2.featureCacheHits)
+        assertEquals("Warm run must have 0 cache misses", 0, run2.featureCacheMisses)
+        assertEquals("Warm run must perform 0 expensive feature computations", 0, pipelineWarm.totalFeatureComputations())
+
+        // Run 3: Invalidate cand_track_2 by corrupting its schema version in Room
+        val existingCand = fakeDao.getTrackFeature("cand_track_2")!!
+        fakeDao.upsertTrackFeature(existingCand.copy(featureSource = "LEGACY_UNVERSIONED_SOURCE"))
+
+        val pipelineInvalidated = HybridRecommendationPipeline(
+            classificationService = classificationService,
+            contextEngine = contextEngine,
+            audioEmbeddingService = audioService,
+            lyricsSemanticService = lyricsService,
+            collaborativeEngine = collabEngine,
+            neuralEngine = neuralEngine,
+            experimentManager = expManager
+        )
+        val run3 = pipelineInvalidated.execute(
+            accountId = "user_cache_test",
+            likedTracks = listOf(sharedTrack),
+            recentTracks = emptyList(),
+            playlistTracks = emptyList(),
+            frequentSignals = listOf(Recommender.PlayedSignal(sharedTrack.videoId, sharedTrack.artist, sharedTrack.title, plays = 6)),
+            savedArtists = listOf("Sushin Shyam"),
+            sessionSignals = emptyList(),
+            relatedBySeed = mapOf(sharedTrack.videoId to listOf(candTrack)),
+            activeSeeds = listOf(sharedTrack.videoId),
+            shownVideoIds = emptySet(),
+            shownCounts = emptyMap(),
+            hourOfDay = 20,
+            preferredContentLanguage = "Malayalam",
+            languageOverrides = emptyMap(),
+            pauseListenHistory = false,
+            engineDao = fakeDao,
+            nowMs = nowMs + 2_000L
+        )
+
+        assertEquals("Valid track should still hit cache", 1, run3.featureCacheHits)
+        assertEquals("Invalidated schema version track must miss cache and recompute", 1, run3.featureCacheMisses)
+        assertEquals(1, pipelineInvalidated.totalFeatureComputations())
+    }
+
     private class FakeRecommendationEngineDao : RecommendationEngineDao {
         private val features = mutableMapOf<String, TrackFeatureEntity>()
         private val profiles = mutableMapOf<String, UserPreferenceProfileEntity>()
         private val assignments = mutableMapOf<String, ExperimentAssignmentEntity>()
         private val interactions = mutableListOf<CollaborativeInteractionEntity>()
         private var nextInteractionId = 1L
+
+        fun interactionCount(): Int = interactions.size
 
         override suspend fun upsertTrackFeature(feature: TrackFeatureEntity) {
             features[feature.videoId] = feature

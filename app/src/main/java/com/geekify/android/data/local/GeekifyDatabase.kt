@@ -370,6 +370,12 @@ interface LikedDao {
     @Delete suspend fun delete(e: LikedTrackEntity)
     @Query("DELETE FROM liked_tracks") suspend fun clear()
     @Query("SELECT * FROM liked_tracks ORDER BY addedAt DESC, rowid DESC") suspend fun allOnce(): List<LikedTrackEntity>
+    @Query("SELECT videoId FROM liked_tracks") suspend fun allVideoIdsOnce(): List<String>
+    @Query("SELECT videoId FROM liked_tracks") fun observeVideoIds(): Flow<List<String>>
+    @Query("SELECT DISTINCT artist FROM liked_tracks WHERE artist != '' ORDER BY addedAt DESC LIMIT :limit")
+    suspend fun distinctArtistsOnce(limit: Int = 100): List<String>
+    @Query("SELECT DISTINCT artist FROM liked_tracks WHERE artist != '' ORDER BY addedAt DESC LIMIT :limit")
+    fun observeDistinctArtists(limit: Int = 100): Flow<List<String>>
     @Query("SELECT * FROM liked_tracks WHERE title LIKE '%' || :query || '%' OR artist LIKE '%' || :query || '%' OR album LIKE '%' || :query || '%' LIMIT :limit")
     suspend fun searchLiked(query: String, limit: Int = 20): List<LikedTrackEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAll(list: List<LikedTrackEntity>)
@@ -407,6 +413,10 @@ interface PlayStatDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insert(e: PlayStatEntity): Long
     @Query("SELECT * FROM play_stats ORDER BY playCount DESC, lastPlayedAt DESC LIMIT :limit") suspend fun top(limit: Int): List<PlayStatEntity>
     @Query("SELECT * FROM play_stats ORDER BY playCount DESC, lastPlayedAt DESC LIMIT :limit") fun topFlow(limit: Int): Flow<List<PlayStatEntity>>
+    @Query("SELECT DISTINCT artist FROM play_stats WHERE artist != '' ORDER BY playCount DESC, lastPlayedAt DESC LIMIT :limit")
+    suspend fun topArtistsOnce(limit: Int = 25): List<String>
+    @Query("SELECT DISTINCT artist FROM play_stats WHERE artist != '' ORDER BY playCount DESC, lastPlayedAt DESC LIMIT :limit")
+    fun observeTopArtists(limit: Int = 25): Flow<List<String>>
     @Query("DELETE FROM play_stats") suspend fun clear()
 }
 
@@ -631,6 +641,17 @@ interface RecommendationEngineDao {
 
     @Query("DELETE FROM collaborative_interactions WHERE anonUserHash = :anonUserHash")
     suspend fun deleteCollaborativeInteractionsForUser(anonUserHash: String)
+
+    @Transaction
+    suspend fun replaceUserCollaborativeInteractions(
+        anonUserHash: String,
+        interactions: List<CollaborativeInteractionEntity>
+    ) {
+        deleteCollaborativeInteractionsForUser(anonUserHash)
+        if (interactions.isNotEmpty()) {
+            insertCollaborativeInteractions(interactions)
+        }
+    }
 
     @Query("DELETE FROM collaborative_interactions WHERE timestampMs < :before")
     suspend fun pruneCollaborativeInteractionsBefore(before: Long): Int

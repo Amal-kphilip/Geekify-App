@@ -77,7 +77,6 @@ class GeekifyNotifier @Inject constructor(@ApplicationContext private val contex
             .setSmallIcon(R.drawable.ic_stat_geekify)
             .setContentTitle(title)
             .setContentText(text)
-            .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(openApp(route, requestCode = if (notificationId == ENGAGEMENT_NOTIFICATION_ID) 14 else 13))
             .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)

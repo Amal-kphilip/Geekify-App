@@ -7,9 +7,13 @@ import com.geekify.android.data.local.UserPreferenceProfileEntity
 import com.geekify.android.data.model.Mix
 import com.geekify.android.data.model.Track
 import com.geekify.android.domain.recommend.Recommender
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.min
@@ -26,7 +30,10 @@ data class CandidateScoreDiagnostics(
     val modelVersion: String,
     val finalScore: Double,
     val neuralProbability: Double,
-    val features: NeuralRankingFeatures
+    val features: NeuralRankingFeatures,
+    val isFallbackModel: Boolean = true,
+    val audioFeatureSource: EmbeddingFeatureSource = EmbeddingFeatureSource.METADATA_STRUCTURAL_PROJECTION,
+    val lyricsFeatureSource: LyricsRepresentationSource = LyricsRepresentationSource.METADATA_LEXICON_PROJECTION
 )
 
 data class HybridPipelineOutput(
@@ -35,7 +42,18 @@ data class HybridPipelineOutput(
     val diagnostics: Map<String, CandidateScoreDiagnostics>,
     val experimentGroup: ExperimentTreatmentGroup,
     val modelVersion: String,
-    val latencyMs: Long
+    val latencyMs: Long,
+    val modelMetadata: ModelVersionMetadata = ModelVersionMetadata(
+        modelVersion = modelVersion,
+        trainedAtMs = 0L,
+        trainSamples = 0,
+        validationLoss = 0.0,
+        validationAccuracy = 0.0,
+        isFallback = true
+    ),
+    val isFallbackModel: Boolean = modelMetadata.isFallback,
+    val featureCacheHits: Int = 0,
+    val featureCacheMisses: Int = 0
 )
 
 /**
@@ -58,7 +76,50 @@ class HybridRecommendationPipeline @Inject constructor(
     private val neuralEngine: NeuralRecommendationEngine,
     private val experimentManager: RecommendationExperimentManager
 ) {
+    companion object {
+        const val FEATURE_CACHE_SCHEMA_VERSION = "v2.5.9-feat-1"
+        const val FEATURE_CACHE_TTL_MS = 30L * 24 * 3600_000L
+        const val NEURAL_MODEL_STATE_PREFIX = "__neural_model_state__:"
+        private const val MAX_MEMORY_CACHE_ENTRIES = 1_000
+        private const val SQLITE_BATCH_CHUNK_SIZE = 400
+
+        fun formatVersionedFeatureSource(source: EmbeddingFeatureSource): String =
+            "${source.name}@$FEATURE_CACHE_SCHEMA_VERSION"
+
+        fun isSupportedFeatureSourceVersion(rawSource: String): Boolean {
+            if (rawSource.isBlank()) return false
+            if (rawSource.endsWith("@$FEATURE_CACHE_SCHEMA_VERSION")) return true
+            return rawSource == EmbeddingFeatureSource.METADATA_STRUCTURAL_PROJECTION.name ||
+                rawSource == EmbeddingFeatureSource.AUTHORIZED_AUDIO_ANALYSIS.name
+        }
+
+        fun parseEmbeddingFeatureSource(rawSource: String): EmbeddingFeatureSource {
+            val prefix = rawSource.substringBefore('@')
+            return runCatching { EmbeddingFeatureSource.valueOf(prefix) }
+                .getOrDefault(EmbeddingFeatureSource.METADATA_STRUCTURAL_PROJECTION)
+        }
+    }
+
+    private data class ResolvedTrackFeatureBundle(
+        val videoId: String,
+        val classification: TrackClassification,
+        val audioEmbedding: AudioEmbeddingResult,
+        val lyricsEmbedding: FloatArray,
+        val entity: TrackFeatureEntity,
+        val fromCache: Boolean
+    )
+
     private val json = Json { ignoreUnknownKeys = true }
+    private val parsedFeatureMemoryCache = ConcurrentHashMap<String, ResolvedTrackFeatureBundle>()
+    private val totalComputationCounter = AtomicInteger(0)
+
+    /** Total number of expensive track feature computations performed by this instance (for diagnostics & tests). */
+    fun totalFeatureComputations(): Int = totalComputationCounter.get()
+
+    fun resetFeatureComputationCounter() {
+        totalComputationCounter.set(0)
+        parsedFeatureMemoryCache.clear()
+    }
 
     suspend fun execute(
         accountId: String?,
@@ -80,9 +141,20 @@ class HybridRecommendationPipeline @Inject constructor(
         nowMs: Long = System.currentTimeMillis(),
         random: Random = Random.Default
     ): HybridPipelineOutput {
+        currentCoroutineContext().ensureActive()
         val startNs = System.nanoTime()
         val treatmentGroup = experimentManager.getOrAssignGroup(accountId, dao = engineDao)
-        val modelVersion = neuralEngine.currentModelMetadata().modelVersion
+
+        // Restore persisted trained neural model if currently on untrained fallback
+        val modelStateKey = "$NEURAL_MODEL_STATE_PREFIX${accountId?.trim()?.ifEmpty { "guest" } ?: "guest"}"
+        if (engineDao != null && neuralEngine.isUsingFallbackModel()) {
+            runCatching {
+                val savedModelRow = engineDao.getUserProfile(modelStateKey)
+                if (savedModelRow != null && savedModelRow.tasteVectorJson.isNotBlank()) {
+                    neuralEngine.restoreTrainedModelJson(savedModelRow.tasteVectorJson)
+                }
+            }
+        }
 
         // 1. Build base behavioural signals & language affinity via Recommender
         fun signal(t: Track) = Recommender.Signal(t.videoId, t.artist, t.title)
@@ -110,9 +182,94 @@ class HybridRecommendationPipeline @Inject constructor(
             languageOverrides = languageOverrides
         )
 
-        // 2. Build user content taste vectors (Audio 32-D, Lyrics Semantic 32-D, Genre & Mood distributions)
+        // Pre-collect all unique tracks that may need features in this execution pass
         val allUserTracks = (likedTracks.take(25) + recentTracks.take(20) + playlistTracks.take(20))
             .distinctBy { it.videoId }
+        val allCandidatesById = relatedBySeed.values.flatten().associateBy { it.videoId }
+        val leadFavoriteTrack = likedTracks.firstOrNull() ?: recentTracks.firstOrNull()
+
+        val uniqueTracksForFeatureLookup = LinkedHashMap<String, Track>()
+        for (t in allUserTracks) uniqueTracksForFeatureLookup.putIfAbsent(t.videoId, t)
+        for ((vid, t) in allCandidatesById) uniqueTracksForFeatureLookup.putIfAbsent(vid, t)
+        if (leadFavoriteTrack != null) {
+            uniqueTracksForFeatureLookup.putIfAbsent(leadFavoriteTrack.videoId, leadFavoriteTrack)
+        }
+
+        // Batch-read cached track features from Room before computing
+        val cachedEntitiesById = HashMap<String, TrackFeatureEntity>()
+        if (engineDao != null && uniqueTracksForFeatureLookup.isNotEmpty()) {
+            val allIds = uniqueTracksForFeatureLookup.keys.toList()
+            for (chunk in allIds.chunked(SQLITE_BATCH_CHUNK_SIZE)) {
+                currentCoroutineContext().ensureActive()
+                val rows = runCatching { engineDao.getTrackFeatures(chunk) }.getOrDefault(emptyList())
+                for (row in rows) {
+                    cachedEntitiesById[row.videoId] = row
+                }
+            }
+        }
+
+        val resolvedByVideoId = HashMap<String, ResolvedTrackFeatureBundle>(uniqueTracksForFeatureLookup.size)
+        val newlyComputedEntities = ArrayList<TrackFeatureEntity>()
+        var cacheHits = 0
+        var cacheMisses = 0
+
+        suspend fun resolveTrackFeatures(track: Track): ResolvedTrackFeatureBundle {
+            currentCoroutineContext().ensureActive()
+            resolvedByVideoId[track.videoId]?.let { return it }
+
+            val cachedEntity = cachedEntitiesById[track.videoId]
+            if (cachedEntity != null) {
+                val validated = validateAndDecodeCachedFeature(track, cachedEntity, nowMs)
+                if (validated != null) {
+                    cacheHits++
+                    resolvedByVideoId[track.videoId] = validated
+                    return validated
+                }
+            }
+
+            // Cache miss or invalidated entry: compute once and record for persistence
+            cacheMisses++
+            totalComputationCounter.incrementAndGet()
+            val cls = classificationService.classify(track.title, track.artist, track.album, track.durationSeconds)
+            val audioEmb = audioEmbeddingService.embedTrack(track, classification = cls)
+            val lyricsEmb = lyricsSemanticService.extractSemanticVector(track.title, track.artist, track.album)
+            val resolvedLang = Recommender.resolveLanguage(track.videoId, track.title, track.artist, languageOverrides)
+            val identity = TrackIdentityNormalizer.normalize(track)
+            val versionedSource = formatVersionedFeatureSource(audioEmb.source)
+
+            val newEntity = TrackFeatureEntity(
+                videoId = track.videoId,
+                normalizedIdentity = identity.canonicalKey,
+                recordingVariant = identity.variant.name,
+                language = resolvedLang,
+                languageConfidence = 1.0,
+                genresJson = json.encodeToString(cls.genres.mapKeys { it.key.name }),
+                moodsJson = json.encodeToString(cls.moods.mapKeys { it.key.name }),
+                audioEmbeddingJson = json.encodeToString(audioEmb.vector.toList()),
+                lyricsEmbeddingJson = json.encodeToString(lyricsEmb.toList()),
+                featureSource = versionedSource,
+                tempoBpm = audioEmb.inferredTempoBpm,
+                energy = audioEmb.inferredEnergy,
+                acousticness = audioEmb.inferredAcousticness,
+                valence = 0.55,
+                updatedAt = nowMs
+            )
+
+            val bundle = ResolvedTrackFeatureBundle(
+                videoId = track.videoId,
+                classification = cls,
+                audioEmbedding = audioEmb,
+                lyricsEmbedding = lyricsEmb,
+                entity = newEntity,
+                fromCache = false
+            )
+            resolvedByVideoId[track.videoId] = bundle
+            newlyComputedEntities.add(newEntity)
+            putInMemoryFeatureCache(newEntity, bundle.copy(fromCache = true))
+            return bundle
+        }
+
+        // 2. Build user content taste vectors (Audio 32-D, Lyrics Semantic 32-D, Genre & Mood distributions)
         val userAudioEmbeddings = mutableListOf<Pair<FloatArray, Double>>()
         val userLyricsEmbeddings = mutableListOf<Pair<FloatArray, Double>>()
         val userGenreWeights = mutableMapOf<MusicGenre, Double>()
@@ -120,13 +277,15 @@ class HybridRecommendationPipeline @Inject constructor(
 
         for (t in allUserTracks) {
             val w = (weights[t.videoId] ?: 1.0).coerceAtLeast(0.1)
-            val cls = classificationService.classify(t.title, t.artist, t.album, t.durationSeconds)
-            val audioEmb = audioEmbeddingService.embedTrack(t, classification = cls)
-            val lyricsEmb = lyricsSemanticService.extractSemanticVector(t.title, t.artist, t.album)
-            userAudioEmbeddings.add(audioEmb.vector to w)
-            userLyricsEmbeddings.add(lyricsEmb to w)
-            cls.genres.forEach { (g, conf) -> userGenreWeights[g] = (userGenreWeights[g] ?: 0.0) + w * conf }
-            cls.moods.forEach { (m, conf) -> userMoodWeights[m] = (userMoodWeights[m] ?: 0.0) + w * conf }
+            val resolved = resolveTrackFeatures(t)
+            userAudioEmbeddings.add(resolved.audioEmbedding.vector to w)
+            userLyricsEmbeddings.add(resolved.lyricsEmbedding to w)
+            resolved.classification.genres.forEach { (g, conf) ->
+                userGenreWeights[g] = (userGenreWeights[g] ?: 0.0) + w * conf
+            }
+            resolved.classification.moods.forEach { (m, conf) ->
+                userMoodWeights[m] = (userMoodWeights[m] ?: 0.0) + w * conf
+            }
         }
 
         val totalGenreW = userGenreWeights.values.sum().takeIf { it > 0.0 } ?: 1.0
@@ -136,52 +295,112 @@ class HybridRecommendationPipeline @Inject constructor(
 
         val userAudioTasteVector = audioEmbeddingService.buildUserAudioTasteVector(userAudioEmbeddings)
         val userLyricsTasteVector = audioEmbeddingService.buildUserAudioTasteVector(userLyricsEmbeddings)
-        val userTowerVector = neuralEngine.computeUserTowerEmbedding(
-            combineAudioAndSemanticVectors(userAudioTasteVector, userLyricsTasteVector)
-        )
+        val rawUserCompositeVector = combineAudioAndSemanticVectors(userAudioTasteVector, userLyricsTasteVector)
 
-        // 3. Update & query Collaborative Filtering Engine (respecting privacy / pauseListenHistory)
+        // 3. Update, persist & query Collaborative Filtering Engine (respecting privacy / pauseListenHistory)
         val anonUserHash = collaborativeEngine.anonymizeUserId(accountId)
         if (!pauseListenHistory && engineDao != null) {
-            val newCollabRows = buildList {
-                likedTracks.take(15).forEach { t ->
-                    add(
-                        CollaborativeInteractionEntity(
-                            anonUserHash = anonUserHash,
-                            videoId = t.videoId,
-                            artistKey = t.artist.lowercase(Locale.ROOT).trim(),
-                            interactionType = CollaborativeInteractionType.LIKED.name,
-                            weight = CollaborativeInteractionType.LIKED.baseWeight,
-                            timestampMs = nowMs
-                        )
-                    )
-                }
-                sessionSignals.take(25).forEach { s ->
-                    val type = when {
-                        s.completionRate >= 0.75 -> CollaborativeInteractionType.COMPLETED
-                        s.skipRate >= 0.65 -> CollaborativeInteractionType.SKIPPED_EARLY
-                        else -> CollaborativeInteractionType.MEANINGFUL_PLAY
-                    }
-                    add(
-                        CollaborativeInteractionEntity(
-                            anonUserHash = anonUserHash,
-                            videoId = s.videoId,
-                            artistKey = s.artist.lowercase(Locale.ROOT).trim(),
-                            interactionType = type.name,
-                            weight = type.baseWeight,
-                            timestampMs = s.lastPlayedAtMs.takeIf { it > 0L } ?: nowMs
-                        )
-                    )
-                }
+            val deduplicatedCollabMap = LinkedHashMap<String, CollaborativeInteractionEntity>()
+            likedTracks.take(15).forEach { t ->
+                val entity = CollaborativeInteractionEntity(
+                    anonUserHash = anonUserHash,
+                    videoId = t.videoId,
+                    artistKey = t.artist.lowercase(Locale.ROOT).trim(),
+                    interactionType = CollaborativeInteractionType.LIKED.name,
+                    weight = CollaborativeInteractionType.LIKED.baseWeight,
+                    timestampMs = nowMs
+                )
+                deduplicatedCollabMap["${entity.videoId}:${entity.interactionType}"] = entity
             }
+            sessionSignals.take(25).forEach { s ->
+                val type = when {
+                    s.completionRate >= 0.75 -> CollaborativeInteractionType.COMPLETED
+                    s.skipRate >= 0.65 -> CollaborativeInteractionType.SKIPPED_EARLY
+                    else -> CollaborativeInteractionType.MEANINGFUL_PLAY
+                }
+                val entity = CollaborativeInteractionEntity(
+                    anonUserHash = anonUserHash,
+                    videoId = s.videoId,
+                    artistKey = s.artist.lowercase(Locale.ROOT).trim(),
+                    interactionType = type.name,
+                    weight = type.baseWeight,
+                    timestampMs = s.lastPlayedAtMs.takeIf { it > 0L } ?: nowMs
+                )
+                deduplicatedCollabMap["${entity.videoId}:${entity.interactionType}"] = entity
+            }
+            val newCollabRows = deduplicatedCollabMap.values.toList()
             runCatching {
-                val recentInteractions = engineDao.getRecentCollaborativeInteractions(nowMs - 30L * 24 * 3600_000L, 2_000)
-                val combinedInteractions = collaborativeEngine.fromRoomEntities(recentInteractions + newCollabRows)
+                if (newCollabRows.isNotEmpty()) {
+                    engineDao.replaceUserCollaborativeInteractions(anonUserHash, newCollabRows)
+                }
+                val recentInteractions = engineDao.getRecentCollaborativeInteractions(
+                    nowMs - 30L * 24 * 3600_000L,
+                    2_000
+                )
+                val combinedSource = if (recentInteractions.isNotEmpty()) {
+                    recentInteractions
+                } else {
+                    newCollabRows
+                }
+                val combinedInteractions = collaborativeEngine.fromRoomEntities(combinedSource)
                 if (combinedInteractions.isNotEmpty()) {
                     collaborativeEngine.train(combinedInteractions, minCohortListeners = 1)
                 }
             }
         }
+
+        // Optional chronological training from real logged user session outcomes when enough real examples exist
+        val allKnownTracksById = (likedTracks + recentTracks + playlistTracks + allCandidatesById.values)
+            .associateBy { it.videoId }
+        if (!pauseListenHistory && sessionSignals.size >= 8 && neuralEngine.isUsingFallbackModel()) {
+            val trainingExamples = buildRealChronologicalTrainingExamples(
+                sessionSignals = sessionSignals,
+                knownTracksById = allKnownTracksById,
+                rawUserCompositeVector = rawUserCompositeVector,
+                userAudioTasteVector = userAudioTasteVector,
+                userLyricsTasteVector = userLyricsTasteVector,
+                artistAffinity = artistAffinity,
+                languageAffinity = languageProfile.affinity,
+                normGenreAffinities = normGenreAffinities,
+                normMoodAffinities = normMoodAffinities,
+                hourOfDay = hourOfDay,
+                languageOverrides = languageOverrides,
+                resolveTrackFeatures = ::resolveTrackFeatures
+            )
+            if (trainingExamples.size >= 6) {
+                val promotedMeta = neuralEngine.trainAndValidateChronologically(
+                    examples = trainingExamples,
+                    newVersionTag = "v2.5.9-neural-trained-${nowMs / 1000L}"
+                )
+                if (engineDao != null && promotedMeta.isTrained) {
+                    val exportedJson = neuralEngine.exportTrainedModelJson()
+                    if (!exportedJson.isNullOrBlank()) {
+                        runCatching {
+                            engineDao.upsertUserProfile(
+                                UserPreferenceProfileEntity(
+                                    accountId = modelStateKey,
+                                    tasteVectorJson = exportedJson,
+                                    artistAffinitiesJson = "{}",
+                                    genreAffinitiesJson = "{}",
+                                    moodAffinitiesJson = "{}",
+                                    languageAffinitiesJson = "{}",
+                                    contextAffinitiesJson = "{}",
+                                    negativeSignalsJson = "{}",
+                                    explorationTolerance = 0.25,
+                                    modelVersion = promotedMeta.modelVersion,
+                                    updatedAt = nowMs
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        val activeModelMetadata = neuralEngine.currentModelMetadata()
+        val modelVersion = activeModelMetadata.modelVersion
+        val isFallbackModel = activeModelMetadata.isFallback || !activeModelMetadata.isTrained
+        val userTowerVector = neuralEngine.computeUserTowerEmbedding(rawUserCompositeVector)
 
         // 4. Run base Recommender.buildMixes for Control compatibility and base candidate pool
         val discoveryExclude = (likedTracks + recentTracks + playlistTracks).map { it.videoId }.toMutableSet().apply {
@@ -223,7 +442,6 @@ class HybridRecommendationPipeline @Inject constructor(
         )
 
         // 5. Stage 3 & Stage 4: Compute multi-modal features and neural/hybrid scores for all candidate tracks
-        val allCandidatesById = relatedBySeed.values.flatten().associateBy { it.videoId }
         val sessionByVideoId = sessionSignals.associateBy { it.videoId }
         val totalArtistAff = artistAffinity.values.sum().takeIf { it > 0.0 } ?: 1.0
         val currentContext = contextEngine.inferContextFromHour(hourOfDay)
@@ -234,13 +452,14 @@ class HybridRecommendationPipeline @Inject constructor(
         val candidateClassifications = mutableMapOf<String, TrackClassification>()
         val candidateAudioEmbs = mutableMapOf<String, AudioEmbeddingResult>()
         val candidateLyricsEmbs = mutableMapOf<String, FloatArray>()
-        val trackFeaturesToCache = mutableListOf<TrackFeatureEntity>()
 
         for ((vid, track) in allCandidatesById) {
+            currentCoroutineContext().ensureActive()
             if (vid in discoveryExclude) continue
-            val cls = classificationService.classify(track.title, track.artist, track.album, track.durationSeconds)
-            val audioEmb = audioEmbeddingService.embedTrack(track, classification = cls)
-            val lyricsEmb = lyricsSemanticService.extractSemanticVector(track.title, track.artist, track.album)
+            val resolved = resolveTrackFeatures(track)
+            val cls = resolved.classification
+            val audioEmb = resolved.audioEmbedding
+            val lyricsEmb = resolved.lyricsEmbedding
             val itemTowerVec = neuralEngine.computeItemTowerEmbedding(
                 combineAudioAndSemanticVectors(audioEmb.vector, lyricsEmb)
             )
@@ -320,33 +539,16 @@ class HybridRecommendationPipeline @Inject constructor(
                 modelVersion = modelVersion,
                 finalScore = finalScore,
                 neuralProbability = neuralProb,
-                features = features
-            )
-
-            val identity = TrackIdentityNormalizer.normalize(track)
-            trackFeaturesToCache.add(
-                TrackFeatureEntity(
-                    videoId = vid,
-                    normalizedIdentity = identity.canonicalKey,
-                    recordingVariant = identity.variant.name,
-                    language = resolvedLang,
-                    languageConfidence = 1.0,
-                    genresJson = json.encodeToString(cls.genres.mapKeys { it.key.name }),
-                    moodsJson = json.encodeToString(cls.moods.mapKeys { it.key.name }),
-                    audioEmbeddingJson = json.encodeToString(audioEmb.vector.toList()),
-                    lyricsEmbeddingJson = json.encodeToString(lyricsEmb.toList()),
-                    featureSource = audioEmb.source.name,
-                    tempoBpm = audioEmb.inferredTempoBpm,
-                    energy = audioEmb.inferredEnergy,
-                    acousticness = audioEmb.inferredAcousticness,
-                    valence = 0.55,
-                    updatedAt = nowMs
-                )
+                features = features,
+                isFallbackModel = isFallbackModel,
+                audioFeatureSource = audioEmb.source,
+                lyricsFeatureSource = lyricsSemanticService.resolveRepresentationSource(null)
             )
         }
 
-        if (engineDao != null && trackFeaturesToCache.isNotEmpty()) {
-            runCatching { engineDao.upsertTrackFeatures(trackFeaturesToCache.take(80)) }
+        // Persist only newly computed / cache-miss track features
+        if (engineDao != null && newlyComputedEntities.isNotEmpty()) {
+            runCatching { engineDao.upsertTrackFeatures(newlyComputedEntities.take(120)) }
         }
         if (engineDao != null && !accountId.isNullOrBlank() && !pauseListenHistory) {
             runCatching {
@@ -368,9 +570,9 @@ class HybridRecommendationPipeline @Inject constructor(
             }
         }
 
+        currentCoroutineContext().ensureActive()
+
         // 6. Stage 6: Build all 8 distinct recommendation mix products
-        val allKnownTracksById = (likedTracks + recentTracks + playlistTracks + allCandidatesById.values)
-            .associateBy { it.videoId }
         val anchorTracksPool = (likedTracks + playlistTracks + recentTracks.drop(5))
             .distinctBy { it.videoId }
             .filter { it.videoId !in strictExclude }
@@ -447,16 +649,17 @@ class HybridRecommendationPipeline @Inject constructor(
             }
         }
 
-        // Product 4: "More Like <Track>" deep-track similarity using Audio + Lyrics Semantic Embeddings
-        val leadFavoriteTrack = likedTracks.firstOrNull() ?: recentTracks.firstOrNull()
+        // Product 4: "More Like <Track>" similarity using resolved cached features (no duplicate recomputation)
         if (leadFavoriteTrack != null && allCandidatesById.size >= 10) {
-            val seedAudio = audioEmbeddingService.embedTrack(leadFavoriteTrack)
-            val seedLyrics = lyricsSemanticService.extractSemanticVector(leadFavoriteTrack.title, leadFavoriteTrack.artist, leadFavoriteTrack.album)
+            val seedResolved = resolveTrackFeatures(leadFavoriteTrack)
+            val seedAudio = seedResolved.audioEmbedding
+            val seedLyrics = seedResolved.lyricsEmbedding
             val deepMatches = allCandidatesById.values
                 .filter { it.videoId !in discoveryExclude && it.videoId != leadFavoriteTrack.videoId }
                 .map { cand ->
-                    val cAudio = candidateAudioEmbs[cand.videoId]?.vector ?: audioEmbeddingService.embedTrack(cand).vector
-                    val cLyrics = candidateLyricsEmbs[cand.videoId] ?: lyricsSemanticService.extractSemanticVector(cand.title, cand.artist)
+                    val cResolved = resolvedByVideoId[cand.videoId] ?: resolveTrackFeatures(cand)
+                    val cAudio = cResolved.audioEmbedding.vector
+                    val cLyrics = cResolved.lyricsEmbedding
                     val sim = 0.60 * audioEmbeddingService.cosineSimilarity(seedAudio.vector, cAudio) +
                         0.40 * lyricsSemanticService.semanticSimilarity(seedLyrics, cLyrics)
                     cand to sim
@@ -471,7 +674,7 @@ class HybridRecommendationPipeline @Inject constructor(
                     Mix(
                         id = "more-like-track-${leadFavoriteTrack.videoId}",
                         title = "More like $cleanSeedTitle",
-                        subtitle = "Matched by musical sound and lyrical mood",
+                        subtitle = "Matched by genre, mood, and thematic style",
                         tracks = deepMatches
                     )
                 )
@@ -575,8 +778,174 @@ class HybridRecommendationPipeline @Inject constructor(
             diagnostics = diagnostics,
             experimentGroup = treatmentGroup,
             modelVersion = modelVersion,
-            latencyMs = elapsedMs
+            latencyMs = elapsedMs,
+            modelMetadata = activeModelMetadata,
+            isFallbackModel = isFallbackModel,
+            featureCacheHits = cacheHits,
+            featureCacheMisses = cacheMisses
         )
+    }
+
+    private fun memoryCacheKey(entity: TrackFeatureEntity): String =
+        "${entity.videoId}|${entity.normalizedIdentity}|${entity.updatedAt}|${entity.featureSource}"
+
+    private fun putInMemoryFeatureCache(entity: TrackFeatureEntity, bundle: ResolvedTrackFeatureBundle) {
+        if (parsedFeatureMemoryCache.size >= MAX_MEMORY_CACHE_ENTRIES) {
+            val firstKey = parsedFeatureMemoryCache.keys.firstOrNull()
+            if (firstKey != null) parsedFeatureMemoryCache.remove(firstKey)
+        }
+        parsedFeatureMemoryCache[memoryCacheKey(entity)] = bundle
+    }
+
+    private fun validateAndDecodeCachedFeature(
+        track: Track,
+        entity: TrackFeatureEntity,
+        nowMs: Long
+    ): ResolvedTrackFeatureBundle? {
+        if (entity.videoId != track.videoId) return null
+        if (entity.updatedAt <= 0L || (nowMs - entity.updatedAt) > FEATURE_CACHE_TTL_MS) return null
+        if (!isSupportedFeatureSourceVersion(entity.featureSource)) return null
+
+        val expectedIdentity = TrackIdentityNormalizer.normalize(track).canonicalKey
+        if (entity.normalizedIdentity != expectedIdentity) return null
+
+        val memKey = memoryCacheKey(entity)
+        parsedFeatureMemoryCache[memKey]?.let { return it }
+
+        return runCatching {
+            val audioList = json.decodeFromString<List<Float>>(entity.audioEmbeddingJson)
+            val lyricsList = json.decodeFromString<List<Float>>(entity.lyricsEmbeddingJson)
+            if (audioList.size != AudioEmbeddingService.EMBEDDING_DIM ||
+                lyricsList.size != LyricsSemanticService.SEMANTIC_DIM
+            ) {
+                return null
+            }
+            val audioVec = audioList.toFloatArray()
+            val lyricsVec = lyricsList.toFloatArray()
+            if (audioVec.any { !it.isFinite() } || lyricsVec.any { !it.isFinite() }) return null
+            if (audioVec.all { it == 0f } || lyricsVec.all { it == 0f }) return null
+
+            val rawGenres = json.decodeFromString<Map<String, Double>>(entity.genresJson)
+            val rawMoods = json.decodeFromString<Map<String, Double>>(entity.moodsJson)
+            val genres = rawGenres.mapNotNull { (k, v) ->
+                runCatching { MusicGenre.valueOf(k) to v }.getOrNull()
+            }.toMap()
+            val moods = rawMoods.mapNotNull { (k, v) ->
+                runCatching { MusicMood.valueOf(k) to v }.getOrNull()
+            }.toMap()
+            if (genres.isEmpty() && moods.isEmpty()) return null
+
+            val cls = TrackClassification(
+                genres = genres,
+                moods = moods,
+                primaryGenre = genres.maxByOrNull { it.value }?.key,
+                primaryMood = moods.maxByOrNull { it.value }?.key
+            )
+            val audioEmb = AudioEmbeddingResult(
+                videoId = entity.videoId,
+                vector = audioVec,
+                source = parseEmbeddingFeatureSource(entity.featureSource),
+                inferredTempoBpm = entity.tempoBpm,
+                inferredEnergy = entity.energy,
+                inferredAcousticness = entity.acousticness
+            )
+            val bundle = ResolvedTrackFeatureBundle(
+                videoId = entity.videoId,
+                classification = cls,
+                audioEmbedding = audioEmb,
+                lyricsEmbedding = lyricsVec,
+                entity = entity,
+                fromCache = true
+            )
+            putInMemoryFeatureCache(entity, bundle)
+            bundle
+        }.getOrNull()
+    }
+
+    private suspend fun buildRealChronologicalTrainingExamples(
+        sessionSignals: List<Recommender.SessionSignal>,
+        knownTracksById: Map<String, Track>,
+        rawUserCompositeVector: FloatArray,
+        userAudioTasteVector: FloatArray,
+        userLyricsTasteVector: FloatArray,
+        artistAffinity: Map<String, Double>,
+        languageAffinity: Map<String, Double>,
+        normGenreAffinities: Map<MusicGenre, Double>,
+        normMoodAffinities: Map<MusicMood, Double>,
+        hourOfDay: Int?,
+        languageOverrides: Map<String, String>,
+        resolveTrackFeatures: suspend (Track) -> ResolvedTrackFeatureBundle
+    ): List<TrainingExample> {
+        val totalArtistAff = artistAffinity.values.sum().takeIf { it > 0.0 } ?: 1.0
+        val currentContext = contextEngine.inferContextFromHour(hourOfDay)
+        val examples = ArrayList<TrainingExample>()
+
+        for ((idx, s) in sessionSignals.withIndex()) {
+            currentCoroutineContext().ensureActive()
+            val track = knownTracksById[s.videoId] ?: Track(
+                videoId = s.videoId,
+                title = s.title,
+                artist = s.artist
+            )
+            val resolved = resolveTrackFeatures(track)
+            val itemRawVec = combineAudioAndSemanticVectors(
+                resolved.audioEmbedding.vector,
+                resolved.lyricsEmbedding
+            )
+            val audioSim = ((audioEmbeddingService.cosineSimilarity(userAudioTasteVector, resolved.audioEmbedding.vector) + 1.0) / 2.0)
+                .coerceIn(0.0, 1.0)
+            val lyricsSim = ((lyricsSemanticService.semanticSimilarity(userLyricsTasteVector, resolved.lyricsEmbedding) + 1.0) / 2.0)
+                .coerceIn(0.0, 1.0)
+            val aKey = track.artist.lowercase(Locale.ROOT).trim()
+            val artAff = min(1.0, ((artistAffinity[aKey] ?: 0.0) / totalArtistAff) * 3.0)
+            val resolvedLang = Recommender.resolveLanguage(track.videoId, track.title, track.artist, languageOverrides)
+            val langAff = resolvedLang?.let { languageAffinity[it] } ?: 0.0
+            val genreAff = resolved.classification.genres.entries
+                .sumOf { (g, c) -> c * (normGenreAffinities[g] ?: 0.0) }
+                .coerceIn(0.0, 1.0)
+            val moodAff = resolved.classification.moods.entries
+                .sumOf { (m, c) -> c * (normMoodAffinities[m] ?: 0.0) }
+                .coerceIn(0.0, 1.0)
+            val ctxMult = contextEngine.contextAlignmentMultiplier(
+                resolved.classification,
+                currentContext,
+                normGenreAffinities
+            )
+            val label = when {
+                s.completionRate >= 0.70 && s.skipRate < 0.35 -> 1.0
+                s.skipRate >= 0.65 && s.completionRate < 0.35 -> 0.0
+                else -> s.completionRate.coerceIn(0.0, 1.0)
+            }
+            val rankingFeatures = NeuralRankingFeatures(
+                twoTowerSimilarity = (0.5 * audioSim + 0.5 * lyricsSim).coerceIn(0.0, 1.0),
+                collaborativeScore = 0.5,
+                artistAffinity = artAff,
+                languageAffinity = langAff,
+                audioSimilarity = audioSim,
+                lyricsSimilarity = lyricsSim,
+                genreAffinity = genreAff,
+                moodAffinity = moodAff,
+                contextAlignment = (ctxMult - 0.90).coerceIn(0.0, 1.0),
+                noveltyScore = 0.35,
+                popularityPrior = 0.65,
+                freshnessScore = 0.70,
+                candidateSourceConfidence = 0.90,
+                historicalCompletionRate = s.completionRate.coerceIn(0.0, 1.0),
+                historicalSkipPenalty = s.skipRate.coerceIn(0.0, 1.0),
+                recentExposurePenalty = 0.1
+            )
+            val ts = s.lastPlayedAtMs.takeIf { it > 0L } ?: (1_000_000L + idx * 1_000L)
+            examples.add(
+                TrainingExample(
+                    userTowerInput = rawUserCompositeVector,
+                    itemTowerInput = itemRawVec,
+                    rankingFeatures = rankingFeatures,
+                    outcomeLabel = label,
+                    timestampMs = ts
+                )
+            )
+        }
+        return examples
     }
 
     private fun combineAudioAndSemanticVectors(audio: FloatArray, semantic: FloatArray): FloatArray {

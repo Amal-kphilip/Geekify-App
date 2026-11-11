@@ -24,9 +24,18 @@ import javax.inject.Singleton
  * Geekify's existing Media3 service, queue, and stable on-disk cache-key scheme.
  */
 @Singleton
-class StreamResolver @Inject constructor(
-    private val extractor: InnerTubePlaybackExtractor
+class StreamResolver internal constructor(
+    private val extractor: InnerTubePlaybackExtractor?,
+    private val clock: () -> Long,
+    private val customFetcher: (suspend (String) -> ResolvedStream)?
 ) : InnerTubeXPlayer {
+
+    @Inject
+    constructor(extractor: InnerTubePlaybackExtractor) : this(
+        extractor = extractor,
+        clock = System::currentTimeMillis,
+        customFetcher = null
+    )
     data class ResolvedStream(
         val url: String,
         val mimeType: String,
@@ -59,18 +68,23 @@ class StreamResolver @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override suspend fun resolve(videoId: String, forceRefresh: Boolean): ResolvedStream {
+        val now = clock()
         val job: Deferred<ResolvedStream> = synchronized(lock) {
             if (!forceRefresh) {
                 val cached = cache[videoId]
-                if (cached != null && cached.expiresAt > System.currentTimeMillis()) {
+                if (cached != null && cached.expiresAt > now) {
                     byUrl[cached.url] = cached
                     return cached
                 }
-                if (cached != null) cache.remove(videoId)
+                if (cached != null) {
+                    cache.remove(videoId)
+                    byUrl.remove(cached.url)
+                }
                 inFlight[videoId]?.takeIf { it.isActive }?.let { return@synchronized it }
             } else {
                 val previous = cache.remove(videoId)
                 previous?.let { byUrl.remove(it.url) }
+                inFlight.remove(videoId)?.cancel()
             }
 
             val generation = (generations[videoId] ?: 0L) + 1L
@@ -102,12 +116,27 @@ class StreamResolver @Inject constructor(
     }
 
     override fun prefetch(videoIds: List<String>) {
-        videoIds.distinct().forEach { id -> scope.launch { runCatching { resolve(id) } } }
+        val now = clock()
+        val toPrefetch = synchronized(lock) {
+            videoIds.asSequence()
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .filter { id ->
+                    val cached = cache[id]
+                    val validCached = cached != null && cached.expiresAt > now
+                    val activeInFlight = inFlight[id]?.isActive == true
+                    !validCached && !activeInFlight
+                }
+                .toList()
+        }
+        toPrefetch.forEach { id -> scope.launch { runCatching { resolve(id) } } }
     }
 
     override fun invalidate(videoId: String) {
         synchronized(lock) {
             cache.remove(videoId)?.let { byUrl.remove(it.url) }
+            inFlight.remove(videoId)?.cancel()
             generations[videoId] = (generations[videoId] ?: 0L) + 1L
         }
     }
@@ -128,20 +157,21 @@ class StreamResolver @Inject constructor(
         val failed = synchronized(lock) {
             val stream = cache.remove(videoId)
             stream?.let { byUrl.remove(it.url) }
+            inFlight.remove(videoId)?.cancel()
             generations[videoId] = (generations[videoId] ?: 0L) + 1L
             stream
         }
         failed?.clientName?.takeIf(String::isNotBlank)?.let { clientName ->
-            extractor.markStreamClientFailed(videoId, clientName)
+            extractor?.markStreamClientFailed(videoId, clientName)
             // A 403 frequently means the remote player config/cipher changed. Refresh it off the
             // playback thread; the next bounded retry uses another client and/or fresh config.
-            scope.launch { runCatching { extractor.refreshAfterStreamRejection() } }
+            scope.launch { runCatching { extractor?.refreshAfterStreamRejection() } }
         }
     }
 
     override suspend fun warmUp() {
         try {
-            extractor.prewarm()
+            extractor?.prewarm()
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {
@@ -152,9 +182,10 @@ class StreamResolver @Inject constructor(
     @OptIn(UnstableApi::class)
     override fun resolveDataSpec(dataSpec: DataSpec): DataSpec {
         val url = dataSpec.uri.toString()
+        val now = clock()
         val stream = synchronized(lock) {
             val found = byUrl[url] ?: return dataSpec
-            if (found.expiresAt <= System.currentTimeMillis()) {
+            if (found.expiresAt <= now) {
                 byUrl.remove(url)
                 return dataSpec
             }
@@ -176,7 +207,9 @@ class StreamResolver @Inject constructor(
 
     private suspend fun doResolve(videoId: String): ResolvedStream {
         try {
-            val stream = extractor.resolve(videoId)
+            customFetcher?.let { return it(videoId) }
+            val ext = requireNotNull(extractor) { "InnerTubePlaybackExtractor is required when customFetcher is null" }
+            val stream = ext.resolve(videoId)
             return ResolvedStream(
                 url = stream.url,
                 mimeType = stream.mimeType,
@@ -190,6 +223,8 @@ class StreamResolver @Inject constructor(
                 useRangeChunks = stream.useRangeChunks
             )
         } catch (error: CancellationException) {
+            throw error
+        } catch (error: StreamException) {
             throw error
         } catch (error: Exception) {
             throw StreamException(error.message ?: "Could not resolve a playable stream.", error)

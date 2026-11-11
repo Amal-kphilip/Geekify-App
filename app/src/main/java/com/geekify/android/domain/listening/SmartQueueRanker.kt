@@ -4,6 +4,11 @@ import com.geekify.android.data.local.ListeningSessionEntity
 import com.geekify.android.data.local.PlayStat
 import com.geekify.android.data.model.Track
 import com.geekify.android.domain.recommend.Recommender
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.ln
@@ -12,12 +17,129 @@ import kotlin.math.ln
 data class RankedQueueTrack(val track: Track, val reason: String, val score: Double)
 
 /**
+ * Pre-aggregated listening history signals so [SmartQueueRanker] does not need to re-scan
+ * thousands of raw session entities on every track transition.
+ */
+data class QueueRankingSignals(
+    val trackStats: Map<String, TrackSessionSummary>,
+    val artistStats: Map<String, ArtistSessionSummary>,
+    val playsByTrack: Map<String, Int>,
+    val likedIds: Set<String>,
+    val likedArtists: Set<String>,
+    val builtAtMs: Long
+) {
+    data class TrackSessionSummary(
+        val totalRows: Int,
+        val meaningfulOutcomes: Int,
+        val completionRate: Double,
+        val skipRate: Double,
+        val fallbackPlayCount: Int,
+        val recentRepeatCount: Int
+    )
+
+    data class ArtistSessionSummary(
+        val totalRows: Int,
+        val completionRate: Double,
+        val skipRate: Double
+    )
+}
+
+/**
  * Re-ranks only the new related-track batch. It never reorders or removes the current/manual queue.
  * Signals are local: meaningful play counts, completed sessions, skips, likes, artist session affinity,
  * language/vibe continuity, and artist diversity.
  */
 object SmartQueueRanker {
     private const val MIN_MEANINGFUL_MS = 10_000L
+
+    fun buildSignals(
+        sessions: List<ListeningSessionEntity>,
+        playCounts: List<PlayStat>,
+        likedTracks: List<Track>,
+        now: Long = System.currentTimeMillis()
+    ): QueueRankingSignals {
+        val sevenDaysAgo = now - 7L * 24 * 60 * 60_000L
+        val trackStats = sessions.groupBy { it.videoId }.mapValues { (_, rows) ->
+            val meaningfulRows = rows.filter { it.listenedMs >= MIN_MEANINGFUL_MS }
+            val outcomes = meaningfulRows.size
+            val completionRate = if (outcomes == 0) 0.0 else meaningfulRows.count { it.completed }.toDouble() / outcomes
+            val skipRows = rows.count { it.skipped }
+            val skipRate = if (rows.isEmpty()) 0.0 else skipRows.toDouble() / rows.size
+            val fallbackPlays = meaningfulRows.count { it.completed || it.listenedMs >= MIN_MEANINGFUL_MS }
+            val recentRepeats = rows.count { it.startedAt >= sevenDaysAgo }
+            QueueRankingSignals.TrackSessionSummary(
+                totalRows = rows.size,
+                meaningfulOutcomes = outcomes,
+                completionRate = completionRate,
+                skipRate = skipRate,
+                fallbackPlayCount = fallbackPlays,
+                recentRepeatCount = recentRepeats
+            )
+        }
+        val artistStats = sessions.groupBy { key(it.artist) }
+            .filterKeys(String::isNotBlank)
+            .mapValues { (_, rows) ->
+                val completionRate = if (rows.isEmpty()) 0.0 else rows.count { it.completed }.toDouble() / rows.size
+                val skipRate = if (rows.isEmpty()) 0.0 else rows.count { it.skipped }.toDouble() / rows.size
+                QueueRankingSignals.ArtistSessionSummary(
+                    totalRows = rows.size,
+                    completionRate = completionRate,
+                    skipRate = skipRate
+                )
+            }
+        val playsByTrack = playCounts.associate { it.videoId to it.plays }
+        val likedIds = likedTracks.asSequence().map { it.videoId }.toSet()
+        val likedArtists = likedTracks.asSequence()
+            .flatMap { artistNames(it).asSequence() }
+            .map(::key)
+            .filter(String::isNotBlank)
+            .toSet()
+
+        return QueueRankingSignals(
+            trackStats = trackStats,
+            artistStats = artistStats,
+            playsByTrack = playsByTrack,
+            likedIds = likedIds,
+            likedArtists = likedArtists,
+            builtAtMs = now
+        )
+    }
+
+    /**
+     * Executes CPU-intensive queue ranking on [dispatcher] (defaults to [Dispatchers.Default])
+     * so it never blocks the main thread.
+     */
+    suspend fun rankAsync(
+        candidates: List<Track>,
+        current: Track,
+        signals: QueueRankingSignals,
+        upcoming: List<Track>,
+        dispatcher: CoroutineDispatcher = Dispatchers.Default
+    ): List<RankedQueueTrack> = withContext(dispatcher) {
+        currentCoroutineContext().ensureActive()
+        rankWithSignals(
+            candidates = candidates,
+            current = current,
+            signals = signals,
+            upcoming = upcoming
+        )
+    }
+
+    suspend fun rankAsync(
+        candidates: List<Track>,
+        current: Track,
+        sessions: List<ListeningSessionEntity>,
+        playCounts: List<PlayStat>,
+        likedTracks: List<Track>,
+        upcoming: List<Track>,
+        now: Long = System.currentTimeMillis(),
+        dispatcher: CoroutineDispatcher = Dispatchers.Default
+    ): List<RankedQueueTrack> = withContext(dispatcher) {
+        currentCoroutineContext().ensureActive()
+        val signals = buildSignals(sessions, playCounts, likedTracks, now)
+        currentCoroutineContext().ensureActive()
+        rankWithSignals(candidates, current, signals, upcoming)
+    }
 
     fun rank(
         candidates: List<Track>,
@@ -28,15 +150,20 @@ object SmartQueueRanker {
         upcoming: List<Track>,
         now: Long = System.currentTimeMillis()
     ): List<RankedQueueTrack> {
+        val signals = buildSignals(sessions, playCounts, likedTracks, now)
+        return rankWithSignals(candidates, current, signals, upcoming)
+    }
+
+    fun rankWithSignals(
+        candidates: List<Track>,
+        current: Track,
+        signals: QueueRankingSignals,
+        upcoming: List<Track>
+    ): List<RankedQueueTrack> {
         val alreadyQueued = (listOf(current) + upcoming).map { it.videoId }.toSet()
         val pool = candidates.distinctBy { it.videoId }.filter { it.videoId !in alreadyQueued }.toMutableList()
         if (pool.isEmpty()) return emptyList()
 
-        val sessionsByTrack = sessions.groupBy { it.videoId }
-        val sessionsByArtist = sessions.groupBy { key(it.artist) }.filterKeys(String::isNotBlank)
-        val playsByTrack = playCounts.associate { it.videoId to it }
-        val likedIds = likedTracks.map { it.videoId }.toSet()
-        val likedArtists = likedTracks.flatMap { artistNames(it) }.map(::key).filter(String::isNotBlank).toSet()
         val currentLanguage = Recommender.languageOf(current.title, current.artist)
         val artistCounts = mutableMapOf<String, Int>()
         (listOf(current) + upcoming).flatMap(::artistNames).map(::key).filter(String::isNotBlank).forEach { artist ->
@@ -55,19 +182,18 @@ object SmartQueueRanker {
             val languageMatched: Boolean
         )
         val staticScores = pool.associate { track ->
-            val rows = sessionsByTrack[track.videoId].orEmpty()
-            val meaningfulRows = rows.filter { it.listenedMs >= MIN_MEANINGFUL_MS }
-            val outcomes = meaningfulRows.size
-            val completionRate = if (outcomes == 0) 0.0 else meaningfulRows.count { it.completed }.toDouble() / outcomes
-            val skipRows = rows.count { it.skipped }
-            val skipRate = if (rows.isEmpty()) 0.0 else skipRows.toDouble() / rows.size
-            val playCount = playsByTrack[track.videoId]?.plays
-                ?: meaningfulRows.count { it.completed || it.listenedMs >= MIN_MEANINGFUL_MS }
+            val trackStat = signals.trackStats[track.videoId]
+            val totalRows = trackStat?.totalRows ?: 0
+            val outcomes = trackStat?.meaningfulOutcomes ?: 0
+            val completionRate = trackStat?.completionRate ?: 0.0
+            val skipRate = trackStat?.skipRate ?: 0.0
+            val playCount = signals.playsByTrack[track.videoId]
+                ?: (trackStat?.fallbackPlayCount ?: 0)
             val artistKeys = artistNames(track).map(::key).filter(String::isNotBlank)
-            val recentRepeatCount = rows.count { it.startedAt >= now - 7L * 24 * 60 * 60_000L }
+            val recentRepeatCount = trackStat?.recentRepeatCount ?: 0
             var score = 0.0
-            val likedTrack = track.videoId in likedIds
-            val likedArtist = artistKeys.any { it in likedArtists }
+            val likedTrack = track.videoId in signals.likedIds
+            val likedArtist = artistKeys.any { it in signals.likedArtists }
             if (likedTrack) score += 5.0
             if (likedArtist) score += 1.7
             if (playCount > 0) score += minOf(1.5, ln(playCount + 1.0) * 0.65)
@@ -75,11 +201,14 @@ object SmartQueueRanker {
             score -= skipRate * 2.8
 
             // Artist session affinity: reward artists whose songs the listener finishes
-            val artistRows = artistKeys.flatMap { sessionsByArtist[it].orEmpty() }
-            if (artistRows.isNotEmpty() && rows.isEmpty()) {
-                val artistComplete = artistRows.count { it.completed }.toDouble() / artistRows.size
-                val artistSkip = artistRows.count { it.skipped }.toDouble() / artistRows.size
-                score += (artistComplete - 0.5) * 0.75 - artistSkip * 0.85
+            if (totalRows == 0 && artistKeys.isNotEmpty()) {
+                val matchingArtistSummaries = artistKeys.mapNotNull { signals.artistStats[it] }
+                val totalArtistSessions = matchingArtistSummaries.sumOf { it.totalRows }
+                if (totalArtistSessions > 0) {
+                    val weightedComplete = matchingArtistSummaries.sumOf { it.completionRate * it.totalRows } / totalArtistSessions
+                    val weightedSkip = matchingArtistSummaries.sumOf { it.skipRate * it.totalRows } / totalArtistSessions
+                    score += (weightedComplete - 0.5) * 0.75 - weightedSkip * 0.85
+                }
             }
 
             // Language / script session continuity

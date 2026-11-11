@@ -21,6 +21,23 @@ class GeekifyUpdateMessagingService : FirebaseMessagingService() {
 
     @Inject lateinit var coordinator: NotificationCoordinator
 
+    override fun onNewToken(token: String) {
+        super.onNewToken(token)
+        if (token.isBlank()) return
+        try {
+            NotificationChannels.ensureAll(applicationContext)
+            runBlocking(Dispatchers.IO) {
+                coordinator.onFcmTokenRefreshed(token) { updatesEnabled ->
+                    UpdatePushSubscription.sync(applicationContext, updatesEnabled)
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Timber.tag(TAG).w(error, "Failed to synchronize topic subscription after FCM token refresh")
+        }
+    }
+
     override fun onMessageReceived(message: RemoteMessage) {
         val data = message.data
         val type = data[KEY_TYPE]

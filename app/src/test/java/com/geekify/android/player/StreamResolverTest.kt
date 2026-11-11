@@ -1,15 +1,116 @@
 package com.geekify.android.player
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 class StreamResolverTest {
+
+    @Test
+    fun `resolve caches valid stream and deduplicates concurrent in-flight and prefetch requests`() = runBlocking {
+        val nowMs = AtomicLong(1_000_000L)
+        val fetchCount = AtomicInteger(0)
+        val gate = CompletableDeferred<Unit>()
+
+        val resolver = StreamResolver(
+            extractor = null,
+            clock = { nowMs.get() },
+            customFetcher = { videoId ->
+                fetchCount.incrementAndGet()
+                gate.await()
+                StreamResolver.ResolvedStream(
+                    url = "https://stream.example/$videoId.m4a",
+                    mimeType = "audio/mp4",
+                    expiresAt = nowMs.get() + 30 * 60_000L,
+                    clientName = "ANDROID_VR"
+                )
+            }
+        )
+
+        // Two concurrent resolve calls + one prefetch for the same videoId while in-flight
+        val first = async { resolver.resolve("vid_1") }
+        val second = async { resolver.resolve("vid_1") }
+        delay(20)
+        resolver.prefetch(listOf("vid_1", "vid_1"))
+
+        gate.complete(Unit)
+
+        val r1 = first.await()
+        val r2 = second.await()
+        assertNotNull(r1)
+        assertEquals(r1.url, r2.url)
+        assertEquals("Concurrent requests for the same track must be deduplicated into 1 fetch", 1, fetchCount.get())
+
+        // Subsequent resolve within TTL hits cache without fetching
+        val r3 = resolver.resolve("vid_1")
+        assertEquals(r1.url, r3.url)
+        assertEquals(1, fetchCount.get())
+
+        // Prefetching an already-cached valid track must be skipped
+        resolver.prefetch(listOf("vid_1"))
+        delay(30)
+        assertEquals("Prefetch must skip valid cached tracks", 1, fetchCount.get())
+
+        // Advance clock past expiration window -> cache expires and re-fetches
+        nowMs.addAndGet(31 * 60_000L)
+        val r4 = resolver.resolve("vid_1")
+        assertNotNull(r4)
+        assertEquals("Expired cache entry must trigger a fresh fetch", 2, fetchCount.get())
+    }
+
+    @Test
+    fun `invalidate and markFailed cancel stale in-flight resolution and force fresh fetch`() = runBlocking {
+        val nowMs = AtomicLong(5_000_000L)
+        val attemptCounter = AtomicInteger(0)
+        val firstStarted = CompletableDeferred<Unit>()
+        val firstGate = CompletableDeferred<Unit>()
+
+        val resolver = StreamResolver(
+            extractor = null,
+            clock = { nowMs.get() },
+            customFetcher = { videoId ->
+                val attempt = attemptCounter.incrementAndGet()
+                if (attempt == 1) {
+                    firstStarted.complete(Unit)
+                    firstGate.await()
+                }
+                StreamResolver.ResolvedStream(
+                    url = "https://stream.example/$videoId/attempt-$attempt.m4a",
+                    mimeType = "audio/mp4",
+                    expiresAt = nowMs.get() + 30 * 60_000L,
+                    clientName = "ANDROID_VR"
+                )
+            }
+        )
+
+        val staleJob = async { runCatching { resolver.resolve("track_stale") }.getOrNull() }
+        firstStarted.await()
+
+        // Mark failed while first attempt is still in-flight -> cancels stale job
+        resolver.markFailed("track_stale")
+        firstGate.complete(Unit)
+        val staleResult = staleJob.await()
+        assertNull("Cancelled stale resolution should not produce a result", staleResult)
+
+        // Fresh resolution succeeds with attempt 2
+        val freshResult = resolver.resolve("track_stale", forceRefresh = true)
+        assertNotNull(freshResult)
+        assertTrue(freshResult.url.endsWith("attempt-2.m4a"))
+    }
 
     private val json = Json { ignoreUnknownKeys = true }
     private val http = OkHttpClient.Builder()

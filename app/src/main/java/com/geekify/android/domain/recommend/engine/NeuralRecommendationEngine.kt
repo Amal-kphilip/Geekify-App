@@ -1,5 +1,8 @@
 package com.geekify.android.domain.recommend.engine
 
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.exp
@@ -61,6 +64,7 @@ data class TrainingExample(
     val timestampMs: Long
 )
 
+@Serializable
 data class ModelVersionMetadata(
     val modelVersion: String,
     val trainedAtMs: Long,
@@ -68,6 +72,29 @@ data class ModelVersionMetadata(
     val validationLoss: Double,
     val validationAccuracy: Double,
     val isFallback: Boolean = false
+) {
+    /** True only when the model has been trained on real chronological examples and passed validation. */
+    val isTrained: Boolean
+        get() = !isFallback && trainSamples > 0 && trainedAtMs > 0L
+
+    /** Explicit human-readable status that never labels an untrained fallback as a trained neural model. */
+    val statusSummary: String
+        get() = if (isTrained) {
+            "TRAINED_NEURAL_MODEL(version=$modelVersion, samples=$trainSamples)"
+        } else {
+            "UNTRAINED_FALLBACK_PRIOR(version=$modelVersion)"
+        }
+}
+
+@Serializable
+internal data class PersistedNeuralModelSnapshot(
+    val version: ModelVersionMetadata,
+    val userTowerDiag: List<Float>,
+    val itemTowerDiag: List<Float>,
+    val w1: List<List<Float>>,
+    val b1: List<Float>,
+    val w2: List<Float>,
+    val b2: Float
 )
 
 /**
@@ -104,11 +131,79 @@ class NeuralRecommendationEngine @Inject constructor() {
     )
 
     private val modelHistory = ArrayDeque<ModelWeights>()
+    private val snapshotJson = Json { ignoreUnknownKeys = true }
 
     @Volatile
     private var activeModel: ModelWeights = createCalibratedDefaultModel()
 
     fun currentModelMetadata(): ModelVersionMetadata = activeModel.version
+
+    fun isUsingFallbackModel(): Boolean = activeModel.version.isFallback || !activeModel.version.isTrained
+
+    /**
+     * Exports the currently active model snapshot as JSON only if it is a genuinely trained model.
+     * Untrained fallback models are never exported as trained snapshots.
+     */
+    @Synchronized
+    fun exportTrainedModelJson(): String? {
+        val model = activeModel
+        if (model.version.isFallback || !model.version.isTrained) return null
+        val snapshot = PersistedNeuralModelSnapshot(
+            version = model.version,
+            userTowerDiag = model.userTowerDiag.toList(),
+            itemTowerDiag = model.itemTowerDiag.toList(),
+            w1 = model.w1.map { it.toList() },
+            b1 = model.b1.toList(),
+            w2 = model.w2.toList(),
+            b2 = model.b2
+        )
+        return runCatching { snapshotJson.encodeToString(snapshot) }.getOrNull()
+    }
+
+    /**
+     * Restores a previously validated trained model snapshot from JSON.
+     * Returns true if the snapshot was valid and restored, false otherwise.
+     */
+    @Synchronized
+    fun restoreTrainedModelJson(rawJson: String): Boolean {
+        if (rawJson.isBlank()) return false
+        val snapshot = runCatching {
+            snapshotJson.decodeFromString<PersistedNeuralModelSnapshot>(rawJson)
+        }.getOrNull() ?: return false
+
+        if (snapshot.version.isFallback || snapshot.version.trainSamples <= 0 || snapshot.version.trainedAtMs <= 0L) {
+            return false
+        }
+        if (snapshot.userTowerDiag.size != TOWER_DIM ||
+            snapshot.itemTowerDiag.size != TOWER_DIM ||
+            snapshot.w1.size != HIDDEN_DIM ||
+            snapshot.w1.any { it.size != INPUT_DIM } ||
+            snapshot.b1.size != HIDDEN_DIM ||
+            snapshot.w2.size != HIDDEN_DIM
+        ) {
+            return false
+        }
+        val allFinite = snapshot.userTowerDiag.all { it.isFinite() } &&
+            snapshot.itemTowerDiag.all { it.isFinite() } &&
+            snapshot.w1.all { row -> row.all { it.isFinite() } } &&
+            snapshot.b1.all { it.isFinite() } &&
+            snapshot.w2.all { it.isFinite() } &&
+            snapshot.b2.isFinite()
+        if (!allFinite) return false
+
+        modelHistory.addLast(activeModel)
+        while (modelHistory.size > 5) modelHistory.removeFirst()
+        activeModel = ModelWeights(
+            version = snapshot.version,
+            userTowerDiag = snapshot.userTowerDiag.toFloatArray(),
+            itemTowerDiag = snapshot.itemTowerDiag.toFloatArray(),
+            w1 = Array(HIDDEN_DIM) { h -> snapshot.w1[h].toFloatArray() },
+            b1 = snapshot.b1.toFloatArray(),
+            w2 = snapshot.w2.toFloatArray(),
+            b2 = snapshot.b2
+        )
+        return true
+    }
 
     /**
      * Projects raw 32-D user preference vector through the User Tower and L2-normalizes the output.
@@ -363,8 +458,8 @@ class NeuralRecommendationEngine @Inject constructor() {
                 modelVersion = "v2.4-neural-base",
                 trainedAtMs = 0L,
                 trainSamples = 0,
-                validationLoss = 0.42,
-                validationAccuracy = 0.78,
+                validationLoss = 0.0,
+                validationAccuracy = 0.0,
                 isFallback = true
             ),
             userTowerDiag = FloatArray(TOWER_DIM) { 1.0f },

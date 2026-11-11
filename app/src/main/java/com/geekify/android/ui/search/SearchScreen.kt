@@ -503,6 +503,14 @@ fun SearchScreen(
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Medium
                                 )
+                                Spacer(Modifier.height(12.dp))
+                                TextButton(onClick = { viewModel.retry() }) {
+                                    Text(
+                                        text = "Retry",
+                                        color = IosPalette.systemBlue,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
                             }
                         }
                     }

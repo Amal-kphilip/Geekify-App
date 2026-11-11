@@ -274,4 +274,31 @@ class QueueManagerTest {
         assertTrue(state.isPlaying)
     }
 
+    @Test
+    fun `appendRelated and next advance into autoplay tracks and tonearm transition unblocks when sync is disabled`() = runBlocking {
+        val store = FakePreferencesDataStore()
+        val manager = QueueManager(store, Dispatchers.Unconfined, debounceMs = 0L)
+        manager.awaitLoaded()
+
+        val first = track("track_1")
+        val autoCandidate1 = track("auto_1")
+        val autoCandidate2 = track("auto_2")
+
+        manager.play(first, listOf(first))
+        manager.appendRelated(
+            listOf(autoCandidate1, autoCandidate2),
+            mapOf("auto_1" to "Similar vibe", "auto_2" to "From your history")
+        )
+
+        manager.setTonearmSyncEnabled(true)
+        manager.next()
+        assertEquals("auto_1", manager.state.value.current?.videoId)
+        assertTrue(manager.state.value.tonearmTransitionPending)
+        assertEquals("Similar vibe", manager.state.value.recommendationReasons["auto_1"])
+
+        // When UI closes or goes to background, disabling tonearm sync immediately unblocks playback
+        manager.setTonearmSyncEnabled(false)
+        assertFalse(manager.state.value.tonearmTransitionPending)
+    }
+
 }

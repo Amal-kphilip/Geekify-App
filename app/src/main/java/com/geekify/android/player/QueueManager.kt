@@ -119,10 +119,13 @@ class QueueManager(
 
     /** Enabled only while the expanded Now Playing screen is visible. */
     @Volatile private var tonearmSyncEnabled = false
+    @Volatile private var tonearmTimeoutJob: Job? = null
 
     fun setTonearmSyncEnabled(enabled: Boolean) {
         tonearmSyncEnabled = enabled
         if (!enabled) {
+            tonearmTimeoutJob?.cancel()
+            tonearmTimeoutJob = null
             synchronized(stateLock) {
                 val current = _state.value
                 if (current.tonearmTransitionPending) {
@@ -135,6 +138,8 @@ class QueueManager(
 
     /** Called by the tonearm animation after the stylus has settled onto this exact track. */
     fun completeTonearmTransition(trackVideoId: String) {
+        tonearmTimeoutJob?.cancel()
+        tonearmTimeoutJob = null
         synchronized(stateLock) {
             val current = _state.value
             if (current.current?.videoId == trackVideoId && current.tonearmTransitionPending) {
@@ -694,6 +699,22 @@ class QueueManager(
         progressChanged: Boolean = false
     ) {
         _state.value = newState
+        if (newState.tonearmTransitionPending) {
+            val targetId = newState.current?.videoId
+            tonearmTimeoutJob?.cancel()
+            tonearmTimeoutJob = scope.launch {
+                delay(1_200L)
+                synchronized(stateLock) {
+                    val cur = _state.value
+                    if (cur.tonearmTransitionPending && cur.current?.videoId == targetId) {
+                        _state.value = cur.copy(tonearmTransitionPending = false)
+                    }
+                }
+            }
+        } else {
+            tonearmTimeoutJob?.cancel()
+            tonearmTimeoutJob = null
+        }
         if (queueChanged) dirtyQueue = true
         if (modesChanged) dirtyModes = true
         if (volumeChanged) dirtyVolume = true

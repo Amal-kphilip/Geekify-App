@@ -11,14 +11,22 @@ import com.geekify.android.di.IoDispatcher
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 
 data class SearchUiState(
@@ -32,8 +40,15 @@ data class SearchUiState(
     val isLoading: Boolean = false,
     val isLoadingMore: Boolean = false,
     val error: String? = null
-)
+) {
+    val isEmpty: Boolean
+        get() = !isLoading && error == null && query.isNotBlank() && response != null &&
+            libraryTracks.isEmpty() && libraryPlaylists.isEmpty() &&
+            response.songs.isEmpty() && response.albums.isEmpty() &&
+            response.artists.isEmpty() && response.playlists.isEmpty()
+}
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class SearchViewModel @Inject constructor(
     private val musicSource: MusicSource,
@@ -46,12 +61,44 @@ class SearchViewModel @Inject constructor(
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) : ViewModel() {
 
+    companion object {
+        const val SUGGESTIONS_DEBOUNCE_MS = 150L
+        const val SEARCH_DEBOUNCE_MS = 300L
+    }
+
+    private data class SearchRequest(
+        val query: String,
+        val tab: String,
+        val debounce: Boolean,
+        val generation: Long,
+        val force: Boolean = false
+    )
+
+    private data class SuggestionRequest(
+        val query: String,
+        val generation: Long
+    )
+
     private val _uiState = MutableStateFlow(SearchUiState())
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
 
-    private var searchJob: Job? = null
-    private var suggestionsJob: Job? = null
-    private var requestGeneration = 0L
+    private val searchRequestFlow = MutableStateFlow<SearchRequest?>(null)
+    private val suggestionRequestFlow = MutableStateFlow<SuggestionRequest?>(null)
+
+    private var loadMoreJob: Job? = null
+    private var activeContinuationToken: String? = null
+
+    private val requestGeneration = AtomicLong(0L)
+    private val suggestionGeneration = AtomicLong(0L)
+
+    @Volatile
+    private var cachedFavoriteArtists: Set<String>? = null
+
+    @Volatile
+    private var inFlightRequestKey: String? = null
+
+    @Volatile
+    private var lastCompletedRequestKey: String? = null
 
     val genreTags = listOf(
         "Malayalam hits", "Tamil hits", "Hindi hits", "Telugu hits",
@@ -60,71 +107,180 @@ class SearchViewModel @Inject constructor(
     )
 
     init {
-        viewModelScope.launch {
+        viewModelScope.launch(ioDispatcher) {
             recentSearchDao.observeRecent().collect { list ->
                 _uiState.update { it.copy(recentSearches = list.map { r -> r.query }) }
             }
         }
+
+        // Maintain reactive favorite-artist set so searches do not re-read full tables on every keystroke
+        viewModelScope.launch(ioDispatcher) {
+            combine(
+                playStatDao.observeTopArtists(25),
+                likedDao.observeDistinctArtists(100)
+            ) { topPlayedArtists, likedArtists ->
+                (topPlayedArtists + likedArtists)
+                    .asSequence()
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .toSet()
+            }.collectLatest { artists ->
+                cachedFavoriteArtists = artists
+            }
+        }
+
+        // Cancellation-safe suggestion pipeline using flatMapLatest
+        viewModelScope.launch {
+            suggestionRequestFlow
+                .flatMapLatest { req ->
+                    flow {
+                        if (req == null || req.query.isBlank()) {
+                            emit(null)
+                            return@flow
+                        }
+                        delay(SUGGESTIONS_DEBOUNCE_MS)
+                        val items = try {
+                            musicSource.searchSuggestions(req.query)
+                        } catch (ce: CancellationException) {
+                            throw ce
+                        } catch (_: Exception) {
+                            emptyList()
+                        }
+                        emit(req to items.distinct())
+                    }
+                }
+                .collect { payload ->
+                    if (payload == null) return@collect
+                    val (req, suggestions) = payload
+                    if (req.generation == suggestionGeneration.get() &&
+                        _uiState.value.query.trim() == req.query.trim()
+                    ) {
+                        _uiState.update { it.copy(suggestions = suggestions) }
+                    }
+                }
+        }
+
+        // Cancellation-safe debounced search pipeline using flatMapLatest
+        viewModelScope.launch {
+            searchRequestFlow
+                .flatMapLatest { req ->
+                    flow<Unit> {
+                        if (req == null || req.query.isBlank()) {
+                            inFlightRequestKey = null
+                            return@flow
+                        }
+                        executeSearchRequest(req)
+                    }
+                }
+                .collect {}
+        }
     }
 
     fun onQueryChange(newQuery: String) {
-        requestGeneration++
-        searchJob?.cancel()
-        suggestionsJob?.cancel()
+        val previousTrimmed = _uiState.value.query.trim()
+        val trimmed = newQuery.trim()
 
-        _uiState.update { it.copy(query = newQuery) }
+        cancelPagination()
 
-        if (newQuery.isBlank()) {
-            _uiState.update {
-                it.copy(
-                    suggestions = emptyList(),
-                    libraryTracks = emptyList(),
-                    libraryPlaylists = emptyList(),
-                    response = null,
-                    isLoading = false,
-                    error = null
-                )
+        if (trimmed.isEmpty()) {
+            val gen = requestGeneration.incrementAndGet()
+            suggestionGeneration.incrementAndGet()
+            inFlightRequestKey = null
+            lastCompletedRequestKey = null
+            suggestionRequestFlow.value = null
+            searchRequestFlow.value = null
+            if (_uiState.value.query != newQuery || _uiState.value.response != null || _uiState.value.isLoading) {
+                _uiState.update {
+                    it.copy(
+                        query = newQuery,
+                        suggestions = emptyList(),
+                        libraryTracks = emptyList(),
+                        libraryPlaylists = emptyList(),
+                        response = null,
+                        isLoading = false,
+                        isLoadingMore = false,
+                        error = null
+                    )
+                }
             }
             return
         }
 
-        // Suggestions with 150ms debounce
-        suggestionsJob = viewModelScope.launch {
-            delay(150)
-            val suggestions = musicSource.searchSuggestions(newQuery)
-            _uiState.update { it.copy(suggestions = suggestions) }
+        // If only trailing/leading whitespace changed and query text is identical, just update raw query
+        if (trimmed == previousTrimmed && _uiState.value.response != null && !_uiState.value.isLoading) {
+            _uiState.update { it.copy(query = newQuery) }
+            return
         }
 
-        // Full search with 350ms debounce
-        startSearch(newQuery, debounce = true)
+        val gen = requestGeneration.incrementAndGet()
+        val sugGen = suggestionGeneration.incrementAndGet()
+        inFlightRequestKey = null
+        lastCompletedRequestKey = null
+
+        // Release previous response memory immediately when switching queries
+        _uiState.update {
+            it.copy(
+                query = newQuery,
+                response = if (trimmed != previousTrimmed) null else it.response,
+                libraryTracks = if (trimmed != previousTrimmed) emptyList() else it.libraryTracks,
+                libraryPlaylists = if (trimmed != previousTrimmed) emptyList() else it.libraryPlaylists,
+                isLoading = true,
+                isLoadingMore = false,
+                error = null
+            )
+        }
+
+        suggestionRequestFlow.value = SuggestionRequest(query = trimmed, generation = sugGen)
+        searchRequestFlow.value = SearchRequest(
+            query = trimmed,
+            tab = _uiState.value.selectedTab,
+            debounce = true,
+            generation = gen
+        )
     }
 
     fun onSuggestionClick(suggestion: String) {
+        val clean = suggestion.trim()
+        if (clean.isBlank()) return
+        cancelSuggestions()
         _uiState.update { it.copy(query = suggestion, suggestions = emptyList()) }
-        recordRecentSearch(suggestion)
-        startSearch(suggestion, debounce = false)
+        recordRecentSearch(clean)
+        triggerImmediateSearch(clean, _uiState.value.selectedTab, force = false)
     }
 
     fun onSubmit(query: String) {
         val q = query.trim()
         if (q.isBlank()) return
-        _uiState.update { it.copy(suggestions = emptyList()) }
+        cancelSuggestions()
+        _uiState.update { it.copy(query = query, suggestions = emptyList()) }
         recordRecentSearch(q)
-        startSearch(q, debounce = false)
+        triggerImmediateSearch(q, _uiState.value.selectedTab, force = false)
     }
 
     fun onTabSelected(tab: String) {
         if (_uiState.value.selectedTab == tab) return
-        _uiState.update { it.copy(selectedTab = tab) }
-        if (_uiState.value.query.isNotBlank()) {
-            startSearch(_uiState.value.query, debounce = false)
+        cancelPagination()
+        _uiState.update { it.copy(selectedTab = tab, isLoadingMore = false) }
+        val q = _uiState.value.query.trim()
+        if (q.isNotBlank()) {
+            triggerImmediateSearch(q, tab, force = false)
         }
     }
 
     fun onTagClick(tag: String) {
+        val clean = tag.trim()
+        if (clean.isBlank()) return
+        cancelSuggestions()
         _uiState.update { it.copy(query = tag, suggestions = emptyList()) }
-        recordRecentSearch(tag)
-        startSearch(tag, debounce = false)
+        recordRecentSearch(clean)
+        triggerImmediateSearch(clean, _uiState.value.selectedTab, force = false)
+    }
+
+    fun retry() {
+        val q = _uiState.value.query.trim()
+        if (q.isBlank()) return
+        cancelSuggestions()
+        triggerImmediateSearch(q, _uiState.value.selectedTab, force = true)
     }
 
     fun deleteRecentSearch(query: String) {
@@ -145,18 +301,92 @@ class SearchViewModel @Inject constructor(
         }
     }
 
-    private suspend fun searchLocalLibrary(query: String) {
+    private fun cancelSuggestions() {
+        suggestionGeneration.incrementAndGet()
+        suggestionRequestFlow.value = null
+    }
+
+    private fun cancelPagination() {
+        loadMoreJob?.cancel()
+        loadMoreJob = null
+        activeContinuationToken = null
+    }
+
+    private fun triggerImmediateSearch(query: String, tab: String, force: Boolean) {
+        val q = query.trim()
+        if (q.isBlank()) return
+        val key = "$q|$tab"
+
+        // Deduplicate: if this exact query + tab already completed with a valid response (or is actively executing post-debounce),
+        // avoid firing a redundant network request unless explicitly forced (e.g. retry()).
+        if (!force) {
+            val state = _uiState.value
+            if (lastCompletedRequestKey == key && state.response != null && state.error == null && !state.isLoading) {
+                return
+            }
+            if (inFlightRequestKey == key && state.isLoading) {
+                return
+            }
+        }
+
+        cancelPagination()
+        val previousQuery = _uiState.value.query.trim()
+        val gen = requestGeneration.incrementAndGet()
+        inFlightRequestKey = null
+        if (force || previousQuery != q) {
+            lastCompletedRequestKey = null
+        }
+
+        _uiState.update {
+            it.copy(
+                response = if (previousQuery != q) null else it.response,
+                libraryTracks = if (previousQuery != q) emptyList() else it.libraryTracks,
+                libraryPlaylists = if (previousQuery != q) emptyList() else it.libraryPlaylists,
+                isLoading = true,
+                isLoadingMore = false,
+                error = null
+            )
+        }
+
+        searchRequestFlow.value = SearchRequest(
+            query = q,
+            tab = tab,
+            debounce = false,
+            generation = gen,
+            force = force
+        )
+    }
+
+    private suspend fun resolveFavoriteArtists(): Set<String> {
+        cachedFavoriteArtists?.let { return it }
+        return withContext(ioDispatcher) {
+            cachedFavoriteArtists ?: run {
+                val topStats = playStatDao.topArtistsOnce(25)
+                val topLiked = likedDao.distinctArtistsOnce(100)
+                (topStats + topLiked)
+                    .asSequence()
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .toSet()
+                    .also { cachedFavoriteArtists = it }
+            }
+        }
+    }
+
+    private suspend fun searchLocalLibrary(query: String, expectedGeneration: Long) {
         withContext(ioDispatcher) {
             val q = query.trim()
             if (q.isBlank()) {
-                _uiState.update { it.copy(libraryTracks = emptyList(), libraryPlaylists = emptyList()) }
+                if (expectedGeneration == requestGeneration.get()) {
+                    _uiState.update { it.copy(libraryTracks = emptyList(), libraryPlaylists = emptyList()) }
+                }
                 return@withContext
             }
             val liked = likedDao.searchLiked(q).map { it.toTrack() }
             val history = historyDao.searchHistory(q).map { it.toTrack() }
             val matchingTracks = (liked + history).distinctBy { it.videoId }.take(10)
 
-            val playlists = playlistDao.searchPlaylists(q).map { p ->
+            val playlists = playlistDao.searchPlaylists(q).distinctBy { it.id }.map { p ->
                 Card(
                     id = p.id,
                     title = p.name,
@@ -167,60 +397,63 @@ class SearchViewModel @Inject constructor(
                 )
             }
 
-            _uiState.update {
-                it.copy(
-                    libraryTracks = matchingTracks,
-                    libraryPlaylists = playlists
-                )
+            if (expectedGeneration == requestGeneration.get() && _uiState.value.query.trim() == q) {
+                _uiState.update {
+                    it.copy(
+                        libraryTracks = matchingTracks,
+                        libraryPlaylists = playlists
+                    )
+                }
             }
         }
     }
 
-    private fun startSearch(query: String, debounce: Boolean = false) {
-        val q = query.trim()
-        if (q.isBlank()) return
+    private suspend fun executeSearchRequest(req: SearchRequest) {
+        val q = req.query.trim()
+        val requestedTab = req.tab
+        val generation = req.generation
+        val requestKey = "$q|$requestedTab"
 
-        val generation = ++requestGeneration
-        val requestedTab = _uiState.value.selectedTab
-        searchJob?.cancel()
+        if (req.debounce) {
+            delay(SEARCH_DEBOUNCE_MS)
+        }
 
-        _uiState.update { it.copy(isLoading = true, error = null) }
+        if (!isRequestStillActive(generation, q, requestedTab)) return
+        inFlightRequestKey = requestKey
 
-        searchJob = viewModelScope.launch {
-            if (debounce) delay(350)
-            if (generation != requestGeneration || _uiState.value.query.trim() != q || _uiState.value.selectedTab != requestedTab) return@launch
+        val type = when (requestedTab) {
+            "Songs" -> SearchType.SONG
+            "Videos" -> SearchType.VIDEO
+            "Albums" -> SearchType.ALBUM
+            "Artists" -> SearchType.ARTIST
+            "Playlists" -> SearchType.PLAYLIST
+            else -> null
+        }
 
-            // Search local library concurrently
-            launch { searchLocalLibrary(q) }
+        try {
+            coroutineScope {
+                launch { searchLocalLibrary(q, generation) }
 
-            val type = when (requestedTab) {
-                "Songs" -> SearchType.SONG
-                "Videos" -> SearchType.VIDEO
-                "Albums" -> SearchType.ALBUM
-                "Artists" -> SearchType.ARTIST
-                "Playlists" -> SearchType.PLAYLIST
-                else -> null
-            }
-
-            try {
-                // Fetch favorite artists for re-ranking boost
-                val favoriteArtists = withContext(ioDispatcher) {
-                    val topStats = playStatDao.top(25).map { it.artist }
-                    val topLiked = likedDao.allOnce().map { it.artist }
-                    (topStats + topLiked).toSet()
+                val favoriteArtists = resolveFavoriteArtists()
+                val result = withContext(ioDispatcher) {
+                    musicSource.search(q, type)
                 }
 
-                when (val result = musicSource.search(q, type)) {
+                if (!isRequestStillActive(generation, q, requestedTab)) return@coroutineScope
+
+                when (result) {
                     is MusicResult.Success -> {
-                        if (generation == requestGeneration && _uiState.value.query.trim() == q && _uiState.value.selectedTab == requestedTab) {
-                            val rankedResponse = withContext(defaultDispatcher) {
-                                result.value.copy(
-                                    songs = SearchRelevance.rankTracks(q, result.value.songs, favoriteArtists),
-                                    albums = SearchRelevance.rankCards(q, result.value.albums, favoriteArtists),
-                                    artists = SearchRelevance.rankCards(q, result.value.artists, favoriteArtists),
-                                    playlists = SearchRelevance.rankCards(q, result.value.playlists, favoriteArtists)
-                                )
-                            }
+                        val rankedResponse = withContext(defaultDispatcher) {
+                            result.value.copy(
+                                songs = SearchRelevance.rankTracks(q, result.value.songs, favoriteArtists),
+                                albums = SearchRelevance.rankCards(q, result.value.albums, favoriteArtists),
+                                artists = SearchRelevance.rankCards(q, result.value.artists, favoriteArtists),
+                                playlists = SearchRelevance.rankCards(q, result.value.playlists, favoriteArtists)
+                            )
+                        }
+                        if (isRequestStillActive(generation, q, requestedTab)) {
+                            lastCompletedRequestKey = requestKey
+                            inFlightRequestKey = null
                             _uiState.update {
                                 it.copy(
                                     response = rankedResponse,
@@ -231,52 +464,116 @@ class SearchViewModel @Inject constructor(
                         }
                     }
                     is MusicResult.Failure -> {
-                        if (generation == requestGeneration) {
-                            _uiState.update { it.copy(error = result.message, isLoading = false) }
+                        if (isRequestStillActive(generation, q, requestedTab)) {
+                            inFlightRequestKey = null
+                            _uiState.update {
+                                it.copy(
+                                    response = null,
+                                    error = result.message,
+                                    isLoading = false
+                                )
+                            }
                         }
                     }
                 }
-            } catch (_: CancellationException) {
-                // Cancelled by a newer query
-            } catch (error: Exception) {
-                if (generation == requestGeneration) {
-                    _uiState.update {
-                        it.copy(
-                            error = error.message ?: "Search failed. Please try again.",
-                            isLoading = false
-                        )
-                    }
+            }
+        } catch (ce: CancellationException) {
+            if (inFlightRequestKey == requestKey) {
+                inFlightRequestKey = null
+            }
+            throw ce
+        } catch (error: Exception) {
+            if (isRequestStillActive(generation, q, requestedTab)) {
+                inFlightRequestKey = null
+                _uiState.update {
+                    it.copy(
+                        response = null,
+                        error = error.message ?: "Search failed. Please try again.",
+                        isLoading = false
+                    )
                 }
             }
         }
     }
 
-    fun loadMore() {
-        val currentResponse = _uiState.value.response ?: return
-        val continuation = currentResponse.continuation ?: return
-        if (_uiState.value.isLoadingMore) return
+    private fun isRequestStillActive(expectedGeneration: Long, expectedQuery: String, expectedTab: String): Boolean {
+        val current = _uiState.value
+        return expectedGeneration == requestGeneration.get() &&
+            current.query.trim() == expectedQuery &&
+            current.selectedTab == expectedTab
+    }
 
+    fun loadMore() {
+        val snapshot = _uiState.value
+        val currentResponse = snapshot.response ?: return
+        val continuation = currentResponse.continuation?.takeIf { it.isNotBlank() } ?: return
+        if (snapshot.isLoading || snapshot.isLoadingMore) return
+        if (activeContinuationToken == continuation) return
+
+        val expectedGeneration = requestGeneration.get()
+        val expectedQuery = snapshot.query.trim()
+        val expectedTab = snapshot.selectedTab
+        if (expectedQuery.isBlank()) return
+
+        activeContinuationToken = continuation
         _uiState.update { it.copy(isLoadingMore = true) }
-        viewModelScope.launch {
+
+        loadMoreJob?.cancel()
+        loadMoreJob = viewModelScope.launch {
             try {
-                when (val result = musicSource.searchContinuation(continuation)) {
+                val favoriteArtists = resolveFavoriteArtists()
+                val result = withContext(ioDispatcher) {
+                    musicSource.searchContinuation(continuation)
+                }
+
+                // Prevent stale pagination responses from entering new search results
+                if (!isRequestStillActive(expectedGeneration, expectedQuery, expectedTab)) {
+                    return@launch
+                }
+
+                when (result) {
                     is MusicResult.Success -> {
+                        val latestResponse = _uiState.value.response
+                        if (latestResponse == null || latestResponse.continuation != continuation) {
+                            return@launch
+                        }
                         val next = result.value
-                        val merged = currentResponse.copy(
-                            songs = (currentResponse.songs + next.songs).distinctBy { it.videoId },
-                            albums = (currentResponse.albums + next.albums).distinctBy { it.id },
-                            artists = (currentResponse.artists + next.artists).distinctBy { it.id },
-                            playlists = (currentResponse.playlists + next.playlists).distinctBy { it.id },
-                            continuation = next.continuation
-                        )
-                        _uiState.update { it.copy(response = merged, isLoadingMore = false) }
+                        val merged = withContext(defaultDispatcher) {
+                            latestResponse.copy(
+                                songs = SearchRelevance.mergePaginatedTracks(
+                                    query = expectedQuery,
+                                    existing = latestResponse.songs,
+                                    incoming = next.songs,
+                                    favoriteArtists = favoriteArtists
+                                ),
+                                albums = (latestResponse.albums + SearchRelevance.rankCards(expectedQuery, next.albums, favoriteArtists))
+                                    .distinctBy { it.id },
+                                artists = (latestResponse.artists + SearchRelevance.rankCards(expectedQuery, next.artists, favoriteArtists))
+                                    .distinctBy { it.id },
+                                playlists = (latestResponse.playlists + SearchRelevance.rankCards(expectedQuery, next.playlists, favoriteArtists))
+                                    .distinctBy { it.id },
+                                continuation = next.continuation?.takeIf { it != continuation }
+                            )
+                        }
+                        if (isRequestStillActive(expectedGeneration, expectedQuery, expectedTab)) {
+                            activeContinuationToken = null
+                            _uiState.update { it.copy(response = merged, isLoadingMore = false) }
+                        }
                     }
                     is MusicResult.Failure -> {
-                        _uiState.update { it.copy(isLoadingMore = false) }
+                        if (isRequestStillActive(expectedGeneration, expectedQuery, expectedTab)) {
+                            activeContinuationToken = null
+                            _uiState.update { it.copy(isLoadingMore = false) }
+                        }
                     }
                 }
+            } catch (ce: CancellationException) {
+                throw ce
             } catch (_: Exception) {
-                _uiState.update { it.copy(isLoadingMore = false) }
+                if (isRequestStillActive(expectedGeneration, expectedQuery, expectedTab)) {
+                    activeContinuationToken = null
+                    _uiState.update { it.copy(isLoadingMore = false) }
+                }
             }
         }
     }
