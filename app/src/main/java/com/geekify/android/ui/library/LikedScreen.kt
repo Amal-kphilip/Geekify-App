@@ -60,7 +60,11 @@ fun LikedScreen(
                 }
             }
 
-            items(liked, key = { it.videoId }) { track ->
+            items(
+                items = liked,
+                key = { it.videoId },
+                contentType = { "track_row" }
+            ) { track ->
                 TrackRow(track = track, onClick = { onPlayTrack(track, liked) })
             }
 

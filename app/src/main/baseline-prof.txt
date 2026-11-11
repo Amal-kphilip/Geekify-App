@@ -1,0 +1,58 @@
+# Geekify Baseline Profile
+# Critical startup and rendering paths for AOT pre-compilation
+# Generated for Geekify v2.6 Performance Optimization
+
+# Core Application & Dependency Injection
+Lcom/geekify/android/GeekifyApplication;
+HSPLcom/geekify/android/GeekifyApplication;-><init>()V
+HSPLcom/geekify/android/GeekifyApplication;->onCreate()V
+HSPLcom/geekify/android/GeekifyApplication;->newImageLoader(Lcoil3/PlatformContext;)Lcoil3/ImageLoader;
+
+# Main Activity & Navigation
+Lcom/geekify/android/MainActivity;
+HSPLcom/geekify/android/MainActivity;-><init>()V
+HSPLcom/geekify/android/MainActivity;->onCreate(Landroid/os/Bundle;)V
+Lcom/geekify/android/ui/MainScreenKt;
+HSPLcom/geekify/android/ui/MainScreenKt;->MainScreen(Lcom/geekify/android/ui/MainViewModel;Lcom/geekify/android/ui/player/PlayerViewModel;Landroidx/navigation/NavHostController;Landroidx/compose/runtime/Composer;II)V
+
+# Home Screen & Shelves
+Lcom/geekify/android/ui/home/HomeScreenKt;
+HSPLcom/geekify/android/ui/home/HomeScreenKt;->HomeScreen(Lcom/geekify/android/ui/home/HomeViewModel;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Landroidx/compose/runtime/Composer;II)V
+Lcom/geekify/android/ui/components/ShelfRowKt;
+HSPLcom/geekify/android/ui/components/ShelfRowKt;->ShelfRow(Lcom/geekify/android/data/model/Shelf;Landroidx/compose/ui/Modifier;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Landroidx/compose/runtime/Composer;II)V
+
+# Search Screen & Relevance Engine
+Lcom/geekify/android/ui/search/SearchViewModel;
+HSPLcom/geekify/android/ui/search/SearchViewModel;-><init>(Lcom/geekify/android/data/source/MusicSource;Lcom/geekify/android/data/local/RecentSearchDao;Lcom/geekify/android/data/local/LikedDao;Lcom/geekify/android/data/local/PlaylistDao;)V
+HSPLcom/geekify/android/ui/search/SearchViewModel;->onQueryChange(Ljava/lang/String;)V
+HSPLcom/geekify/android/ui/search/SearchViewModel;->onSubmit(Ljava/lang/String;)V
+Lcom/geekify/android/ui/search/SearchRelevance;
+HSPLcom/geekify/android/ui/search/SearchRelevance;->rank(Ljava/util/List;Ljava/lang/String;Ljava/util/Set;Ljava/util/List;)Ljava/util/List;
+HSPLcom/geekify/android/ui/search/SearchRelevance;->rankCards(Ljava/util/List;Ljava/lang/String;Ljava/util/List;)Ljava/util/List;
+HSPLcom/geekify/android/ui/search/SearchRelevance;->dedupTracks(Ljava/util/List;)Ljava/util/List;
+HSPLcom/geekify/android/ui/search/SearchRelevance;->normalize(Ljava/lang/String;)Ljava/lang/String;
+
+# Liquid Glass & Backdrop Shaders
+Lcom/geekify/android/ui/glass/LiquidGlassKt;
+HSPLcom/geekify/android/ui/glass/LiquidGlassKt;->liquidGlass(Landroidx/compose/ui/Modifier;Lcom/geekify/android/ui/glass/GlassStyle;Landroidx/compose/ui/graphics/Shape;Lcom/geekify/android/ui/glass/GlassBackdrop;ZZLkotlin/jvm/functions/Function1;)Landroidx/compose/ui/Modifier;
+Lcom/geekify/android/ui/glass/GlassEffectConfig;
+HSPLcom/geekify/android/ui/glass/GlassEffectConfig;->isEnabledFor(Lcom/geekify/android/ui/glass/GlassComponent;)Z
+
+# Playback Service & Stream Resolver
+Lcom/geekify/android/player/PlaybackService;
+HSPLcom/geekify/android/player/PlaybackService;-><init>()V
+HSPLcom/geekify/android/player/PlaybackService;->onCreate()V
+HSPLcom/geekify/android/player/StreamResolver;
+HSPLcom/geekify/android/player/StreamResolver;->resolve(Ljava/lang/String;Z)Lcom/geekify/android/player/StreamResolver$ResolvedStream;
+HSPLcom/geekify/android/player/StreamResolver;->prefetch(Ljava/util/List;)V
+Lcom/geekify/android/domain/listening/SmartQueueRanker;
+HSPLcom/geekify/android/domain/listening/SmartQueueRanker;->rankWithSignals(Ljava/util/List;Lcom/geekify/android/data/model/Track;Lcom/geekify/android/domain/listening/QueueRankingSignals;Ljava/util/List;)Ljava/util/List;
+
+# Room Database & Local DAOs
+Lcom/geekify/android/data/local/GeekifyDatabase_Impl;
+HSPLcom/geekify/android/data/local/GeekifyDatabase_Impl;-><init>()V
+HSPLcom/geekify/android/data/local/LikedDao_Impl;
+HSPLcom/geekify/android/data/local/HistoryDao_Impl;
+HSPLcom/geekify/android/data/local/ListeningSessionDao_Impl;
+HSPLcom/geekify/android/data/local/PlayStatDao_Impl;
+HSPLcom/geekify/android/data/local/ShelfCacheDao_Impl;

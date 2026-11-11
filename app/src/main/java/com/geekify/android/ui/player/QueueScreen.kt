@@ -323,7 +323,11 @@ fun QueueScreen(
                             )
                         }
 
-                        itemsIndexed(state.queue, key = { index, item -> "${item.videoId}_$index" }) { index, track ->
+                        itemsIndexed(
+                            items = state.queue,
+                            key = { index, item -> "${item.videoId}_$index" },
+                            contentType = { _, _ -> "queue_item" }
+                        ) { index, track ->
                             if (index > state.index) {
                                 Column(Modifier.fillMaxWidth()) {
                                     val reason = state.recommendationReasons[track.videoId]

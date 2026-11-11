@@ -292,7 +292,11 @@ fun SearchScreen(
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
                         ) {
-                            items(state.suggestions) { suggestion ->
+                            items(
+                                items = state.suggestions,
+                                key = { "sug_$it" },
+                                contentType = { "suggestion_row" }
+                            ) { suggestion ->
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()

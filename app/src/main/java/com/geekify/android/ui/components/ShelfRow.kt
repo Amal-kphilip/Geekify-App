@@ -36,7 +36,11 @@ fun ShelfRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            items(uniqueItems, key = { it.id }) { item ->
+            items(
+                items = uniqueItems,
+                key = { it.id },
+                contentType = { item -> if (item is ShelfTrack) "track" else "card" }
+            ) { item ->
                 when (item) {
                     is ShelfTrack -> {
                         CardItem(
