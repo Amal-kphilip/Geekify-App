@@ -57,5 +57,6 @@ class AudioSettingsViewModel @Inject constructor(
 
     fun setSkipSilence(enabled: Boolean) = controller.update { it.copy(skipSilence = enabled) }
     fun setNormalize(enabled: Boolean) = controller.update { it.copy(normalize = enabled) }
+    fun setCrossfadeSeconds(sec: Int) = controller.update { it.copy(crossfadeSeconds = sec.coerceIn(0, 12)) }
     fun resetAll() = controller.update { AudioSettings() }
 }

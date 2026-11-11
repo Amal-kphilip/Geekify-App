@@ -15,7 +15,8 @@ import javax.inject.Inject
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     private val library: LibraryRepository,
-    private val sync: SyncRepository
+    private val sync: SyncRepository,
+    private val feedbackRepository: com.geekify.android.domain.recommend.RecommendationFeedbackRepository
 ) : ViewModel() {
 
     val liked: StateFlow<List<Track>> = library.liked
@@ -26,6 +27,14 @@ class LibraryViewModel @Inject constructor(
 
     val savedCollections: StateFlow<List<SavedCollection>> = library.savedCollections
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    suspend fun recordFeedback(track: Track, action: com.geekify.android.data.local.FeedbackAction) {
+        feedbackRepository.recordTrackFeedback(track, action)
+    }
+
+    suspend fun recordArtistFeedback(artistName: String, action: com.geekify.android.data.local.FeedbackAction) {
+        feedbackRepository.recordArtistFeedback(artistName, action)
+    }
 
     fun toggleSavedCollection(collection: SavedCollection) {
         viewModelScope.launch {

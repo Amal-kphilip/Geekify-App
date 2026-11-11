@@ -696,9 +696,10 @@ interface RecommendationEngineDao {
         LikedTrackEntity::class, HistoryTrackEntity::class, PlaylistEntity::class, PlaylistTrackEntity::class, PlayStatEntity::class,
         TrackEntity::class, AlbumEntity::class, ArtistEntity::class, CachedShelfEntity::class, ListeningSessionEntity::class,
         RecentSearchEntity::class, RecommendationImpressionEntity::class, RecommendationOutcomeEntity::class,
-        TrackFeatureEntity::class, UserPreferenceProfileEntity::class, ExperimentAssignmentEntity::class, CollaborativeInteractionEntity::class
+        TrackFeatureEntity::class, UserPreferenceProfileEntity::class, ExperimentAssignmentEntity::class, CollaborativeInteractionEntity::class,
+        UserRecommendationFeedbackEntity::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -713,6 +714,7 @@ abstract class GeekifyDatabase : RoomDatabase() {
     abstract fun recentSearchDao(): RecentSearchDao
     abstract fun recommendationLogDao(): RecommendationLogDao
     abstract fun recommendationEngineDao(): RecommendationEngineDao
+    abstract fun recommendationFeedbackDao(): RecommendationFeedbackDao
 }
 
 /** v2 -> v3: adds the offline catalog (tracks, albums, artists) and the cached home shelves. Nothing is dropped. */
@@ -905,5 +907,25 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_collaborative_interactions_videoId_timestampMs` ON `collaborative_interactions` (`videoId`, `timestampMs`)")
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_collaborative_interactions_anonUserHash_timestampMs` ON `collaborative_interactions` (`anonUserHash`, `timestampMs`)")
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_collaborative_interactions_artistKey` ON `collaborative_interactions` (`artistKey`)")
+    }
+}
+
+/** v9 -> v10: adds user recommendation feedback table for explicit user controls (more like this, hide, block artist, etc.). */
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `user_recommendation_feedback` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`targetType` TEXT NOT NULL, " +
+                "`targetId` TEXT NOT NULL, " +
+                "`targetName` TEXT NOT NULL, " +
+                "`action` TEXT NOT NULL, " +
+                "`createdAtMs` INTEGER NOT NULL, " +
+                "`undo` INTEGER NOT NULL DEFAULT 0, " +
+                "`synced` INTEGER NOT NULL DEFAULT 0)"
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_user_recommendation_feedback_targetType_targetId` ON `user_recommendation_feedback` (`targetType`, `targetId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_user_recommendation_feedback_action` ON `user_recommendation_feedback` (`action`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_user_recommendation_feedback_createdAtMs` ON `user_recommendation_feedback` (`createdAtMs`)")
     }
 }

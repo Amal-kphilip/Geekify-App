@@ -37,17 +37,19 @@ import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
+import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.geekify.android.MainActivity
 import com.geekify.android.R
 import com.geekify.android.audio.AudioEffectsController
+import com.geekify.android.audio.CrossfadeAudioTransitionController
 import com.geekify.android.data.local.ListeningSessionEntity
 import com.geekify.android.data.local.ListeningStatsRepository
 import com.geekify.android.data.model.Track
 import com.geekify.android.data.source.MusicSource
 import com.geekify.android.data.source.innertube.InnerTubeClient
+import com.geekify.android.domain.listening.ListeningBehaviorManager
 import com.geekify.android.domain.listening.SmartQueueRanker
 import com.geekify.android.notifications.NotificationChannels
 import com.geekify.android.player.artwork.ArtworkUrls
@@ -78,7 +80,7 @@ import okhttp3.OkHttpClient
 
 @OptIn(UnstableApi::class)
 @AndroidEntryPoint
-class PlaybackService : MediaSessionService() {
+class PlaybackService : MediaLibraryService() {
 
     companion object {
         @Volatile private var activeInstance: PlaybackService? = null
@@ -125,9 +127,12 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var audioCache: SimpleCache
     @Inject lateinit var syncRepository: dagger.Lazy<com.geekify.android.data.sync.SyncRepository>
     @Inject lateinit var appSettings: com.geekify.android.settings.AppSettingsRepository
+    @Inject lateinit var listeningBehaviorManager: ListeningBehaviorManager
+    @Inject lateinit var crossfadeController: CrossfadeAudioTransitionController
+    @Inject lateinit var diagnosticsTracker: PlaybackDiagnosticsTracker
 
     private lateinit var player: ExoPlayer
-    private lateinit var mediaSession: MediaSession
+    private lateinit var mediaSession: MediaLibraryService.MediaLibrarySession
     private var mediaNotificationController: MediaSession.ControllerInfo? = null
     private var likedVideoIds: Set<String> = emptySet()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -260,11 +265,10 @@ class PlaybackService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         artworkLoader = CoilBitmapLoader(this)
-        mediaSession = MediaSession.Builder(this, QueuePlayer(player))
+        mediaSession = MediaLibraryService.MediaLibrarySession.Builder(this, QueuePlayer(player), PlaybackSessionCallback())
             .setSessionActivity(pendingIntent)
             .setBitmapLoader(CacheBitmapLoader(artworkLoader))
             .setMediaButtonPreferences(mediaButtonPreferences(liked = false, shuffle = false))
-            .setCallback(PlaybackSessionCallback())
             .build()
         // Media3 only manages the notification (and the foreground state) for sessions that were added to the
         // service. The app never creates a MediaController, so onGetSession() is not called by anything and the
@@ -638,7 +642,35 @@ class PlaybackService : MediaSessionService() {
         mediaSession.setMediaButtonPreferences(controller, mediaButtonPreferences(liked, shuffle))
     }
 
-    private inner class PlaybackSessionCallback : MediaSession.Callback {
+    private fun buildBrowsableMediaItem(id: String, title: String): androidx.media3.common.MediaItem {
+        return androidx.media3.common.MediaItem.Builder()
+            .setMediaId(id)
+            .setMediaMetadata(
+                androidx.media3.common.MediaMetadata.Builder()
+                    .setIsBrowsable(true)
+                    .setIsPlayable(false)
+                    .setTitle(title)
+                    .build()
+            )
+            .build()
+    }
+
+    private fun buildTrackMediaItem(track: Track): androidx.media3.common.MediaItem {
+        return androidx.media3.common.MediaItem.Builder()
+            .setMediaId(track.videoId)
+            .setMediaMetadata(
+                androidx.media3.common.MediaMetadata.Builder()
+                    .setIsBrowsable(false)
+                    .setIsPlayable(true)
+                    .setTitle(track.title)
+                    .setArtist(track.artist)
+                    .setArtworkUri(track.thumbnails.firstOrNull()?.url?.let { android.net.Uri.parse(it) })
+                    .build()
+            )
+            .build()
+    }
+
+    private inner class PlaybackSessionCallback : MediaLibraryService.MediaLibrarySession.Callback {
         override fun onConnect(
             session: MediaSession,
             controller: MediaSession.ControllerInfo
@@ -660,6 +692,120 @@ class PlaybackService : MediaSessionService() {
                     )
             }
             return accepted.build()
+        }
+
+        override fun onGetLibraryRoot(
+            session: MediaLibraryService.MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            params: MediaLibraryService.LibraryParams?
+        ): ListenableFuture<androidx.media3.session.LibraryResult<androidx.media3.common.MediaItem>> {
+            val rootItem = androidx.media3.common.MediaItem.Builder()
+                .setMediaId("ROOT")
+                .setMediaMetadata(
+                    androidx.media3.common.MediaMetadata.Builder()
+                        .setIsBrowsable(true)
+                        .setIsPlayable(false)
+                        .setTitle("Geekify")
+                        .build()
+                )
+                .build()
+            val res = SettableFuture.create<androidx.media3.session.LibraryResult<androidx.media3.common.MediaItem>>()
+            res.set(androidx.media3.session.LibraryResult.ofItem(rootItem, params))
+            return res
+        }
+
+        override fun onGetChildren(
+            session: MediaLibraryService.MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            parentId: String,
+            page: Int,
+            pageSize: Int,
+            params: MediaLibraryService.LibraryParams?
+        ): ListenableFuture<androidx.media3.session.LibraryResult<com.google.common.collect.ImmutableList<androidx.media3.common.MediaItem>>> {
+            val res = SettableFuture.create<androidx.media3.session.LibraryResult<com.google.common.collect.ImmutableList<androidx.media3.common.MediaItem>>>()
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val items = when (parentId) {
+                        "ROOT" -> listOf(
+                            buildBrowsableMediaItem("NODE_LIKED", "Liked Songs"),
+                            buildBrowsableMediaItem("NODE_RECENTS", "Recently Played"),
+                            buildBrowsableMediaItem("NODE_PLAYLISTS", "Playlists")
+                        )
+                        "NODE_LIKED" -> {
+                            val liked = libraryRepository.likedOnce()
+                            liked.map { buildTrackMediaItem(it) }
+                        }
+                        "NODE_RECENTS" -> {
+                            val recents = historyRepository.allOnce()
+                            recents.map { buildTrackMediaItem(it) }
+                        }
+                        "NODE_PLAYLISTS" -> {
+                            val pls = libraryRepository.playlistsOnce()
+                            pls.map { buildBrowsableMediaItem("PLAYLIST_${it.id}", it.name) }
+                        }
+                        else -> {
+                            if (parentId.startsWith("PLAYLIST_")) {
+                                val plId = parentId.removePrefix("PLAYLIST_")
+                                val plTracks = libraryRepository.playlistTracks(plId).first()
+                                plTracks.map { buildTrackMediaItem(it) }
+                            } else {
+                                emptyList()
+                            }
+                        }
+                    }
+                    res.set(androidx.media3.session.LibraryResult.ofItemList(items, params))
+                } catch (_: Exception) {
+                    res.set(androidx.media3.session.LibraryResult.ofError(androidx.media3.session.SessionError.ERROR_UNKNOWN))
+                }
+            }
+            return res
+        }
+
+        override fun onGetItem(
+            session: MediaLibraryService.MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            mediaId: String
+        ): ListenableFuture<androidx.media3.session.LibraryResult<androidx.media3.common.MediaItem>> {
+            val res = SettableFuture.create<androidx.media3.session.LibraryResult<androidx.media3.common.MediaItem>>()
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val track = libraryRepository.likedOnce().find { it.videoId == mediaId }
+                        ?: historyRepository.allOnce().find { it.videoId == mediaId }
+                    if (track != null) {
+                        res.set(androidx.media3.session.LibraryResult.ofItem(buildTrackMediaItem(track), null))
+                    } else {
+                        res.set(androidx.media3.session.LibraryResult.ofError(androidx.media3.session.SessionError.ERROR_BAD_VALUE))
+                    }
+                } catch (_: Exception) {
+                    res.set(androidx.media3.session.LibraryResult.ofError(androidx.media3.session.SessionError.ERROR_UNKNOWN))
+                }
+            }
+            return res
+        }
+
+        override fun onSetMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: MutableList<androidx.media3.common.MediaItem>,
+            startIndex: Int,
+            startPositionMs: Long
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val res = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+            scope.launch(Dispatchers.IO) {
+                val allTracks = libraryRepository.likedOnce() + historyRepository.allOnce()
+                val tracks = mediaItems.mapNotNull { item ->
+                    val videoId = item.mediaId
+                    allTracks.find { it.videoId == videoId }
+                }
+                if (tracks.isNotEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        val target = tracks.getOrElse(startIndex) { tracks.first() }
+                        queueManager.play(target, tracks)
+                    }
+                }
+                res.set(MediaSession.MediaItemsWithStartPosition(mediaItems, startIndex, startPositionMs))
+            }
+            return res
         }
 
         override fun onCustomCommand(
@@ -869,10 +1015,13 @@ class PlaybackService : MediaSessionService() {
         if (autoPlay) queueManager.setBuffering(true)
         ensureWarmUpTriggered()
         loadJob = scope.launch {
+            val resolveStartTime = System.currentTimeMillis()
             try {
                 val stream = withContext(Dispatchers.IO) {
                     streamResolver.resolve(track.videoId)
                 }
+                diagnosticsTracker.recordResolution(System.currentTimeMillis() - resolveStartTime, success = true)
+                diagnosticsTracker.recordAudioFormat(stream.mimeType)
                 if (!isActive || accountTransitionInProgress || generation != playbackGeneration.get() ||
                     loadingId != track.videoId || loadingGeneration != generation ||
                     queueManager.state.value.current?.videoId != track.videoId
@@ -883,10 +1032,14 @@ class PlaybackService : MediaSessionService() {
                 // The user may have pressed play/pause while the stream was being resolved.
                 val latestState = queueManager.state.value
                 player.playWhenReady = latestState.isPlaying && !latestState.tonearmTransitionPending
+                listeningBehaviorManager.recordPlaybackStart(track)
+                crossfadeController.applyTrackStartFadeIn(player)
                 player.prepare()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
+                diagnosticsTracker.recordResolution(System.currentTimeMillis() - resolveStartTime, success = false)
+                diagnosticsTracker.recordError("RESOLUTION", e.message)
                 if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
                 // Show the reason instead of failing silently. Only move on to the next song when the
                 // person was actually listening: a restored, paused queue must never start by itself.
@@ -1344,6 +1497,13 @@ class PlaybackService : MediaSessionService() {
                 skipped = skipped && !meaningfulCompletion
             )
             if (!appSettings.state.value.pauseListenHistory) {
+                listeningBehaviorManager.recordPlaybackEnd(
+                    track = track,
+                    listenedMs = activeListeningMs,
+                    durationMs = duration.coerceAtLeast(0L),
+                    isCompleted = meaningfulCompletion,
+                    isSkipped = skipped && !meaningfulCompletion
+                )
                 invalidateQueueRankingCache()
                 // This job waits for all previous periodic checkpoints, then writes and uploads the
                 // final cumulative record. Account handoff joins it before clearing Room or changing UID.
@@ -1501,7 +1661,7 @@ class PlaybackService : MediaSessionService() {
         return next
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = mediaSession
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibraryService.MediaLibrarySession = mediaSession
 
     @OptIn(UnstableApi::class)
     override fun onTaskRemoved(rootIntent: Intent?) {

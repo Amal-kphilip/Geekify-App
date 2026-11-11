@@ -138,6 +138,7 @@ class HybridRecommendationPipeline @Inject constructor(
         languageOverrides: Map<String, String>,
         pauseListenHistory: Boolean = false,
         engineDao: RecommendationEngineDao? = null,
+        feedbackDao: com.geekify.android.data.local.RecommendationFeedbackDao? = null,
         nowMs: Long = System.currentTimeMillis(),
         random: Random = Random.Default
     ): HybridPipelineOutput {
@@ -379,15 +380,19 @@ class HybridRecommendationPipeline @Inject constructor(
         val isFallbackModel = activeModelMetadata.isFallback || !activeModelMetadata.isTrained
         val userTowerVector = neuralEngine.computeUserTowerEmbedding(rawUserCompositeVector)
 
-        // 4. Run base Recommender.buildMixes for Control compatibility and base candidate pool
+        // 4. Query user explicit recommendation feedback (hidden tracks, blocked artists, boosts)
+        val hiddenTrackIds = feedbackDao?.getHiddenTrackIdsOnce()?.toSet().orEmpty()
+        val blockedArtists = feedbackDao?.getBlockedArtistsOnce()?.toSet().orEmpty()
+
         val discoveryExclude = (likedTracks + recentTracks + playlistTracks).map { it.videoId }.toMutableSet().apply {
             addAll(frequentSignals.map { it.videoId })
+            addAll(hiddenTrackIds)
         }
         val heavilySkippedIds = sessionSignals
             .filter { it.skipRate >= 0.6 && it.completionRate < 0.35 }
             .map { it.videoId }
             .toSet()
-        val strictExclude = recentTracks.take(5).map { it.videoId }.toSet() + heavilySkippedIds
+        val strictExclude = recentTracks.take(5).map { it.videoId }.toSet() + heavilySkippedIds + hiddenTrackIds
 
         val (baseMixResults, _) = Recommender.buildMixes(
             liked = likedSignals,
@@ -433,6 +438,8 @@ class HybridRecommendationPipeline @Inject constructor(
         for ((vid, track) in allCandidatesById) {
             currentCoroutineContext().ensureActive()
             if (vid in discoveryExclude) continue
+            val artistClean = track.artist.lowercase(Locale.ROOT).trim()
+            if (artistClean in blockedArtists) continue
             val resolved = resolveTrackFeatures(track)
             val cls = resolved.classification
             val audioEmb = resolved.audioEmbedding

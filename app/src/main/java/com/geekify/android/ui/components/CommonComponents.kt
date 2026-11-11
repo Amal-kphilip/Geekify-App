@@ -313,7 +313,11 @@ fun TrackActionsDialog(
     onToggleLike: () -> Unit,
     onAddToQueue: () -> Unit,
     onAddToPlaylist: (String) -> Unit,
-    onCreatePlaylist: (String) -> Unit
+    onCreatePlaylist: (String) -> Unit,
+    onMoreLikeThis: (() -> Unit)? = null,
+    onLessLikeThis: (() -> Unit)? = null,
+    onHideTrack: (() -> Unit)? = null,
+    onBlockArtist: (() -> Unit)? = null
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
 
@@ -358,6 +362,36 @@ fun TrackActionsDialog(
             icon = GeekifyIcons.AddCircleOutline,
             label = "Add to Queue"
         ) { onAddToQueue(); onDismiss() }
+
+        if (onMoreLikeThis != null) {
+            ActionRow(
+                icon = GeekifyIcons.AutoAwesome,
+                label = "More like this"
+            ) { onMoreLikeThis(); onDismiss() }
+        }
+
+        if (onLessLikeThis != null) {
+            ActionRow(
+                icon = GeekifyIcons.Sliders,
+                label = "Less like this"
+            ) { onLessLikeThis(); onDismiss() }
+        }
+
+        if (onHideTrack != null) {
+            ActionRow(
+                icon = GeekifyIcons.Close,
+                label = "Hide this track",
+                iconTint = Color(0xFFFF5252)
+            ) { onHideTrack(); onDismiss() }
+        }
+
+        if (onBlockArtist != null && track.artist.isNotBlank()) {
+            ActionRow(
+                icon = GeekifyIcons.Clear,
+                label = "Don't recommend ${track.artist}",
+                iconTint = Color(0xFFFF5252)
+            ) { onBlockArtist(); onDismiss() }
+        }
 
         Text(
             "Add to playlist",

@@ -86,7 +86,8 @@ abstract class AppModule {
                     MIGRATION_5_6,
                     MIGRATION_6_7,
                     MIGRATION_7_8,
-                    MIGRATION_8_9
+                    MIGRATION_8_9,
+                    com.geekify.android.data.local.MIGRATION_9_10
                 )
                 .build()
 
@@ -100,5 +101,6 @@ abstract class AppModule {
         @Provides fun provideRecentSearchDao(db: GeekifyDatabase): RecentSearchDao = db.recentSearchDao()
         @Provides fun provideRecommendationLogDao(db: GeekifyDatabase): RecommendationLogDao = db.recommendationLogDao()
         @Provides fun provideRecommendationEngineDao(db: GeekifyDatabase): RecommendationEngineDao = db.recommendationEngineDao()
+        @Provides fun provideRecommendationFeedbackDao(db: GeekifyDatabase): com.geekify.android.data.local.RecommendationFeedbackDao = db.recommendationFeedbackDao()
     }
 }

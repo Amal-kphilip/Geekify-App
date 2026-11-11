@@ -32,13 +32,15 @@ data class AudioSettings(
     val speed: Float = 1f,
     val pitch: Float = 1f,
     val skipSilence: Boolean = false,
-    val normalize: Boolean = false
+    val normalize: Boolean = false,
+    val crossfadeSeconds: Int = 0
 ) {
     /** Clamps every value into a safe range, so a corrupt stored value can never produce harsh or invalid audio. */
     fun sanitized(): AudioSettings = copy(
         bandGainsDb = List(EqPresets.BAND_HZ.size) { i -> (bandGainsDb.getOrNull(i) ?: 0f).coerceIn(-MAX_GAIN_DB, MAX_GAIN_DB) },
         speed = speed.coerceIn(MIN_RATE, MAX_RATE),
-        pitch = pitch.coerceIn(MIN_RATE, MAX_RATE)
+        pitch = pitch.coerceIn(MIN_RATE, MAX_RATE),
+        crossfadeSeconds = crossfadeSeconds.coerceIn(0, 12)
     )
 
     companion object {
@@ -80,6 +82,7 @@ class AudioSettingsRepository @Inject constructor(
     private val pitch = floatPreferencesKey("audio_pitch")
     private val skipSilence = booleanPreferencesKey("audio_skip_silence")
     private val normalize = booleanPreferencesKey("audio_normalize")
+    private val crossfade = androidx.datastore.preferences.core.intPreferencesKey("audio_crossfade_sec")
 
     val settings: Flow<AudioSettings> = dataStore.data
         .catch { emit(emptyPreferences()) }
@@ -97,7 +100,8 @@ class AudioSettingsRepository @Inject constructor(
         speed = p[speed] ?: 1f,
         pitch = p[pitch] ?: 1f,
         skipSilence = p[skipSilence] ?: false,
-        normalize = p[normalize] ?: false
+        normalize = p[normalize] ?: false,
+        crossfadeSeconds = p[crossfade] ?: 0
     ).sanitized()
 
     private fun encode(p: MutablePreferences, s: AudioSettings) {
@@ -108,5 +112,6 @@ class AudioSettingsRepository @Inject constructor(
         p[pitch] = s.pitch
         p[skipSilence] = s.skipSilence
         p[normalize] = s.normalize
+        p[crossfade] = s.crossfadeSeconds
     }
 }

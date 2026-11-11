@@ -41,7 +41,7 @@ class DatabaseOptimizationTest {
     }
 
     @Test
-    fun `all migrations from v1 to v9 preserve user library tables and create expected schema elements`() {
+    fun `all migrations from v1 to v10 preserve user library tables and create expected schema elements`() {
         val migrations = listOf(
             MIGRATION_1_2,
             MIGRATION_2_3,
@@ -50,7 +50,8 @@ class DatabaseOptimizationTest {
             MIGRATION_5_6,
             MIGRATION_6_7,
             MIGRATION_7_8,
-            MIGRATION_8_9
+            MIGRATION_8_9,
+            MIGRATION_9_10
         )
         val executedStatements = mutableListOf<String>()
 
@@ -77,6 +78,7 @@ class DatabaseOptimizationTest {
         assertTrue(executedStatements.any { it.contains("CREATE TABLE IF NOT EXISTS `recent_searches`") })
         assertTrue(executedStatements.any { it.contains("CREATE TABLE IF NOT EXISTS `recommendation_impressions`") })
         assertTrue(executedStatements.any { it.contains("CREATE TABLE IF NOT EXISTS `track_features`") })
+        assertTrue(executedStatements.any { it.contains("CREATE TABLE IF NOT EXISTS `user_recommendation_feedback`") })
         // Verify core user tables (liked_tracks, history_tracks, playlists) are never dropped across any migration
         assertTrue(executedStatements.none { it.contains("DROP TABLE `liked_tracks`", ignoreCase = true) })
         assertTrue(executedStatements.none { it.contains("DROP TABLE `history_tracks`", ignoreCase = true) })

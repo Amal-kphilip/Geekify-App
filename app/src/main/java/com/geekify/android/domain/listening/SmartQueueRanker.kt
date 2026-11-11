@@ -26,6 +26,8 @@ data class QueueRankingSignals(
     val playsByTrack: Map<String, Int>,
     val likedIds: Set<String>,
     val likedArtists: Set<String>,
+    val hiddenTrackIds: Set<String> = emptySet(),
+    val blockedArtists: Set<String> = emptySet(),
     val builtAtMs: Long
 ) {
     data class TrackSessionSummary(
@@ -79,6 +81,8 @@ object SmartQueueRanker {
         playCounts: List<PlayStat>,
         likedIds: Set<String>,
         likedArtists: Collection<String>,
+        hiddenTrackIds: Set<String> = emptySet(),
+        blockedArtists: Collection<String> = emptySet(),
         now: Long = System.currentTimeMillis()
     ): QueueRankingSignals {
         val sevenDaysAgo = now - 7L * 24 * 60 * 60_000L
@@ -115,6 +119,10 @@ object SmartQueueRanker {
             .map(::key)
             .filter(String::isNotBlank)
             .toSet()
+        val normalizedBlockedArtists = blockedArtists.asSequence()
+            .map(::key)
+            .filter(String::isNotBlank)
+            .toSet()
 
         return QueueRankingSignals(
             trackStats = trackStats,
@@ -122,6 +130,8 @@ object SmartQueueRanker {
             playsByTrack = playsByTrack,
             likedIds = likedIds,
             likedArtists = normalizedLikedArtists,
+            hiddenTrackIds = hiddenTrackIds,
+            blockedArtists = normalizedBlockedArtists,
             builtAtMs = now
         )
     }
@@ -182,7 +192,14 @@ object SmartQueueRanker {
         upcoming: List<Track>
     ): List<RankedQueueTrack> {
         val alreadyQueued = (listOf(current) + upcoming).map { it.videoId }.toSet()
-        val pool = candidates.distinctBy { it.videoId }.filter { it.videoId !in alreadyQueued }.toMutableList()
+        val pool = candidates.distinctBy { it.videoId }
+            .filter { it.videoId !in alreadyQueued }
+            .filter { it.videoId !in signals.hiddenTrackIds }
+            .filter { track ->
+                val primary = artistNames(track).firstOrNull()?.let(::key).orEmpty()
+                primary !in signals.blockedArtists
+            }
+            .toMutableList()
         if (pool.isEmpty()) return emptyList()
 
         val currentLanguage = Recommender.languageOf(current.title, current.artist)

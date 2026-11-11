@@ -215,6 +215,18 @@ private fun Content(s: AudioSettings, vm: AudioSettingsViewModel) {
             checked = s.normalize,
             onCheckedChange = vm::setNormalize
         )
+        IosSettingsDivider()
+        IosSettingsSliderRow(
+            icon = GeekifyIcons.GraphicEq,
+            tileColor = IosPalette.systemIndigo,
+            title = "Intelligent Crossfade",
+            valueLabel = if (s.crossfadeSeconds == 0) "Off" else "${s.crossfadeSeconds}s",
+            value = s.crossfadeSeconds.toFloat(),
+            valueRange = 0f..12f,
+            activeColor = IosPalette.systemIndigo,
+            onValueLabelClick = if (s.crossfadeSeconds > 0) ({ vm.setCrossfadeSeconds(0) }) else null,
+            onValueChange = { vm.setCrossfadeSeconds(kotlin.math.round(it).toInt()) }
+        )
     }
 
     Spacer(Modifier.height(24.dp))

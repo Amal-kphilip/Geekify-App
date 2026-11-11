@@ -601,6 +601,7 @@ fun MainScreen(
         }
 
         actionTrack?.let { track ->
+            val scope = rememberCoroutineScope()
             TrackActionsDialog(
                 track = track,
                 liked = likedTracks.any { it.videoId == track.videoId },
@@ -609,7 +610,27 @@ fun MainScreen(
                 onToggleLike = { libraryViewModel.toggleLike(track) },
                 onAddToQueue = { playerViewModel.addToQueue(track) },
                 onAddToPlaylist = { playlistId -> libraryViewModel.addToPlaylist(playlistId, track) },
-                onCreatePlaylist = { name -> libraryViewModel.createPlaylistWithTrack(name, track) }
+                onCreatePlaylist = { name -> libraryViewModel.createPlaylistWithTrack(name, track) },
+                onMoreLikeThis = {
+                    scope.launch {
+                        libraryViewModel.recordFeedback(track, com.geekify.android.data.local.FeedbackAction.MORE_LIKE_THIS)
+                    }
+                },
+                onLessLikeThis = {
+                    scope.launch {
+                        libraryViewModel.recordFeedback(track, com.geekify.android.data.local.FeedbackAction.LESS_LIKE_THIS)
+                    }
+                },
+                onHideTrack = {
+                    scope.launch {
+                        libraryViewModel.recordFeedback(track, com.geekify.android.data.local.FeedbackAction.HIDE_TRACK)
+                    }
+                },
+                onBlockArtist = {
+                    scope.launch {
+                        libraryViewModel.recordArtistFeedback(track.artist, com.geekify.android.data.local.FeedbackAction.BLOCK_ARTIST)
+                    }
+                }
             )
         }
 

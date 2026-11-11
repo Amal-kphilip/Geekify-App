@@ -80,6 +80,7 @@ private enum class SettingsSubPage(val title: String) {
     NOTIFICATIONS("Notifications"),
     PRIVACY("Privacy & security"),
     STORAGE("Storage & backup"),
+    DIAGNOSTICS("Playback diagnostics"),
     ABOUT("About Geekify")
 }
 
@@ -306,6 +307,15 @@ fun SettingsScreen(
                         onClick = onHealthClick
                     ),
                     SettingsRootItem(
+                        key = "diagnostics",
+                        title = "Playback Diagnostics",
+                        subtitle = "Real-time stream resolution & reliability metrics",
+                        icon = GeekifyIcons.Speed,
+                        tint = IosPalette.systemGreen,
+                        subPage = SettingsSubPage.DIAGNOSTICS,
+                        onClick = { openSubPage(SettingsSubPage.DIAGNOSTICS, isSplitLayout) }
+                    ),
+                    SettingsRootItem(
                         key = "about",
                         title = "About & Software Update",
                         subtitle = "Version info, updates & open-source links",
@@ -380,6 +390,8 @@ fun SettingsScreen(
                         openBackupLauncher.launch(arrayOf("application/json", "*/*"))
                     }
                 )
+
+                SettingsSubPage.DIAGNOSTICS -> PlaybackDiagnosticsSubPage()
 
                 SettingsSubPage.ABOUT -> AboutAndUpdateSubPage(
                     updateCacheBytes = storageStats.updateCacheBytes,
@@ -1878,4 +1890,77 @@ private fun formatBytes(bytes: Long): String {
     if (bytes <= 0L) return "0 MB"
     val mb = bytes.toDouble() / (1024.0 * 1024.0)
     return if (mb < 0.1) "< 0.1 MB" else "%.1f MB".format(Locale.US, mb)
+}
+
+@Composable
+private fun PlaybackDiagnosticsSubPage() {
+    val context = LocalContext.current
+    val diagnosticsTracker = remember {
+        val entryPoint = dagger.hilt.android.EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            com.geekify.android.di.DiagnosticsEntryPoint::class.java
+        )
+        entryPoint.diagnosticsTracker()
+    }
+    val snapshot by diagnosticsTracker.snapshot.collectAsState()
+    var copiedReport by remember { mutableStateOf(false) }
+
+    IosSettingsSection(title = "Stream resolution health") {
+        IosSettingsRow(
+            icon = GeekifyIcons.Speed,
+            tileColor = IosPalette.systemGreen,
+            title = "Resolution Success Rate",
+            value = "${"%.1f".format(snapshot.resolutionSuccessRate)}%",
+            subtitle = "${snapshot.successfulResolutions} successful / ${snapshot.totalResolutions} total"
+        )
+        IosSettingsDivider()
+        IosSettingsRow(
+            icon = GeekifyIcons.Timer,
+            tileColor = IosPalette.systemBlue,
+            title = "Avg Resolution Latency",
+            value = "${snapshot.avgResolutionLatencyMs} ms",
+            subtitle = "Time to resolve streaming media URL"
+        )
+        IosSettingsDivider()
+        IosSettingsRow(
+            icon = GeekifyIcons.Public,
+            tileColor = IosPalette.systemPurple,
+            title = "Network Condition",
+            value = snapshot.networkCondition
+        )
+    }
+
+    Spacer(Modifier.height(24.dp))
+    IosSettingsSection(title = "Audio pipeline & stability") {
+        IosSettingsRow(
+            icon = GeekifyIcons.Audiotrack,
+            tileColor = IosPalette.systemOrange,
+            title = "Active Codec & Format",
+            value = snapshot.audioFormat
+        )
+        IosSettingsDivider()
+        IosSettingsRow(
+            icon = GeekifyIcons.ErrorOutline,
+            tileColor = IosPalette.systemRed,
+            title = "Playback Stalls",
+            value = "${snapshot.stallCount}",
+            subtitle = "${snapshot.totalBufferingDurationMs} ms total buffering duration"
+        )
+    }
+
+    Spacer(Modifier.height(24.dp))
+    IosSettingsSection(title = "Scrubbed diagnostics report") {
+        IosSettingsRow(
+            icon = GeekifyIcons.UploadFile,
+            tileColor = IosPalette.systemTeal,
+            title = if (copiedReport) "Copied to Clipboard!" else "Copy Diagnostic Report",
+            subtitle = "Privacy-safe report with all URLs, tokens, and PII redacted",
+            onClick = {
+                val report = diagnosticsTracker.generateScrubbedReport()
+                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("Geekify Diagnostics", report))
+                copiedReport = true
+            }
+        )
+    }
 }
