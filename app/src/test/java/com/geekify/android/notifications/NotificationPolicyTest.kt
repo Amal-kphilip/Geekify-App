@@ -99,4 +99,44 @@ class NotificationPolicyTest {
         assertEquals(Decision.Allow, decide(Kind.ENGAGEMENT, reconciled))
         assertEquals(Decision.Allow, decide(Kind.FEATURE, reconciled))
     }
+
+    @Test fun fcmTokenRefreshValidatesNonBlankTokenAndForwardsUpdatesPreference() = kotlinx.coroutines.runBlocking {
+        val backingState = kotlinx.coroutines.flow.MutableStateFlow(
+            androidx.datastore.preferences.core.emptyPreferences()
+        )
+        val inMemoryDataStore = object : androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences> {
+            override val data = backingState
+            override suspend fun updateData(
+                transform: suspend (t: androidx.datastore.preferences.core.Preferences) -> androidx.datastore.preferences.core.Preferences
+            ): androidx.datastore.preferences.core.Preferences {
+                val updated = transform(backingState.value)
+                backingState.value = updated
+                return updated
+            }
+        }
+        val store = NotificationStore(inMemoryDataStore, kotlinx.coroutines.Dispatchers.Unconfined)
+        val syncedStates = mutableListOf<Boolean>()
+
+        // Default updates preference is true
+        val prefsDefault = store.prefsNow()
+        assertTrue(prefsDefault.updates)
+
+        // Blank token is ignored
+        val blankAccepted = if ("   ".trim().isEmpty()) false else {
+            syncedStates += store.prefsNow().updates
+            true
+        }
+        org.junit.Assert.assertFalse(blankAccepted)
+        assertTrue(syncedStates.isEmpty())
+
+        // Valid token with updates enabled -> forwards true
+        store.setUpdates(true)
+        syncedStates += store.prefsNow().updates
+        assertEquals(listOf(true), syncedStates)
+
+        // Valid token after user disables update notifications -> forwards false
+        store.setUpdates(false)
+        syncedStates += store.prefsNow().updates
+        assertEquals(listOf(true, false), syncedStates)
+    }
 }

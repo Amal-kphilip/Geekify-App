@@ -52,6 +52,7 @@ class StreamResolver internal constructor(
     private companion object {
         const val MAX_CACHE_ENTRIES = 500
         const val MAX_URL_METADATA_ENTRIES = 500
+        const val MAX_CONCURRENT_PREFETCHES = 2
     }
 
     private val lock = Any()
@@ -60,6 +61,9 @@ class StreamResolver internal constructor(
             size > MAX_CACHE_ENTRIES
     }
     private val inFlight = HashMap<String, Deferred<ResolvedStream>>()
+    private val prefetchJobs = HashMap<String, Job>()
+    private val prefetchOnlyInFlight = HashSet<String>()
+    private var lastPrefetchSignature: List<String> = emptyList()
     private val generations = HashMap<String, Long>()
     private val byUrl = object : LinkedHashMap<String, ResolvedStream>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ResolvedStream>): Boolean =
@@ -67,9 +71,20 @@ class StreamResolver internal constructor(
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    override suspend fun resolve(videoId: String, forceRefresh: Boolean): ResolvedStream {
+    override suspend fun resolve(videoId: String, forceRefresh: Boolean): ResolvedStream =
+        resolveInternal(videoId = videoId, forceRefresh = forceRefresh, initiatedByPrefetch = false)
+
+    private suspend fun resolveInternal(
+        videoId: String,
+        forceRefresh: Boolean,
+        initiatedByPrefetch: Boolean
+    ): ResolvedStream {
         val now = clock()
         val job: Deferred<ResolvedStream> = synchronized(lock) {
+            if (!initiatedByPrefetch) {
+                // Promote any in-flight prefetch to a foreground playback resolution so queue changes never cancel it.
+                prefetchOnlyInFlight.remove(videoId)
+            }
             if (!forceRefresh) {
                 val cached = cache[videoId]
                 if (cached != null && cached.expiresAt > now) {
@@ -84,9 +99,14 @@ class StreamResolver internal constructor(
             } else {
                 val previous = cache.remove(videoId)
                 previous?.let { byUrl.remove(it.url) }
+                prefetchJobs.remove(videoId)?.cancel()
+                prefetchOnlyInFlight.remove(videoId)
                 inFlight.remove(videoId)?.cancel()
             }
 
+            if (initiatedByPrefetch) {
+                prefetchOnlyInFlight.add(videoId)
+            }
             val generation = (generations[videoId] ?: 0L) + 1L
             generations[videoId] = generation
             val created = scope.async(start = CoroutineStart.LAZY) {
@@ -104,7 +124,10 @@ class StreamResolver internal constructor(
                 } finally {
                     val completedJob = currentCoroutineContext()[Job]
                     synchronized(lock) {
-                        if (inFlight[videoId] === completedJob) inFlight.remove(videoId)
+                        if (inFlight[videoId] === completedJob) {
+                            inFlight.remove(videoId)
+                            prefetchOnlyInFlight.remove(videoId)
+                        }
                     }
                 }
             }
@@ -117,25 +140,67 @@ class StreamResolver internal constructor(
 
     override fun prefetch(videoIds: List<String>) {
         val now = clock()
+        val normalizedTargets = videoIds.asSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .take(MAX_CONCURRENT_PREFETCHES)
+            .toList()
+        val targetSet = normalizedTargets.toSet()
+
         val toPrefetch = synchronized(lock) {
-            videoIds.asSequence()
-                .map { it.trim() }
-                .filter { it.isNotBlank() }
-                .distinct()
-                .filter { id ->
-                    val cached = cache[id]
-                    val validCached = cached != null && cached.expiresAt > now
-                    val activeInFlight = inFlight[id]?.isActive == true
-                    !validCached && !activeInFlight
+            // Cancel obsolete prefetches for tracks no longer in the upcoming window
+            val obsoleteIds = prefetchJobs.keys.filter { it !in targetSet }
+            for (obsoleteId in obsoleteIds) {
+                prefetchJobs.remove(obsoleteId)?.cancel()
+                if (prefetchOnlyInFlight.remove(obsoleteId)) {
+                    inFlight.remove(obsoleteId)?.cancel()
+                    generations[obsoleteId] = (generations[obsoleteId] ?: 0L) + 1L
                 }
-                .toList()
+            }
+
+            if (normalizedTargets == lastPrefetchSignature && normalizedTargets.all { id ->
+                    val cached = cache[id]
+                    (cached != null && cached.expiresAt > now) || inFlight[id]?.isActive == true
+                }
+            ) {
+                return
+            }
+            lastPrefetchSignature = normalizedTargets
+
+            normalizedTargets.filter { id ->
+                val cached = cache[id]
+                val validCached = cached != null && cached.expiresAt > now
+                val activeInFlight = inFlight[id]?.isActive == true
+                !validCached && !activeInFlight
+            }
         }
-        toPrefetch.forEach { id -> scope.launch { runCatching { resolve(id) } } }
+        toPrefetch.forEach { id ->
+            val job = scope.launch {
+                try {
+                    runCatching {
+                        resolveInternal(videoId = id, forceRefresh = false, initiatedByPrefetch = true)
+                    }
+                } finally {
+                    val currentJob = currentCoroutineContext()[Job]
+                    synchronized(lock) {
+                        if (prefetchJobs[id] === currentJob) {
+                            prefetchJobs.remove(id)
+                        }
+                    }
+                }
+            }
+            synchronized(lock) {
+                prefetchJobs[id] = job
+            }
+        }
     }
 
     override fun invalidate(videoId: String) {
         synchronized(lock) {
             cache.remove(videoId)?.let { byUrl.remove(it.url) }
+            prefetchJobs.remove(videoId)?.cancel()
+            prefetchOnlyInFlight.remove(videoId)
             inFlight.remove(videoId)?.cancel()
             generations[videoId] = (generations[videoId] ?: 0L) + 1L
         }
@@ -145,6 +210,10 @@ class StreamResolver internal constructor(
         synchronized(lock) {
             cache.clear()
             byUrl.clear()
+            prefetchJobs.values.forEach { it.cancel() }
+            prefetchJobs.clear()
+            prefetchOnlyInFlight.clear()
+            lastPrefetchSignature = emptyList()
             inFlight.values.forEach { it.cancel() }
             inFlight.clear()
             generations.keys.toList().forEach { id ->
@@ -157,6 +226,8 @@ class StreamResolver internal constructor(
         val failed = synchronized(lock) {
             val stream = cache.remove(videoId)
             stream?.let { byUrl.remove(it.url) }
+            prefetchJobs.remove(videoId)?.cancel()
+            prefetchOnlyInFlight.remove(videoId)
             inFlight.remove(videoId)?.cancel()
             generations[videoId] = (generations[videoId] ?: 0L) + 1L
             stream

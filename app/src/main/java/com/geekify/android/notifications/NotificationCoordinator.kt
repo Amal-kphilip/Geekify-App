@@ -307,10 +307,16 @@ class NotificationCoordinator @Inject constructor(
         token: String,
         syncTopicSubscription: (updatesEnabled: Boolean) -> Unit
     ): Boolean {
-        if (token.isBlank()) return false
+        val normalizedToken = token.trim()
+        if (normalizedToken.isEmpty()) return false
         val prefs = store.prefsNow()
         syncTopicSubscription(prefs.updates)
         return true
+    }
+
+    suspend fun syncTopicSubscription(sync: (updatesEnabled: Boolean) -> Unit) {
+        val prefs = store.prefsNow()
+        sync(prefs.updates)
     }
 
     /** Called when the app starts or package is replaced: if the user has installed the announced version, its notification must go away. */

@@ -286,6 +286,97 @@ class SearchViewModelTest {
         assertEquals(listOf("rec_1"), vm.uiState.value.response?.songs?.map { it.videoId })
     }
 
+    @Test
+    fun `tab change during pagination and repeated loadMore calls prevent duplicate or stale page merges`() = runTest(testDispatcher) {
+        var continuationCallCount = 0
+        val paginationGate = CompletableDeferred<SearchResponse>()
+        val fakeSource = ControlledMusicSource(
+            customSearchHandler = { query, type ->
+                MusicResult.Success(
+                    SearchResponse(
+                        query = query,
+                        songs = listOf(Track("${query}_${type?.name ?: "ALL"}_1", "$query Song", "Artist")),
+                        continuation = "cont_${type?.name ?: "ALL"}"
+                    )
+                )
+            },
+            customContinuationHandler = { token ->
+                continuationCallCount++
+                if (token == "cont_ALL") {
+                    MusicResult.Success(paginationGate.await())
+                } else {
+                    MusicResult.Success(
+                        SearchResponse(
+                            query = "Numb",
+                            songs = listOf(Track("numb_songs_page2", "Numb Song Page 2", "Artist")),
+                            continuation = null
+                        )
+                    )
+                }
+            }
+        )
+        val vm = createViewModel(fakeSource)
+
+        vm.onSubmit("Numb")
+        advanceUntilIdle()
+        assertEquals(listOf("Numb_ALL_1"), vm.uiState.value.response?.songs?.map { it.videoId })
+
+        // Trigger loadMore three times rapidly -> only 1 continuation call should be made
+        vm.loadMore()
+        vm.loadMore()
+        vm.loadMore()
+        runCurrent()
+        assertEquals(1, continuationCallCount)
+        assertTrue(vm.uiState.value.isLoadingMore)
+
+        // Switch tab to "Songs" while "All" pagination is still in-flight
+        vm.onTabSelected("Songs")
+        advanceUntilIdle()
+        assertEquals("Songs", vm.uiState.value.selectedTab)
+        assertFalse(vm.uiState.value.isLoadingMore)
+        assertEquals(listOf("Numb_SONG_1"), vm.uiState.value.response?.songs?.map { it.videoId })
+
+        // Complete stale "All" tab pagination -> must not merge into "Songs" tab results
+        paginationGate.complete(
+            SearchResponse(
+                query = "Numb",
+                songs = listOf(Track("stale_all_page2", "Numb Stale Page 2", "Artist")),
+                continuation = null
+            )
+        )
+        advanceUntilIdle()
+        assertEquals(listOf("Numb_SONG_1"), vm.uiState.value.response?.songs?.map { it.videoId })
+    }
+
+    @Test
+    fun `search deduplication preserves live remix acoustic instrumental and alternate edits while collapsing duplicate official versions`() {
+        val tracks = listOf(
+            Track("v_studio", "Starboy", "The Weeknd", album = "Starboy", durationSeconds = 230),
+            Track("v_official_vid", "Starboy (Official Video)", "The Weeknd", durationSeconds = 230),
+            Track("v_lyric_vid", "Starboy (Lyric Video)", "The Weeknd", durationSeconds = 230),
+            Track("v_live", "Starboy (Live at VEVO)", "The Weeknd", durationSeconds = 240),
+            Track("v_remix", "Starboy (Kygo Remix)", "The Weeknd", durationSeconds = 245),
+            Track("v_acoustic", "Starboy (Acoustic Version)", "The Weeknd", durationSeconds = 215),
+            Track("v_instrumental", "Starboy (Instrumental)", "The Weeknd", durationSeconds = 230),
+            Track("v_edit", "Starboy (Radio Edit)", "The Weeknd", durationSeconds = 200)
+        )
+
+        val ranked = SearchRelevance.rankTracks("Starboy", tracks)
+        val ids = ranked.map { it.videoId }.toSet()
+
+        // Studio + Official Video + Lyric Video collapse to the highest-scored studio version
+        assertTrue(ids.contains("v_studio"))
+        assertFalse(ids.contains("v_official_vid"))
+        assertFalse(ids.contains("v_lyric_vid"))
+
+        // Genuinely distinct recording variants are all preserved
+        assertTrue(ids.contains("v_live"))
+        assertTrue(ids.contains("v_remix"))
+        assertTrue(ids.contains("v_acoustic"))
+        assertTrue(ids.contains("v_instrumental"))
+        assertTrue(ids.contains("v_edit"))
+    }
+
     private fun createViewModel(
         musicSource: MusicSource,
         likedDao: FakeLikedDao = FakeLikedDao()
@@ -368,6 +459,22 @@ class SearchViewModelTest {
         }
         override suspend fun allVideoIdsOnce(): List<String> = emptyList()
         override fun observeVideoIds(): Flow<List<String>> = MutableStateFlow(emptyList())
+        override suspend fun artistProjectionsOnce(limit: Int): List<LikedArtistProjection> =
+            listOf(
+                LikedArtistProjection(
+                    artist = "Vijay Yesudas, The Weeknd",
+                    artists = listOf(ArtistRef("Vijay Yesudas"), ArtistRef("The Weeknd"))
+                )
+            )
+        override fun observeArtistProjections(limit: Int): Flow<List<LikedArtistProjection>> =
+            MutableStateFlow(
+                listOf(
+                    LikedArtistProjection(
+                        artist = "Vijay Yesudas, The Weeknd",
+                        artists = listOf(ArtistRef("Vijay Yesudas"), ArtistRef("The Weeknd"))
+                    )
+                )
+            )
         override suspend fun distinctArtistsOnce(limit: Int): List<String> = artistsFlow.value
         override fun observeDistinctArtists(limit: Int): Flow<List<String>> = artistsFlow
         override suspend fun searchLiked(query: String, limit: Int): List<LikedTrackEntity> = emptyList()

@@ -504,12 +504,17 @@ class PlaybackService : MediaSessionService() {
             if (player.currentMediaItem?.mediaId != track.videoId) {
                 // During a visible vinyl transition, the new item is prepared but held until the stylus lands.
                 loadAndPlay(track, autoPlay = shouldPlay)
-            } else if (shouldPlay && !player.isPlaying && player.playbackState != Player.STATE_BUFFERING) {
-                // Repeat-one / replay after the end of the queue: an ended player must be rewound first.
-                if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
-                player.play()
-            } else if (!shouldPlay && player.playWhenReady) {
-                player.pause()
+            } else {
+                if (shouldPlay && !player.isPlaying && player.playbackState != Player.STATE_BUFFERING) {
+                    // Repeat-one / replay after the end of the queue: an ended player must be rewound first.
+                    if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
+                    player.play()
+                } else if (!shouldPlay && player.playWhenReady) {
+                    player.pause()
+                }
+                if (state.isPlaying) {
+                    startPrefetch(track.videoId)
+                }
             }
         }.launchIn(scope)
     }
@@ -1132,10 +1137,14 @@ class PlaybackService : MediaSessionService() {
             s.queue.getOrNull(s.index + 1)?.videoId?.let { add(it) }
             s.queue.getOrNull(s.index + 2)?.videoId?.let { add(it) }
         }.filter { it != currentId }.distinct()
-        if (nextIds.isEmpty() || nextIds == lastPrefetchedVideoIds) return
+        if (nextIds == lastPrefetchedVideoIds) return
         lastPrefetchedVideoIds = nextIds
-        ensureWarmUpTriggered()
         prefetchJob?.cancel()
+        if (nextIds.isEmpty()) {
+            streamResolver.prefetch(emptyList())
+            return
+        }
+        ensureWarmUpTriggered()
         prefetchJob = scope.launch(Dispatchers.IO) {
             if (accountTransitionInProgress || generation != playbackGeneration.get()) return@launch
             streamResolver.prefetch(nextIds)
@@ -1149,17 +1158,19 @@ class PlaybackService : MediaSessionService() {
                 return cached
             }
         }
-        val (sessions, plays, liked) = withContext(Dispatchers.IO) {
+        val (sessions, plays, likedPair) = withContext(Dispatchers.IO) {
             val s = listeningStatsRepository.latest(500)
             val p = historyRepository.topPlayed(250)
-            val l = libraryRepository.likedOnce()
-            Triple(s, p, l)
+            val ids = likedVideoIds.ifEmpty { libraryRepository.likedVideoIdsOnce() }
+            val artists = libraryRepository.distinctLikedArtistsOnce(150)
+            Triple(s, p, ids to artists)
         }
         return withContext(Dispatchers.Default) {
             SmartQueueRanker.buildSignals(
                 sessions = sessions,
                 playCounts = plays,
-                likedTracks = liked,
+                likedIds = likedPair.first,
+                likedArtists = likedPair.second,
                 now = now
             )
         }.also { cachedQueueRankingSignals = it }

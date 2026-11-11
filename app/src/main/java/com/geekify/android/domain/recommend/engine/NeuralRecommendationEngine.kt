@@ -65,24 +65,37 @@ data class TrainingExample(
 )
 
 @Serializable
+enum class NeuralModelState {
+    UNTRAINED_FALLBACK,
+    TRAINED,
+    INVALID,
+    TRAINING_REQUIRED
+}
+
+@Serializable
 data class ModelVersionMetadata(
     val modelVersion: String,
     val trainedAtMs: Long,
     val trainSamples: Int,
-    val validationLoss: Double,
-    val validationAccuracy: Double,
-    val isFallback: Boolean = false
+    val validationLoss: Double? = null,
+    val validationAccuracy: Double? = null,
+    val isFallback: Boolean = false,
+    val modelState: NeuralModelState = if (isFallback || trainSamples <= 0 || trainedAtMs <= 0L) {
+        NeuralModelState.UNTRAINED_FALLBACK
+    } else {
+        NeuralModelState.TRAINED
+    }
 ) {
     /** True only when the model has been trained on real chronological examples and passed validation. */
     val isTrained: Boolean
-        get() = !isFallback && trainSamples > 0 && trainedAtMs > 0L
+        get() = modelState == NeuralModelState.TRAINED && !isFallback && trainSamples > 0 && trainedAtMs > 0L
 
     /** Explicit human-readable status that never labels an untrained fallback as a trained neural model. */
     val statusSummary: String
         get() = if (isTrained) {
             "TRAINED_NEURAL_MODEL(version=$modelVersion, samples=$trainSamples)"
         } else {
-            "UNTRAINED_FALLBACK_PRIOR(version=$modelVersion)"
+            "UNTRAINED_FALLBACK_PRIOR(state=$modelState, version=$modelVersion)"
         }
 }
 
@@ -347,9 +360,10 @@ class NeuralRecommendationEngine @Inject constructor() {
                 modelVersion = newVersionTag,
                 trainedAtMs = System.currentTimeMillis(),
                 trainSamples = trainSet.size,
-                validationLoss = 0.0,
-                validationAccuracy = 0.0,
-                isFallback = false
+                validationLoss = null,
+                validationAccuracy = null,
+                isFallback = false,
+                modelState = NeuralModelState.TRAINING_REQUIRED
             ),
             userTowerDiag = uDiag,
             itemTowerDiag = iDiag,
@@ -360,15 +374,19 @@ class NeuralRecommendationEngine @Inject constructor() {
         )
 
         val candidateValMetrics = evaluateExamples(candidateWeights, valSet)
+        val isCandidateValid = !candidateValMetrics.first.isNaN() &&
+            candidateValMetrics.first.isFinite() &&
+            candidateValMetrics.second.isFinite()
         val finalizedCandidate = candidateWeights.copy(
             version = candidateWeights.version.copy(
-                validationLoss = candidateValMetrics.first,
-                validationAccuracy = candidateValMetrics.second
+                validationLoss = if (isCandidateValid) candidateValMetrics.first else null,
+                validationAccuracy = if (isCandidateValid) candidateValMetrics.second else null,
+                modelState = if (isCandidateValid) NeuralModelState.TRAINED else NeuralModelState.INVALID
             )
         )
 
         // Validation gate: promote only if loss does not degrade beyond tolerance and weights are finite
-        if (!candidateValMetrics.first.isNaN() && candidateValMetrics.first <= baselineValMetrics.first + 0.05) {
+        if (isCandidateValid && candidateValMetrics.first <= baselineValMetrics.first + 0.05) {
             modelHistory.addLast(activeModel)
             while (modelHistory.size > 5) modelHistory.removeFirst()
             activeModel = finalizedCandidate
@@ -458,9 +476,10 @@ class NeuralRecommendationEngine @Inject constructor() {
                 modelVersion = "v2.4-neural-base",
                 trainedAtMs = 0L,
                 trainSamples = 0,
-                validationLoss = 0.0,
-                validationAccuracy = 0.0,
-                isFallback = true
+                validationLoss = null,
+                validationAccuracy = null,
+                isFallback = true,
+                modelState = NeuralModelState.UNTRAINED_FALLBACK
             ),
             userTowerDiag = FloatArray(TOWER_DIM) { 1.0f },
             itemTowerDiag = FloatArray(TOWER_DIM) { 1.0f },

@@ -20,6 +20,13 @@ class NotificationWorker(context: Context, params: WorkerParameters) : Coroutine
         val entry = EntryPointAccessors.fromApplication(applicationContext, NotificationEntryPoint::class.java)
         return try {
             val coordinator = entry.coordinator()
+            coordinator.syncTopicSubscription { updatesEnabled ->
+                UpdatePushSubscription.sync(
+                    context = applicationContext,
+                    enabled = updatesEnabled,
+                    scheduleFallbackOnFailure = false
+                )
+            }
             coordinator.runOnce()
             coordinator.nextFollowupDelayMs()?.let { delayMs ->
                 scheduleFollowup(applicationContext, delayMs)
@@ -36,6 +43,7 @@ class NotificationWorker(context: Context, params: WorkerParameters) : Coroutine
         const val UNIQUE_NAME = "geekify_notification_check"
         const val KICK_NAME = "geekify_notification_kick"
         const val ENGAGEMENT_FOLLOWUP_NAME = "geekify_engagement_followup"
+        const val TOPIC_SYNC_FALLBACK_NAME = "geekify_fcm_topic_sync"
         const val SCHEDULE_INTERVAL_HOURS = 12L
 
         private val periodicEnqueued = AtomicBoolean(false)
@@ -72,6 +80,20 @@ class NotificationWorker(context: Context, params: WorkerParameters) : Coroutine
                 ExistingWorkPolicy.REPLACE,
                 followupRequest
             )
+        }
+
+        fun scheduleTopicSyncFallback(context: Context) {
+            runCatching {
+                val request = OneTimeWorkRequestBuilder<NotificationWorker>()
+                    .setConstraints(networkConstraints)
+                    .setInitialDelay(15, TimeUnit.SECONDS)
+                    .build()
+                WorkManager.getInstance(context).enqueueUniqueWork(
+                    TOPIC_SYNC_FALLBACK_NAME,
+                    ExistingWorkPolicy.KEEP,
+                    request
+                )
+            }
         }
 
         /**

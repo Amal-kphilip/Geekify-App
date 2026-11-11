@@ -193,6 +193,32 @@ object SearchRelevance {
     }
 
     /**
+     * Identifies genuinely distinct recording variants (live, remix, acoustic, instrumental,
+     * slowed/reverb, cover, or alternate edits) so they are never collapsed with the studio original.
+     */
+    fun recordingVariantTag(title: String): String {
+        val lower = title.lowercase(Locale.ROOT)
+        val tags = mutableListOf<String>()
+        if (Regex("\\b(live|concert|session|unplugged\\s+live)\\b").containsMatchIn(lower)) tags += "live"
+        if (Regex("\\b(remix|rework|bootleg|vip\\s+mix|club\\s+mix|extended\\s+mix|dub\\s+mix)\\b").containsMatchIn(lower)) tags += "remix"
+        if (Regex("\\b(acoustic|unplugged|stripped)\\b").containsMatchIn(lower)) tags += "acoustic"
+        if (Regex("\\b(instrumental|karaoke|backing\\s+track)\\b").containsMatchIn(lower)) tags += "instrumental"
+        if (Regex("\\b(slowed|reverb|sped\\s+up|nightcore)\\b").containsMatchIn(lower)) tags += "slowed"
+        if (Regex("\\b(cover|tribute)\\b").containsMatchIn(lower)) tags += "cover"
+        if (Regex("\\b(radio\\s+edit|alternate\\s+edit|vip\\s+edit|remaster|remastered|deluxe\\s+version|demo|reprise)\\b").containsMatchIn(lower)) tags += "edit"
+        return if (tags.isEmpty()) "studio" else tags.joinToString("+")
+    }
+
+    private fun dedupSignature(track: Track): String? {
+        val clean = cleanTitle(track.title)
+        val normalizedTitle = normalize(clean)
+        val normalizedArtist = normalize(track.artist)
+        if (normalizedTitle.isBlank() || normalizedTitle == "unknown") return null
+        val variantTag = recordingVariantTag(track.title)
+        return "$normalizedTitle::$normalizedArtist::$variantTag"
+    }
+
+    /**
      * Re-ranks tracks, boosts official audio, applies demotions, and deduplicates identical song versions.
      */
     fun rankTracks(
@@ -222,32 +248,26 @@ object SearchRelevance {
         ).map { it.first.value }
 
         // Deduplicate the same song across versions (e.g. "Espresso" and "Espresso (Official Video)")
-        // while preserving distinct songs or identical test tracks without version markers.
+        // while preserving distinct recordings (live, remix, acoustic, instrumental, alternate edits)
+        // and identical test tracks without version markers.
         val signaturesWithVersions = uniqueTracks.filter { hasVersionMarker(it.title) }
-            .map { "${normalize(cleanTitle(it.title))}::${normalize(it.artist)}" }
+            .mapNotNull { dedupSignature(it) }
             .toSet()
 
         val seenSignatures = mutableSetOf<String>()
         return sorted.filter { track ->
-            val clean = cleanTitle(track.title)
-            val normalizedTitle = normalize(clean)
-            val normalizedArtist = normalize(track.artist)
-            if (normalizedTitle.isBlank() || normalizedTitle == "unknown") {
-                true
+            val signature = dedupSignature(track) ?: return@filter true
+            if (signaturesWithVersions.contains(signature)) {
+                seenSignatures.add(signature)
             } else {
-                val signature = "$normalizedTitle::$normalizedArtist"
-                if (signaturesWithVersions.contains(signature)) {
-                    seenSignatures.add(signature)
-                } else {
-                    true
-                }
+                true
             }
         }
     }
 
     /**
      * Merges paginated tracks into existing results while preventing duplicate videoIds
-     * and duplicate version-marked song signatures.
+     * and duplicate version-marked song signatures, while preserving distinct recording variants.
      */
     fun mergePaginatedTracks(
         query: String,
@@ -258,15 +278,11 @@ object SearchRelevance {
         if (incoming.isEmpty()) return existing
         val existingIds = existing.asSequence().map { it.videoId }.toHashSet()
         val existingSignatures = existing.asSequence()
-            .mapNotNull { track ->
-                val normTitle = normalize(cleanTitle(track.title))
-                val normArtist = normalize(track.artist)
-                if (normTitle.isBlank() || normTitle == "unknown") null else "$normTitle::$normArtist"
-            }
+            .mapNotNull { dedupSignature(it) }
             .toHashSet()
         val existingHasVersionBySig = existing.asSequence()
             .filter { hasVersionMarker(it.title) }
-            .map { "${normalize(cleanTitle(it.title))}::${normalize(it.artist)}" }
+            .mapNotNull { dedupSignature(it) }
             .toHashSet()
 
         val rankedIncoming = rankTracks(query, incoming.filterNot { it.videoId in existingIds }, favoriteArtists)
@@ -275,10 +291,8 @@ object SearchRelevance {
 
         for (track in rankedIncoming) {
             if (!existingIds.add(track.videoId)) continue
-            val normTitle = normalize(cleanTitle(track.title))
-            val normArtist = normalize(track.artist)
-            if (normTitle.isNotBlank() && normTitle != "unknown") {
-                val sig = "$normTitle::$normArtist"
+            val sig = dedupSignature(track)
+            if (sig != null) {
                 val hasVersion = hasVersionMarker(track.title) || sig in existingHasVersionBySig
                 if (hasVersion && sig in existingSignatures) {
                     continue

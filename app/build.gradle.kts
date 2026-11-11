@@ -30,12 +30,29 @@ val resolvedVersionCode: Int = semanticVersionCode(resolvedVersionName)
     ?: providers.gradleProperty("appVersionCode").orNull?.toIntOrNull()
     ?: 100
 
-val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystorePropertiesFilePath = providers.gradleProperty("geekify.keystorePropertiesFile").orNull ?: "keystore.properties"
+val keystorePropertiesFile = rootProject.file(keystorePropertiesFilePath)
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.isFile) {
         keystorePropertiesFile.inputStream().use { load(it) }
     }
 }
+
+fun resolveSigningParam(envName: String, propKey: String, injectedPropName: String): String? {
+    val ignoreEnv = providers.gradleProperty("geekify.ignoreSigningEnv").orNull == "true"
+    val fromInjected = providers.gradleProperty(injectedPropName).orNull?.takeIf { it.isNotBlank() }
+    if (fromInjected != null) return fromInjected
+    if (!ignoreEnv) {
+        val fromEnv = System.getenv(envName)?.takeIf { it.isNotBlank() }
+        if (fromEnv != null) return fromEnv
+    }
+    return keystoreProperties.getProperty(propKey)?.takeIf { it.isNotBlank() }
+}
+
+val resolvedReleaseStorePath = resolveSigningParam("ANDROID_KEYSTORE_PATH", "storeFile", "android.injected.signing.store.file")
+val resolvedReleaseStorePassword = resolveSigningParam("ANDROID_KEYSTORE_PASSWORD", "storePassword", "android.injected.signing.store.password")
+val resolvedReleaseKeyAlias = resolveSigningParam("ANDROID_KEY_ALIAS", "keyAlias", "android.injected.signing.key.alias")
+val resolvedReleaseKeyPassword = resolveSigningParam("ANDROID_KEY_PASSWORD", "keyPassword", "android.injected.signing.key.password")
 
 android {
     namespace = "com.geekify.android"
@@ -55,24 +72,15 @@ android {
     }
     signingConfigs {
         create("release") {
-            val envStoreFile = System.getenv("ANDROID_KEYSTORE_PATH")
-                ?: keystoreProperties.getProperty("storeFile")
-            val envStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
-                ?: keystoreProperties.getProperty("storePassword")
-            val envKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
-                ?: keystoreProperties.getProperty("keyAlias")
-            val envKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
-                ?: keystoreProperties.getProperty("keyPassword")
-
-            if (!envStoreFile.isNullOrBlank() &&
-                !envStorePassword.isNullOrBlank() &&
-                !envKeyAlias.isNullOrBlank() &&
-                !envKeyPassword.isNullOrBlank()
+            if (!resolvedReleaseStorePath.isNullOrBlank() &&
+                !resolvedReleaseStorePassword.isNullOrBlank() &&
+                !resolvedReleaseKeyAlias.isNullOrBlank() &&
+                !resolvedReleaseKeyPassword.isNullOrBlank()
             ) {
-                storeFile = rootProject.file(envStoreFile)
-                storePassword = envStorePassword
-                keyAlias = envKeyAlias
-                keyPassword = envKeyPassword
+                storeFile = rootProject.file(resolvedReleaseStorePath)
+                storePassword = resolvedReleaseStorePassword
+                keyAlias = resolvedReleaseKeyAlias
+                keyPassword = resolvedReleaseKeyPassword
             }
         }
     }
@@ -110,30 +118,26 @@ val validateReleaseSigning = tasks.register("validateReleaseSigning") {
     group = "verification"
     description = "Verifies that release signing credentials are configured before building a release artifact."
     doLast {
-        val releaseSigning = android.signingConfigs.findByName("release")
-        val injectedStoreFile = providers.gradleProperty("android.injected.signing.store.file").orNull
-        val injectedStorePassword = providers.gradleProperty("android.injected.signing.store.password").orNull
-        val injectedKeyAlias = providers.gradleProperty("android.injected.signing.key.alias").orNull
-        val injectedKeyPassword = providers.gradleProperty("android.injected.signing.key.password").orNull
+        val missingParams = mutableListOf<String>()
+        if (resolvedReleaseStorePath.isNullOrBlank()) missingParams += "storeFile / ANDROID_KEYSTORE_PATH"
+        if (resolvedReleaseStorePassword.isNullOrBlank()) missingParams += "storePassword / ANDROID_KEYSTORE_PASSWORD"
+        if (resolvedReleaseKeyAlias.isNullOrBlank()) missingParams += "keyAlias / ANDROID_KEY_ALIAS"
+        if (resolvedReleaseKeyPassword.isNullOrBlank()) missingParams += "keyPassword / ANDROID_KEY_PASSWORD"
 
-        val hasInjectedSigning = !injectedStoreFile.isNullOrBlank() &&
-            !injectedStorePassword.isNullOrBlank() &&
-            !injectedKeyAlias.isNullOrBlank() &&
-            !injectedKeyPassword.isNullOrBlank() &&
-            file(injectedStoreFile).exists()
-
-        val configuredStoreFile = releaseSigning?.storeFile
-        val hasReleaseSigningConfig = configuredStoreFile != null &&
-            configuredStoreFile.exists() &&
-            !releaseSigning.storePassword.isNullOrBlank() &&
-            !releaseSigning.keyAlias.isNullOrBlank() &&
-            !releaseSigning.keyPassword.isNullOrBlank()
-
-        if (!hasReleaseSigningConfig && !hasInjectedSigning) {
+        if (missingParams.isNotEmpty()) {
             throw GradleException(
-                "Release signing configuration is missing or incomplete. " +
-                    "Configure ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD " +
-                    "(or provide keystore.properties in the project root) before building a release artifact."
+                "Release signing configuration is missing or incomplete. Missing required signing parameters: " +
+                    "${missingParams.joinToString(", ")}. " +
+                    "Provide ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD " +
+                    "(or keystore.properties / android.injected.signing.* properties) before building a release artifact."
+            )
+        }
+
+        val keystoreFile = rootProject.file(resolvedReleaseStorePath!!)
+        if (!keystoreFile.isFile) {
+            throw GradleException(
+                "Release signing keystore file was not found at the configured storeFile path (${keystoreFile.relativeToOrSelf(rootDir)}). " +
+                    "Ensure the keystore file exists before building a release artifact."
             )
         }
     }
@@ -143,7 +147,9 @@ tasks.matching { task ->
     task.name == "assembleRelease" ||
         task.name == "bundleRelease" ||
         task.name == "packageRelease" ||
-        task.name == "packageReleaseBundle"
+        task.name == "packageReleaseBundle" ||
+        task.name == "validateSigningRelease" ||
+        task.name == "signReleaseBundle"
 }.configureEach {
     dependsOn(validateReleaseSigning)
 }

@@ -14,9 +14,9 @@ plugins {
 
 tasks.register<Zip>("packageSourceArchive") {
     group = "distribution"
-    description = "Packages source code archive excluding signing keys, credentials, local config, private Firebase config, and build outputs."
+    description = "Packages source code archive excluding signing keys, credentials, local config, private service accounts, and build outputs."
     archiveBaseName.set("geekify-source")
-    archiveVersion.set(providers.gradleProperty("appVersionName").orElse("2.5.9"))
+    archiveVersion.set(providers.gradleProperty("appVersionName").orElse("2.5.8"))
     destinationDirectory.set(layout.buildDirectory.dir("distributions"))
 
     from(rootDir) {
@@ -25,23 +25,29 @@ tasks.register<Zip>("packageSourceArchive") {
             ".gradle/**",
             ".kotlin/**",
             ".idea/**",
+            "build/**",
+            "app/build/**",
+            "innertube/build/**",
             "**/build/**",
             "**/*.keystore",
             "**/*.jks",
-            "**/*.p12",
-            "**/*.pfx",
-            "**/*.pem",
-            "**/*.der",
+            "**/*.key",
+            "**/*private-key*.pem",
+            "**/*signing*.p12",
+            "**/*signing*.pfx",
             "**/release-signing.keystore",
             "keystore.properties",
             "**/keystore.properties",
             "local.properties",
             "**/local.properties",
+            "**/*service-account*.json",
+            "**/*firebase-adminsdk*.json",
             "app/google-services.json",
-            "**/google-services.json",
+            "app/src/*/google-services.json",
             "**/*.apk",
             "**/*.aab",
-            "**/*.zip",
+            "geekify-source*.zip",
+            "source-archive*.zip",
             "**/*.tar.gz",
             "**/*.tgz",
             "**/*.iml",

@@ -113,12 +113,13 @@ class SearchViewModel @Inject constructor(
             }
         }
 
-        // Maintain reactive favorite-artist set so searches do not re-read full tables on every keystroke
+        // Maintain reactive favorite-artist set using lightweight JSON projection so searches do not re-read full tables
         viewModelScope.launch(ioDispatcher) {
             combine(
                 playStatDao.observeTopArtists(25),
-                likedDao.observeDistinctArtists(100)
-            ) { topPlayedArtists, likedArtists ->
+                likedDao.observeArtistProjections(100)
+            ) { topPlayedArtists, likedProjections ->
+                val likedArtists = extractDistinctArtists(likedProjections, 100)
                 (topPlayedArtists + likedArtists)
                     .asSequence()
                     .map { it.trim() }
@@ -259,8 +260,9 @@ class SearchViewModel @Inject constructor(
 
     fun onTabSelected(tab: String) {
         if (_uiState.value.selectedTab == tab) return
+        cancelSuggestions()
         cancelPagination()
-        _uiState.update { it.copy(selectedTab = tab, isLoadingMore = false) }
+        _uiState.update { it.copy(selectedTab = tab, suggestions = emptyList(), isLoadingMore = false) }
         val q = _uiState.value.query.trim()
         if (q.isNotBlank()) {
             triggerImmediateSearch(q, tab, force = false)

@@ -12,7 +12,8 @@ import kotlin.math.sqrt
 
 enum class EmbeddingFeatureSource {
     AUTHORIZED_AUDIO_ANALYSIS,
-    METADATA_STRUCTURAL_PROJECTION
+    METADATA_STRUCTURAL_PROJECTION,
+    MODEL_GENERATED_EMBEDDING
 }
 
 data class AuthorizedAudioFeatures(
@@ -251,7 +252,9 @@ enum class LyricsRepresentationSource {
     /** Keyword lexicon + character 3-gram projection over an authorized lyric snippet (not deep NLP comprehension). */
     AUTHORIZED_LYRICS_LEXICON_HASH,
     /** Keyword lexicon + character 3-gram projection derived strictly from title/artist/album metadata (no lyrics text). */
-    METADATA_LEXICON_PROJECTION
+    METADATA_LEXICON_PROJECTION,
+    /** Genuine model-generated semantic embedding when produced by an external or on-device language model. */
+    MODEL_GENERATED_EMBEDDING
 }
 
 /**

@@ -35,6 +35,7 @@ class GeekifyUpdateMessagingService : FirebaseMessagingService() {
             throw cancelled
         } catch (error: Exception) {
             Timber.tag(TAG).w(error, "Failed to synchronize topic subscription after FCM token refresh")
+            NotificationWorker.scheduleTopicSyncFallback(applicationContext)
         }
     }
 

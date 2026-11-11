@@ -550,17 +550,19 @@ class HybridRecommendationEngineTest {
     // -----------------------------------------------------------------------
 
     @Test
-    fun `fallback neural model explicitly reports untrained status with zero validation metrics`() {
+    fun `fallback neural model explicitly reports untrained status with unavailable validation metrics and supports snapshot roundtrip`() {
         val neural = NeuralRecommendationEngine()
         val meta = neural.currentModelMetadata()
 
         assertTrue("Untrained default model must explicitly report isFallback = true", meta.isFallback)
         assertFalse("Untrained default model must report isTrained = false", meta.isTrained)
+        assertEquals(NeuralModelState.UNTRAINED_FALLBACK, meta.modelState)
         assertEquals(0, meta.trainSamples)
-        assertEquals(0.0, meta.validationLoss, 1e-9)
-        assertEquals(0.0, meta.validationAccuracy, 1e-9)
+        assertNull("Untrained fallback must not fabricate validationLoss", meta.validationLoss)
+        assertNull("Untrained fallback must not fabricate validationAccuracy", meta.validationAccuracy)
         assertTrue(meta.statusSummary.startsWith("UNTRAINED_FALLBACK_PRIOR"))
         assertTrue(neural.isUsingFallbackModel())
+        assertNull("Untrained fallback must never be exported as a trained snapshot", neural.exportTrainedModelJson())
 
         val lyricsService = LyricsSemanticService()
         assertEquals(
@@ -607,6 +609,16 @@ class HybridRecommendationEngineTest {
         )
         val nowMs = 1_700_000_500_000L
 
+        val sessionPlayT1 = Recommender.SessionSignal(
+            videoId = sharedTrack.videoId,
+            artist = sharedTrack.artist,
+            title = sharedTrack.title,
+            completionRate = 0.95,
+            skipRate = 0.0,
+            recentPlays7d = 2,
+            lastPlayedAtMs = nowMs - 60_000L
+        )
+
         // Run 1: Cold cache -> all misses, duplicate track across liked/recent/related computed only once
         val run1 = pipeline.execute(
             accountId = "user_cache_test",
@@ -615,7 +627,7 @@ class HybridRecommendationEngineTest {
             playlistTracks = listOf(sharedTrack),
             frequentSignals = listOf(Recommender.PlayedSignal(sharedTrack.videoId, sharedTrack.artist, sharedTrack.title, plays = 6)),
             savedArtists = listOf("Sushin Shyam"),
-            sessionSignals = emptyList(),
+            sessionSignals = listOf(sessionPlayT1),
             relatedBySeed = mapOf(sharedTrack.videoId to listOf(sharedTrack, candTrack)),
             activeSeeds = listOf(sharedTrack.videoId),
             shownVideoIds = emptySet(),
@@ -632,9 +644,11 @@ class HybridRecommendationEngineTest {
         assertEquals("Duplicate track across liked, recent, playlist, and related must be computed only once", 2, run1.featureCacheMisses)
         assertEquals(2, pipeline.totalFeatureComputations())
         assertTrue("Untrained fallback status must be exposed honestly in pipeline output", run1.isFallbackModel)
-        assertTrue("Collaborative interactions should be persisted in Room", fakeDao.interactionCount() > 0)
+        // 1 LIKED + 1 COMPLETED session interaction
+        assertEquals(2, fakeDao.interactionCount())
 
-        // Run 2: Warm cache with fresh pipeline instance (empty in-memory map, reads from Room DAO)
+        // Run 2: Warm cache with fresh pipeline instance + same session event + 1 new repeated listen at a later timestamp
+        val sessionPlayT2 = sessionPlayT1.copy(lastPlayedAtMs = nowMs - 10_000L)
         val pipelineWarm = HybridRecommendationPipeline(
             classificationService = classificationService,
             contextEngine = contextEngine,
@@ -651,7 +665,7 @@ class HybridRecommendationEngineTest {
             playlistTracks = emptyList(),
             frequentSignals = listOf(Recommender.PlayedSignal(sharedTrack.videoId, sharedTrack.artist, sharedTrack.title, plays = 6)),
             savedArtists = listOf("Sushin Shyam"),
-            sessionSignals = emptyList(),
+            sessionSignals = listOf(sessionPlayT1, sessionPlayT2),
             relatedBySeed = mapOf(sharedTrack.videoId to listOf(candTrack)),
             activeSeeds = listOf(sharedTrack.videoId),
             shownVideoIds = emptySet(),
@@ -667,10 +681,14 @@ class HybridRecommendationEngineTest {
         assertEquals("Warm run must hit Room feature cache for both tracks", 2, run2.featureCacheHits)
         assertEquals("Warm run must have 0 cache misses", 0, run2.featureCacheMisses)
         assertEquals("Warm run must perform 0 expensive feature computations", 0, pipelineWarm.totalFeatureComputations())
+        // Duplicate delivery of LIKED and sessionPlayT1 is prevented, while legitimate repeat listen sessionPlayT2 is preserved!
+        assertEquals(3, fakeDao.interactionCount())
 
-        // Run 3: Invalidate cand_track_2 by corrupting its schema version in Room
+        // Run 3: Invalidate cand_track_2 by corrupting its schema version and sharedTrack by wrong embedding dimension
         val existingCand = fakeDao.getTrackFeature("cand_track_2")!!
         fakeDao.upsertTrackFeature(existingCand.copy(featureSource = "LEGACY_UNVERSIONED_SOURCE"))
+        val existingShared = fakeDao.getTrackFeature("dup_track_1")!!
+        fakeDao.upsertTrackFeature(existingShared.copy(audioEmbeddingJson = "[0.1, 0.2, 0.3]"))
 
         val pipelineInvalidated = HybridRecommendationPipeline(
             classificationService = classificationService,
@@ -701,9 +719,9 @@ class HybridRecommendationEngineTest {
             nowMs = nowMs + 2_000L
         )
 
-        assertEquals("Valid track should still hit cache", 1, run3.featureCacheHits)
-        assertEquals("Invalidated schema version track must miss cache and recompute", 1, run3.featureCacheMisses)
-        assertEquals(1, pipelineInvalidated.totalFeatureComputations())
+        assertEquals("Both corrupted tracks must miss cache", 0, run3.featureCacheHits)
+        assertEquals("Both invalidated tracks must recompute", 2, run3.featureCacheMisses)
+        assertEquals(2, pipelineInvalidated.totalFeatureComputations())
     }
 
     private class FakeRecommendationEngineDao : RecommendationEngineDao {

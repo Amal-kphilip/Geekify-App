@@ -112,6 +112,58 @@ class StreamResolverTest {
         assertTrue(freshResult.url.endsWith("attempt-2.m4a"))
     }
 
+    @Test
+    fun `prefetch cancels obsolete in-flight prefetches when upcoming queue changes without cancelling active foreground resolve`() = runBlocking {
+        val nowMs = AtomicLong(10_000_000L)
+        val obsoleteStarted = CompletableDeferred<Unit>()
+        val obsoleteGate = CompletableDeferred<Unit>()
+        val obsoleteCancelled = CompletableDeferred<Boolean>()
+        val activeGate = CompletableDeferred<Unit>()
+        val fetchCounts = java.util.concurrent.ConcurrentHashMap<String, AtomicInteger>()
+
+        val resolver = StreamResolver(
+            extractor = null,
+            clock = { nowMs.get() },
+            customFetcher = { videoId ->
+                fetchCounts.computeIfAbsent(videoId) { AtomicInteger(0) }.incrementAndGet()
+                when (videoId) {
+                    "obsolete_next" -> {
+                        obsoleteStarted.complete(Unit)
+                        try {
+                            obsoleteGate.await()
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            obsoleteCancelled.complete(true)
+                            throw e
+                        }
+                    }
+                    "foreground_track" -> {
+                        activeGate.await()
+                    }
+                }
+                StreamResolver.ResolvedStream(
+                    url = "https://stream.example/$videoId.m4a",
+                    mimeType = "audio/mp4",
+                    expiresAt = nowMs.get() + 30 * 60_000L,
+                    clientName = "ANDROID_VR"
+                )
+            }
+        )
+
+        // Start foreground resolve + prefetch for upcoming ["obsolete_next", "foreground_track"]
+        val foregroundDeferred = async { resolver.resolve("foreground_track") }
+        resolver.prefetch(listOf("obsolete_next", "foreground_track"))
+        obsoleteStarted.await()
+
+        // Upcoming queue changes to ["replacement_next"] -> "obsolete_next" prefetch is cancelled,
+        // while "foreground_track" continues because it is a foreground resolve.
+        resolver.prefetch(listOf("replacement_next"))
+
+        assertTrue("Obsolete prefetch must be cancelled when upcoming queue changes", obsoleteCancelled.await())
+        activeGate.complete(Unit)
+        val foregroundStream = foregroundDeferred.await()
+        assertEquals("https://stream.example/foreground_track.m4a", foregroundStream.url)
+    }
+
     private val json = Json { ignoreUnknownKeys = true }
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)

@@ -21,7 +21,7 @@ object UpdatePushSubscription {
     const val TOPIC = "geekify_updates"
     private const val TAG = "GeekifyUpdatePush"
 
-    fun sync(context: Context, enabled: Boolean) {
+    fun sync(context: Context, enabled: Boolean, scheduleFallbackOnFailure: Boolean = true) {
         val shouldSubscribe = enabled && systemCanShowUpdates(context)
         runCatching {
             val messaging = FirebaseMessaging.getInstance()
@@ -32,10 +32,16 @@ object UpdatePushSubscription {
             }
             task.addOnFailureListener { error ->
                 Timber.tag(TAG).w(error, "Could not ${if (shouldSubscribe) "subscribe to" else "unsubscribe from"} update topic")
+                if (scheduleFallbackOnFailure) {
+                    NotificationWorker.scheduleTopicSyncFallback(context)
+                }
             }
         }.onFailure { error ->
             // In particular, do not block app startup on non-GMS devices. WorkManager remains available.
             Timber.tag(TAG).w(error, "FCM update topic sync is unavailable")
+            if (scheduleFallbackOnFailure) {
+                NotificationWorker.scheduleTopicSyncFallback(context)
+            }
         }
     }
 

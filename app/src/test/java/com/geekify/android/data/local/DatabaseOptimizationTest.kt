@@ -93,4 +93,38 @@ class DatabaseOptimizationTest {
         val encoded = converters.artistsToJson(artists)
         assertEquals(artists, converters.jsonToArtists(encoded))
     }
+
+    @Test
+    fun `extractDistinctArtists extracts collaborating artists from lightweight projections and deduplicates case-insensitively`() {
+        val projections = listOf(
+            LikedArtistProjection(
+                artist = "Sushin Shyam, Dabzee",
+                artists = listOf(
+                    com.geekify.android.data.model.ArtistRef(name = "Sushin Shyam", id = "uc_1"),
+                    com.geekify.android.data.model.ArtistRef(name = "Dabzee", id = "uc_2")
+                )
+            ),
+            LikedArtistProjection(
+                artist = "sushin shyam",
+                artists = listOf(
+                    com.geekify.android.data.model.ArtistRef(name = "  sushin shyam  ", id = "uc_1"),
+                    com.geekify.android.data.model.ArtistRef(name = "Vishnu Vijay", id = "uc_3")
+                )
+            ),
+            LikedArtistProjection(
+                artist = "A. R. Rahman",
+                artists = emptyList()
+            )
+        )
+
+        val extracted = extractDistinctArtists(projections, limit = 10)
+        // Must contain individual collaborating artists + fallback artist without duplicates
+        assertEquals(
+            listOf("Sushin Shyam", "Dabzee", "Sushin Shyam, Dabzee", "Vishnu Vijay", "A. R. Rahman"),
+            extracted
+        )
+
+        val limited = extractDistinctArtists(projections, limit = 2)
+        assertEquals(listOf("Sushin Shyam", "Dabzee"), limited)
+    }
 }

@@ -51,11 +51,34 @@ data class QueueRankingSignals(
  */
 object SmartQueueRanker {
     private const val MIN_MEANINGFUL_MS = 10_000L
+    private const val MAX_RANKING_CANDIDATES = 60
 
     fun buildSignals(
         sessions: List<ListeningSessionEntity>,
         playCounts: List<PlayStat>,
         likedTracks: List<Track>,
+        now: Long = System.currentTimeMillis()
+    ): QueueRankingSignals {
+        val likedIds = likedTracks.asSequence().map { it.videoId }.toSet()
+        val likedArtists = likedTracks.asSequence()
+            .flatMap { artistNames(it).asSequence() }
+            .map(::key)
+            .filter(String::isNotBlank)
+            .toSet()
+        return buildSignals(
+            sessions = sessions,
+            playCounts = playCounts,
+            likedIds = likedIds,
+            likedArtists = likedArtists,
+            now = now
+        )
+    }
+
+    fun buildSignals(
+        sessions: List<ListeningSessionEntity>,
+        playCounts: List<PlayStat>,
+        likedIds: Set<String>,
+        likedArtists: Collection<String>,
         now: Long = System.currentTimeMillis()
     ): QueueRankingSignals {
         val sevenDaysAgo = now - 7L * 24 * 60 * 60_000L
@@ -88,9 +111,7 @@ object SmartQueueRanker {
                 )
             }
         val playsByTrack = playCounts.associate { it.videoId to it.plays }
-        val likedIds = likedTracks.asSequence().map { it.videoId }.toSet()
-        val likedArtists = likedTracks.asSequence()
-            .flatMap { artistNames(it).asSequence() }
+        val normalizedLikedArtists = likedArtists.asSequence()
             .map(::key)
             .filter(String::isNotBlank)
             .toSet()
@@ -100,7 +121,7 @@ object SmartQueueRanker {
             artistStats = artistStats,
             playsByTrack = playsByTrack,
             likedIds = likedIds,
-            likedArtists = likedArtists,
+            likedArtists = normalizedLikedArtists,
             builtAtMs = now
         )
     }
@@ -173,6 +194,8 @@ object SmartQueueRanker {
         data class Scored(
             val track: Track,
             val baseScore: Double,
+            val primaryArtist: String,
+            val artistKeys: List<String>,
             val likedTrack: Boolean,
             val likedArtist: Boolean,
             val playCount: Int,
@@ -190,6 +213,7 @@ object SmartQueueRanker {
             val playCount = signals.playsByTrack[track.videoId]
                 ?: (trackStat?.fallbackPlayCount ?: 0)
             val artistKeys = artistNames(track).map(::key).filter(String::isNotBlank)
+            val primaryArtist = artistKeys.firstOrNull().orEmpty()
             val recentRepeatCount = trackStat?.recentRepeatCount ?: 0
             var score = 0.0
             val likedTrack = track.videoId in signals.likedIds
@@ -228,27 +252,49 @@ object SmartQueueRanker {
 
             // Reward familiar tracks a little, but avoid recommending something just heard repeatedly.
             score -= minOf(2.0, maxOf(0, recentRepeatCount - 1) * 0.45)
-            track.videoId to Scored(track, score, likedTrack, likedArtist, playCount, recentRepeatCount, outcomes, completionRate, languageMatched)
+            track.videoId to Scored(
+                track = track,
+                baseScore = score,
+                primaryArtist = primaryArtist,
+                artistKeys = artistKeys,
+                likedTrack = likedTrack,
+                likedArtist = likedArtist,
+                playCount = playCount,
+                recentRepeatCount = recentRepeatCount,
+                outcomes = outcomes,
+                completionRate = completionRate,
+                languageMatched = languageMatched
+            )
+        }
+        val activePool = if (pool.size > MAX_RANKING_CANDIDATES) {
+            pool.sortedByDescending { staticScores[it.videoId]?.baseScore ?: Double.NEGATIVE_INFINITY }
+                .take(MAX_RANKING_CANDIDATES)
+                .toMutableList()
+        } else {
+            pool
         }
         val ranked = mutableListOf<RankedQueueTrack>()
-        while (pool.isNotEmpty()) {
-            var best: Track? = null
+        while (activePool.isNotEmpty()) {
+            var bestIndex = -1
+            var bestScored: Scored? = null
             var bestScore = Double.NEGATIVE_INFINITY
-            for (candidate in pool) {
+            for (i in activePool.indices) {
+                val candidate = activePool[i]
                 val scored = staticScores[candidate.videoId] ?: continue
-                val primaryArtist = artistNames(candidate).firstOrNull()?.let(::key).orEmpty()
+                val primaryArtist = scored.primaryArtist
                 val artistCount = artistCounts[primaryArtist] ?: 0
                 val diversityPenalty = artistCount * 1.0
                 val discoveryNudge = if (primaryArtist.isNotBlank() && artistCount == 0) 0.65 else 0.0
                 val score = scored.baseScore - diversityPenalty + discoveryNudge
                 if (score > bestScore) {
-                    best = candidate
+                    bestIndex = i
+                    bestScored = scored
                     bestScore = score
                 }
             }
-            val selected = best ?: break
-            val scored = staticScores[selected.videoId] ?: break
-            val primaryArtist = artistNames(selected).firstOrNull()?.let(::key).orEmpty()
+            val scored = bestScored ?: break
+            val selected = scored.track
+            val primaryArtist = scored.primaryArtist
             val reason = when {
                 scored.likedTrack -> "You liked this track"
                 scored.likedArtist -> "From an artist you like"
@@ -259,8 +305,8 @@ object SmartQueueRanker {
                 else -> "Related to the track you’re playing"
             }
             ranked += RankedQueueTrack(selected, reason, bestScore)
-            pool.removeAll { it.videoId == selected.videoId }
-            artistNames(selected).map(::key).filter(String::isNotBlank).forEach { artist ->
+            activePool.removeAt(bestIndex)
+            scored.artistKeys.forEach { artist ->
                 artistCounts[artist] = (artistCounts[artist] ?: 0) + 1
             }
         }

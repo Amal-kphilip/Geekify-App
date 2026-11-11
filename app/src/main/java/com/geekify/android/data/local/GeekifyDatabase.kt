@@ -360,6 +360,34 @@ fun Track.toPlaylistTrack(playlistId: String, position: Int) = PlaylistTrackEnti
 @androidx.compose.runtime.Immutable
 data class LocalPlaylist(val id: String, val name: String, val createdAt: Long, val tracks: List<Track>)
 
+data class LikedArtistProjection(
+    val artist: String,
+    val artists: List<ArtistRef> = emptyList()
+)
+
+fun extractDistinctArtists(projections: List<LikedArtistProjection>, limit: Int = 100): List<String> {
+    if (projections.isEmpty() || limit <= 0) return emptyList()
+    val seenNormalized = HashSet<String>()
+    val result = ArrayList<String>(minOf(limit, projections.size * 2))
+    for (row in projections) {
+        val candidates = if (row.artists.isNotEmpty()) {
+            row.artists.map { it.name } + listOf(row.artist)
+        } else {
+            listOf(row.artist)
+        }
+        for (raw in candidates) {
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty()) continue
+            val key = trimmed.lowercase(java.util.Locale.ROOT)
+            if (seenNormalized.add(key)) {
+                result.add(trimmed)
+                if (result.size >= limit) return result
+            }
+        }
+    }
+    return result
+}
+
 // ---- DAOs ----
 
 @Dao
@@ -372,8 +400,12 @@ interface LikedDao {
     @Query("SELECT * FROM liked_tracks ORDER BY addedAt DESC, rowid DESC") suspend fun allOnce(): List<LikedTrackEntity>
     @Query("SELECT videoId FROM liked_tracks") suspend fun allVideoIdsOnce(): List<String>
     @Query("SELECT videoId FROM liked_tracks") fun observeVideoIds(): Flow<List<String>>
-    @Query("SELECT DISTINCT artist FROM liked_tracks WHERE artist != '' ORDER BY addedAt DESC LIMIT :limit")
-    suspend fun distinctArtistsOnce(limit: Int = 100): List<String>
+    @Query("SELECT artist, artists FROM liked_tracks ORDER BY addedAt DESC, rowid DESC LIMIT :limit")
+    suspend fun artistProjectionsOnce(limit: Int = 100): List<LikedArtistProjection>
+    @Query("SELECT artist, artists FROM liked_tracks ORDER BY addedAt DESC, rowid DESC LIMIT :limit")
+    fun observeArtistProjections(limit: Int = 100): Flow<List<LikedArtistProjection>>
+    suspend fun distinctArtistsOnce(limit: Int = 100): List<String> =
+        extractDistinctArtists(artistProjectionsOnce(limit), limit)
     @Query("SELECT DISTINCT artist FROM liked_tracks WHERE artist != '' ORDER BY addedAt DESC LIMIT :limit")
     fun observeDistinctArtists(limit: Int = 100): Flow<List<String>>
     @Query("SELECT * FROM liked_tracks WHERE title LIKE '%' || :query || '%' OR artist LIKE '%' || :query || '%' OR album LIKE '%' || :query || '%' LIMIT :limit")
