@@ -1,43 +1,40 @@
 package com.geekify.android.ui.account
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.CustomAccessibilityAction
-import androidx.compose.ui.semantics.customActions
-import androidx.compose.ui.semantics.semantics
 import coil3.compose.AsyncImage
 import com.geekify.android.R
 import com.geekify.android.data.auth.KnownAccount
-import com.geekify.android.ui.components.CircleIconButton
-import com.geekify.android.ui.components.LocalBottomInset
-import com.geekify.android.ui.components.bouncyClickable
-import com.geekify.android.ui.components.bouncyCombinedClickable
+import com.geekify.android.ui.components.*
 import com.geekify.android.ui.theme.*
 
 /** Account manager. Firebase maintains a separate SDK-managed session for each saved identity. */
@@ -46,7 +43,9 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
     val state by viewModel.uiState.collectAsState()
     val activityContext = LocalContext.current.findActivity()
     val hadActiveAccountOnEntry = remember { viewModel.uiState.value.user != null }
-    var showAuthForm by remember { mutableStateOf(!state.isRestoringAccounts && state.user == null && state.knownAccounts.isEmpty()) }
+    var showAuthForm by remember {
+        mutableStateOf(!state.isRestoringAccounts && state.user == null && state.knownAccounts.isEmpty())
+    }
     var selectedAccount by remember { mutableStateOf<KnownAccount?>(null) }
     var isSignUp by remember { mutableStateOf(false) }
     var email by remember { mutableStateOf("") }
@@ -55,6 +54,8 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
     var showSignOutConfirmation by remember { mutableStateOf(false) }
     var signInWasRequested by remember { mutableStateOf(false) }
     var accountPendingRemoval by remember { mutableStateOf<KnownAccount?>(null) }
+    val scrollState = rememberScrollState()
+    val bottomInset = LocalBottomInset.current
 
     LaunchedEffect(Unit) { viewModel.clearFeedback() }
     LaunchedEffect(state.isRestoringAccounts, state.user?.uid, state.knownAccounts.size) {
@@ -74,92 +75,120 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(InkBackground)
-            .statusBarsPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 28.dp + LocalBottomInset.current)
+    val otherAccounts = state.knownAccounts.filterNot { it.uid == state.user?.uid }
+
+    IosSettingsPageScaffold(
+        title = stringResource(R.string.accounts_title),
+        scrollState = scrollState,
+        onBack = onBack,
+        bottomPadding = bottomInset + 36.dp
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            CircleIconButton(
-                icon = GeekifyIcons.ArrowBack,
-                contentDescription = stringResource(R.string.accessibility_back),
-                onClick = onBack,
-                size = 48.dp
-            )
-            Spacer(Modifier.width(12.dp))
-            Text(
-                text = stringResource(R.string.accounts_title),
-                color = TextPrimary,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            Spacer(Modifier.size(48.dp))
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        if (state.isRestoringAccounts) {
-            Spacer(Modifier.height(16.dp))
-            Row(
+        val bannerError = (state.syncError ?: state.error)?.takeIf { !showAuthForm }
+        val bannerMessage = state.message?.takeIf { !showAuthForm }
+        AnimatedVisibility(visible = bannerError != null || bannerMessage != null) {
+            val isError = bannerError != null
+            val bannerText = bannerError ?: bannerMessage.orEmpty()
+            val accentColor = if (isError) IosPalette.systemRed else SettingsVisuals.green
+            Surface(
+                color = SettingsVisuals.card,
+                shape = RoundedCornerShape(18.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(InkPanel)
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(bottom = 16.dp)
+                    .border(0.8.dp, accentColor.copy(alpha = 0.42f), RoundedCornerShape(18.dp))
+                    .clickable(onClick = viewModel::clearFeedback)
             ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    color = Color(0xFF69C9E7),
-                    strokeWidth = 2.dp
-                )
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text("Restoring saved accounts", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Checking secure sign-in sessions before showing switch actions…", color = TextSecondary, fontSize = 11.sp)
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = if (isError) GeekifyIcons.ErrorOutline else GeekifyIcons.CheckCircle,
+                        contentDescription = null,
+                        tint = accentColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = bannerText,
+                        color = IosPalette.label,
+                        fontSize = 14.sp,
+                        lineHeight = 19.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        imageVector = GeekifyIcons.Close,
+                        contentDescription = "Dismiss",
+                        tint = IosPalette.secondaryLabel,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+
+        if (state.isRestoringAccounts) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 20.dp)
+                    .border(0.6.dp, SettingsVisuals.cardBorder, IosCardShape),
+                color = SettingsVisuals.card,
+                shape = IosCardShape
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = SettingsVisuals.cyan,
+                        strokeWidth = 2.2.dp
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Column {
+                        Text(
+                            text = "Restoring saved accounts",
+                            color = IosPalette.label,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Checking secure sign-in sessions before showing switch actions…",
+                            color = IosPalette.secondaryLabel,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
                 }
             }
         }
 
         if (state.user != null) {
-            Spacer(Modifier.height(18.dp))
-            AccountSectionTitle("CURRENT ACCOUNT", "This account is active on this device")
-            KnownAccountCard(
-                account = KnownAccount(
-                    uid = state.user!!.uid,
-                    email = state.user!!.email,
-                    name = state.user!!.name,
-                    photoUrl = state.user!!.photoUrl,
-                    hasPassword = state.user!!.hasPassword,
-                    lastUsedAt = System.currentTimeMillis(),
-                    hasCachedSession = true
-                ),
-                active = true,
-                onClick = {}
-            )
+            IosSettingsSection(
+                title = "Current account",
+                footer = "This account is active on this device."
+            ) {
+                KnownAccountCard(
+                    account = KnownAccount(
+                        uid = state.user!!.uid,
+                        email = state.user!!.email,
+                        name = state.user!!.name,
+                        photoUrl = state.user!!.photoUrl,
+                        hasPassword = state.user!!.hasPassword,
+                        lastUsedAt = System.currentTimeMillis(),
+                        hasCachedSession = true
+                    ),
+                    active = true,
+                    onClick = {}
+                )
+            }
+            Spacer(Modifier.height(24.dp))
         }
 
-        val otherAccounts = state.knownAccounts.filterNot { it.uid == state.user?.uid }
         if (otherAccounts.isNotEmpty()) {
-            Spacer(Modifier.height(22.dp))
-            AccountSectionTitle("SAVED ACCOUNTS", "Choose an account to switch")
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(26.dp))
-                    .background(InkPanel)
-                    .padding(horizontal = 14.dp, vertical = 6.dp)
+            IosSettingsSection(
+                title = "Saved accounts",
+                footer = "Choose an account to switch, or long-press an account to remove it from this device."
             ) {
                 otherAccounts.forEachIndexed { index, account ->
                     KnownAccountCard(
@@ -187,166 +216,213 @@ fun AddAccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
                         }
                     )
                     if (index < otherAccounts.lastIndex) {
-                        HorizontalDivider(color = InkGlassBorder.copy(alpha = 0.65f), modifier = Modifier.padding(start = 66.dp))
+                        IosSettingsDivider(insetStart = 76.dp)
                     }
                 }
             }
+            Spacer(Modifier.height(24.dp))
         }
 
-        Spacer(Modifier.height(22.dp))
         if (!showAuthForm) {
-            PrimaryAccountAction(
-                title = "Add another account",
-                subtitle = "Sign in with Google or email and password",
-                enabled = !state.isRestoringAccounts && !state.isLoading,
-                onClick = {
-                    selectedAccount = null
-                    email = ""
-                    password = ""
-                    name = ""
-                    isSignUp = false
-                    showAuthForm = true
-                    viewModel.clearFeedback()
-                }
-            )
+            IosSettingsSection(title = "Add account") {
+                IosSettingsRow(
+                    icon = GeekifyIcons.PersonAdd,
+                    tileColor = IosPalette.systemBlue,
+                    title = "Add another account",
+                    subtitle = "Sign in with Google or email and password",
+                    onClick = if (!state.isRestoringAccounts && !state.isLoading) {
+                        {
+                            selectedAccount = null
+                            email = ""
+                            password = ""
+                            name = ""
+                            isSignUp = false
+                            showAuthForm = true
+                            viewModel.clearFeedback()
+                        }
+                    } else null
+                )
+            }
         } else {
-            AccountAuthForm(
-                isSignUp = isSignUp,
-                name = name,
-                email = email,
-                password = password,
-                isLoading = state.isLoading || state.isRestoringAccounts,
-                selectedAccount = selectedAccount,
-                error = state.error,
-                message = state.message,
-                onNameChange = { name = it.take(40) },
-                onEmailChange = { email = it },
-                onPasswordChange = { password = it },
-                onSubmit = {
-                    if (isSignUp) viewModel.signUpEmail(name, email, password)
-                    else {
+            val sectionTitle = when {
+                selectedAccount != null -> "Switch account"
+                isSignUp -> "Create account"
+                else -> "Add account"
+            }
+            IosSettingsSection(title = sectionTitle) {
+                AccountAuthForm(
+                    isSignUp = isSignUp,
+                    name = name,
+                    email = email,
+                    password = password,
+                    isLoading = state.isLoading || state.isRestoringAccounts,
+                    selectedAccount = selectedAccount,
+                    error = state.error,
+                    message = state.message,
+                    onNameChange = { name = it.take(40) },
+                    onEmailChange = { email = it },
+                    onPasswordChange = { password = it },
+                    onSubmit = {
+                        if (isSignUp) viewModel.signUpEmail(name, email, password)
+                        else {
+                            signInWasRequested = !hadActiveAccountOnEntry
+                            viewModel.signInEmail(email, password, expectedUid = selectedAccount?.uid)
+                        }
+                    },
+                    onGoogle = {
                         signInWasRequested = !hadActiveAccountOnEntry
-                        viewModel.signInEmail(email, password, expectedUid = selectedAccount?.uid)
+                        viewModel.signInGoogle(activityContext, expectedUid = selectedAccount?.uid)
+                    },
+                    onToggleSignUp = {
+                        isSignUp = !isSignUp
+                        selectedAccount = null
+                        viewModel.clearFeedback()
+                    },
+                    onCancel = {
+                        showAuthForm = false
+                        selectedAccount = null
+                        password = ""
+                        viewModel.clearFeedback()
                     }
-                },
-                onGoogle = {
-                    signInWasRequested = !hadActiveAccountOnEntry
-                    viewModel.signInGoogle(activityContext, expectedUid = selectedAccount?.uid)
-                },
-                onToggleSignUp = {
-                    isSignUp = !isSignUp
-                    selectedAccount = null
-                    viewModel.clearFeedback()
-                },
-                onCancel = {
-                    showAuthForm = false
-                    selectedAccount = null
-                    password = ""
-                    viewModel.clearFeedback()
-                }
-            )
+                )
+            }
         }
 
         if (state.user != null) {
-            Spacer(Modifier.height(22.dp))
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = InkPanel,
-                shape = RoundedCornerShape(24.dp)
+            Spacer(Modifier.height(24.dp))
+            IosSettingsSection(
+                title = "Account security",
+                footer = "Geekify keeps separate Firebase sign-in sessions for saved accounts on this device. Passwords are never stored by Geekify, and each account's library and recommendations stay separate."
             ) {
-                Column(Modifier.padding(18.dp)) {
-                    Text("Account security", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "Geekify keeps separate Firebase sign-in sessions for saved accounts on this device. Passwords are never stored by Geekify, and each account's library and recommendations stay separate.",
-                        color = TextSecondary,
-                        fontSize = 13.sp,
-                        lineHeight = 19.sp
-                    )
-                    Spacer(Modifier.height(14.dp))
-                    OutlinedButton(
-                        onClick = { showSignOutConfirmation = true },
-                        enabled = !state.isLoading,
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        shape = CircleShape,
-                        border = BorderStroke(1.dp, ErrorRed.copy(alpha = 0.5f)),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed)
-                    ) { Text("Sign out of current account", fontWeight = FontWeight.SemiBold) }
-                }
-            }
-        }
-
-        (state.syncError ?: state.error)?.takeIf { state.user != null && state.error == null }?.let {
-            Text(it, color = ErrorRed, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
-        }
-        if (state.user == null) {
-            state.error?.let {
-                Text(it, color = ErrorRed, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 12.dp))
-            }
-            state.message?.let {
-                Text(it, color = Lime, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 12.dp))
+                IosSettingsRow(
+                    icon = GeekifyIcons.Logout,
+                    tileColor = IosPalette.systemRed,
+                    title = "Sign out of current account",
+                    subtitle = "Save library, recents & listening sessions before signing out",
+                    destructive = true,
+                    onClick = if (!state.isLoading) {
+                        { showSignOutConfirmation = true }
+                    } else null
+                )
             }
         }
     }
 
     if (showSignOutConfirmation) {
-        AlertDialog(
+        GeekifyDialog(
             onDismissRequest = { if (!state.isLoading) showSignOutConfirmation = false },
-            title = { Text("Sign out of Geekify?") },
-            text = {
-                Text(
-                    "Geekify will save this account's library, recents and listening sessions first. If another saved account is ready on this device, Geekify will switch to it automatically. Otherwise you'll be signed out. If backup fails, your current account and data stay intact."
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = !state.isLoading,
-                    onClick = { viewModel.signOut { showSignOutConfirmation = false } }
+            dismissible = !state.isLoading
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(IosPalette.systemRed.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    if (state.isLoading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    else Text("Sign out", color = ErrorRed)
+                    Icon(
+                        imageVector = GeekifyIcons.Logout,
+                        contentDescription = null,
+                        tint = IosPalette.systemRed,
+                        modifier = Modifier.size(22.dp)
+                    )
                 }
-            },
-            dismissButton = {
-                TextButton(enabled = !state.isLoading, onClick = { showSignOutConfirmation = false }) { Text("Cancel") }
+                Spacer(Modifier.width(14.dp))
+                Text(
+                    text = "Sign out of Geekify?",
+                    color = IosPalette.label,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
-        )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = "Geekify will save this account's library, recents and listening sessions first. If another saved account is ready on this device, Geekify will switch to it automatically. Otherwise you'll be signed out. If backup fails, your current account and data stay intact.",
+                color = IosPalette.secondaryLabel,
+                fontSize = 14.sp,
+                lineHeight = 20.sp
+            )
+            Spacer(Modifier.height(22.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                DialogPillButton(
+                    text = "Cancel",
+                    onClick = { showSignOutConfirmation = false },
+                    modifier = Modifier.weight(1f),
+                    style = DialogButtonStyle.Secondary,
+                    enabled = !state.isLoading
+                )
+                DialogPillButton(
+                    text = "Sign out",
+                    onClick = { viewModel.signOut { showSignOutConfirmation = false } },
+                    modifier = Modifier.weight(1.3f),
+                    style = DialogButtonStyle.Destructive,
+                    enabled = !state.isLoading,
+                    loading = state.isLoading
+                )
+            }
+        }
     }
 
     accountPendingRemoval?.let { account ->
-        AlertDialog(
-            onDismissRequest = { accountPendingRemoval = null },
-            title = {
-                Text(stringResource(R.string.remove_account_title, account.name))
-            },
-            text = {
-                Text(stringResource(R.string.remove_account_message, account.name))
-            },
-            confirmButton = {
-                TextButton(
+        GeekifyDialog(onDismissRequest = { accountPendingRemoval = null }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(IosPalette.systemRed.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = GeekifyIcons.DeleteOutline,
+                        contentDescription = null,
+                        tint = IosPalette.systemRed,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                Spacer(Modifier.width(14.dp))
+                Text(
+                    text = stringResource(R.string.remove_account_title, account.name),
+                    color = IosPalette.label,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = stringResource(R.string.remove_account_message, account.name),
+                color = IosPalette.secondaryLabel,
+                fontSize = 14.sp,
+                lineHeight = 20.sp
+            )
+            Spacer(Modifier.height(22.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                DialogPillButton(
+                    text = stringResource(R.string.action_cancel),
+                    onClick = { accountPendingRemoval = null },
+                    modifier = Modifier.weight(1f),
+                    style = DialogButtonStyle.Secondary
+                )
+                DialogPillButton(
+                    text = stringResource(R.string.action_remove),
                     onClick = {
                         val uid = account.uid
                         accountPendingRemoval = null
                         viewModel.forgetAccount(uid)
-                    }
-                ) {
-                    Text(stringResource(R.string.action_remove), color = ErrorRed)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { accountPendingRemoval = null }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
+                    },
+                    modifier = Modifier.weight(1.3f),
+                    style = DialogButtonStyle.Destructive
+                )
             }
-        )
-    }
-}
-
-@Composable
-private fun AccountSectionTitle(title: String, subtitle: String) {
-    Column(Modifier.padding(start = 4.dp, bottom = 10.dp)) {
-        Text(title, color = Color(0xFF69C9E7), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
-        Text(subtitle, color = TextMuted, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
+        }
     }
 }
 
@@ -388,17 +464,41 @@ private fun KnownAccountCard(
             )
     } else Modifier
 
+    val backgroundModifier = if (active) {
+        Modifier.background(
+            Brush.linearGradient(
+                listOf(
+                    SettingsVisuals.heroStart,
+                    SettingsVisuals.heroMiddle,
+                    SettingsVisuals.card
+                )
+            )
+        )
+    } else {
+        Modifier.background(Color.Transparent)
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(if (compact) 18.dp else 24.dp))
-            .background(if (compact) Color.Transparent else InkPanel)
+            .then(backgroundModifier)
             .then(cardClickModifier)
-            .padding(horizontal = if (compact) 4.dp else 16.dp, vertical = if (compact) 12.dp else 16.dp),
+            .padding(horizontal = 16.dp, vertical = if (compact) 13.dp else 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
-            modifier = Modifier.size(if (compact) 46.dp else 54.dp).clip(CircleShape).background(Lime.copy(alpha = 0.16f)),
+            modifier = Modifier
+                .size(if (compact) 48.dp else 54.dp)
+                .clip(CircleShape)
+                .background(
+                    if (active) SettingsVisuals.blue.copy(alpha = 0.20f)
+                    else SettingsVisuals.cardRaised
+                )
+                .border(
+                    width = 0.7.dp,
+                    color = if (active) SettingsVisuals.cyan.copy(alpha = 0.42f) else SettingsVisuals.cardBorder,
+                    shape = CircleShape
+                ),
             contentAlignment = Alignment.Center
         ) {
             if (!account.photoUrl.isNullOrBlank()) {
@@ -409,77 +509,92 @@ private fun KnownAccountCard(
                     modifier = Modifier.fillMaxSize().clip(CircleShape)
                 )
             } else {
-                Text(account.name.take(1).uppercase(), color = Lime, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = account.name.take(1).uppercase(),
+                    color = SettingsVisuals.cyan,
+                    fontSize = if (compact) 19.sp else 22.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
         Spacer(Modifier.width(13.dp))
         Column(Modifier.weight(1f)) {
-            Text(account.name, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(account.email ?: "${if (account.hasPassword) "Email account" else "Google account"}", color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                when {
+                text = account.name,
+                color = IosPalette.label,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = (-0.2).sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = account.email ?: "${if (account.hasPassword) "Email account" else "Google account"}",
+                color = IosPalette.secondaryLabel,
+                fontSize = 12.5.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 1.dp)
+            )
+            Text(
+                text = when {
                     active -> if (account.hasPassword) "Email & password" else "Google"
                     !enabled -> "Checking saved sign-in session…"
                     account.hasCachedSession -> "Ready for quick switching"
                     account.hasPassword -> "One-time password check required"
                     else -> "One-time Google sign-in required"
                 },
-                color = TextMuted,
-                fontSize = 11.sp,
-                modifier = Modifier.padding(top = 3.dp),
+                color = SettingsVisuals.muted,
+                fontSize = 11.5.sp,
+                modifier = Modifier.padding(top = 2.dp),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
         Spacer(Modifier.width(8.dp))
         if (active) {
-            Text("ACTIVE", color = Color(0xFF53D69A), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+            Surface(
+                color = SettingsVisuals.green.copy(alpha = 0.16f),
+                shape = CircleShape,
+                border = BorderStroke(0.6.dp, SettingsVisuals.green.copy(alpha = 0.42f))
+            ) {
+                Text(
+                    text = "ACTIVE",
+                    color = SettingsVisuals.green,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.6.sp,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
         } else if (!enabled) {
             CircularProgressIndicator(
                 modifier = Modifier.size(16.dp),
-                color = Color(0xFF69C9E7),
+                color = SettingsVisuals.cyan,
                 strokeWidth = 2.dp
             )
         } else {
-            Text(
-                if (account.hasCachedSession) "Switch" else "Verify",
-                color = Color(0xFF69C9E7),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-    }
-}
-
-@Composable
-private fun PrimaryAccountAction(title: String, subtitle: String, enabled: Boolean = true, onClick: () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().then(
-            if (enabled) Modifier.bouncyClickable(pressedScale = 0.98f, onClick = onClick) else Modifier
-        ),
-        color = InkPanel,
-        shape = RoundedCornerShape(24.dp)
-    ) {
-        Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFF69C9E7).copy(alpha = 0.14f)),
-                contentAlignment = Alignment.Center
+            val badgeColor = if (account.hasCachedSession) SettingsVisuals.green else SettingsVisuals.cyan
+            Surface(
+                color = badgeColor.copy(alpha = 0.14f),
+                shape = CircleShape,
+                border = BorderStroke(0.5.dp, badgeColor.copy(alpha = 0.38f))
             ) {
-                Icon(
-                    imageVector = GeekifyIcons.PersonAdd,
-                    contentDescription = stringResource(R.string.add_account),
-                    tint = Color(0xFF69C9E7),
-                    modifier = Modifier.size(24.dp)
+                Text(
+                    text = if (account.hasCachedSession) "Switch" else "Verify",
+                    color = badgeColor,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                 )
             }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                Text(subtitle, color = TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
-            }
+            Spacer(Modifier.width(6.dp))
+            Icon(
+                imageVector = GeekifyIcons.ChevronRight,
+                contentDescription = null,
+                tint = IosPalette.tertiaryLabel,
+                modifier = Modifier.size(16.dp)
+            )
         }
     }
 }
@@ -502,70 +617,183 @@ private fun AccountAuthForm(
     onToggleSignUp: () -> Unit,
     onCancel: () -> Unit
 ) {
-    Surface(modifier = Modifier.fillMaxWidth(), color = InkPanel, shape = RoundedCornerShape(26.dp)) {
-        Column(Modifier.padding(20.dp)) {
-            Text(
-                when {
-                    selectedAccount != null -> "Switch to ${selectedAccount.name}"
-                    isSignUp -> "Create an account"
-                    else -> "Add another account"
-                },
-                color = TextPrimary,
-                fontSize = 21.sp,
-                fontWeight = FontWeight.Bold
+    val selectedGoogleAccount = selectedAccount != null && !selectedAccount.hasPassword
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 18.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IosIconBadge(
+                icon = if (selectedAccount != null) GeekifyIcons.SwitchAccount else GeekifyIcons.PersonAdd,
+                tint = if (selectedAccount != null) IosPalette.systemCyan else IosPalette.systemBlue
             )
-            val selectedGoogleAccount = selectedAccount != null && !selectedAccount.hasPassword
-            Text(
-                when {
-                    selectedGoogleAccount -> "Continue with the Google identity linked to this saved account."
-                    selectedAccount != null -> "Re-enter your password to verify this account. Geekify never saves it."
-                    else -> "Your current account is backed up before a different account becomes active."
-                },
-                color = TextSecondary,
-                fontSize = 13.sp,
-                lineHeight = 19.sp,
-                modifier = Modifier.padding(top = 5.dp, bottom = 18.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = when {
+                        selectedAccount != null -> "Switch to ${selectedAccount.name}"
+                        isSignUp -> "Create an account"
+                        else -> "Add another account"
+                    },
+                    color = IosPalette.label,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = (-0.2).sp
+                )
+                Text(
+                    text = when {
+                        selectedGoogleAccount -> "Continue with the Google identity linked to this saved account."
+                        selectedAccount != null -> "Re-enter your password to verify this account. Geekify never saves it."
+                        else -> "Your current account is backed up before a different account becomes active."
+                    },
+                    color = IosPalette.secondaryLabel,
+                    fontSize = 12.5.sp,
+                    lineHeight = 17.sp,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        }
+
+        if (!selectedGoogleAccount) {
+            Spacer(Modifier.height(16.dp))
+            if (isSignUp) {
+                AccountTextField(
+                    value = name,
+                    onValueChange = onNameChange,
+                    label = "Display name",
+                    password = false,
+                    keyboardType = KeyboardType.Text
+                )
+                Spacer(Modifier.height(10.dp))
+            }
+            AccountTextField(
+                value = email,
+                onValueChange = onEmailChange,
+                label = "Email address",
+                password = false,
+                keyboardType = KeyboardType.Email,
+                enabled = selectedAccount == null
             )
+            Spacer(Modifier.height(10.dp))
+            AccountTextField(
+                value = password,
+                onValueChange = onPasswordChange,
+                label = "Password",
+                password = true,
+                keyboardType = KeyboardType.Password
+            )
+        }
 
-            if (!selectedGoogleAccount) {
-                if (isSignUp) {
-                    AccountTextField(name, onNameChange, "Display name", password = false, keyboardType = KeyboardType.Text)
-                    Spacer(Modifier.height(11.dp))
-                }
-                AccountTextField(email, onEmailChange, "Email address", password = false, keyboardType = KeyboardType.Email, enabled = selectedAccount == null)
-                Spacer(Modifier.height(11.dp))
-                AccountTextField(password, onPasswordChange, "Password", password = true, keyboardType = KeyboardType.Password)
-            }
+        error?.let {
+            Text(
+                text = it,
+                color = IosPalette.systemRed,
+                fontSize = 12.5.sp,
+                lineHeight = 17.sp,
+                modifier = Modifier.padding(top = 10.dp)
+            )
+        }
+        message?.let {
+            Text(
+                text = it,
+                color = SettingsVisuals.green,
+                fontSize = 12.5.sp,
+                lineHeight = 17.sp,
+                modifier = Modifier.padding(top = 10.dp)
+            )
+        }
 
-            if (!isSignUp && (selectedAccount == null || selectedGoogleAccount)) {
-                TextButton(onClick = onGoogle, enabled = !isLoading, modifier = Modifier.fillMaxWidth()) {
-                    Text("Continue with Google", color = Color(0xFF69C9E7), fontWeight = FontWeight.SemiBold)
-                }
-            }
-            error?.let { Text(it, color = ErrorRed, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 8.dp)) }
-            message?.let { Text(it, color = Lime, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 8.dp)) }
-
-            Spacer(Modifier.height(17.dp))
-            val canSubmit = !selectedGoogleAccount && !isLoading && email.isNotBlank() && password.isNotEmpty() && (!isSignUp || name.isNotBlank())
-            if (!selectedGoogleAccount) Button(
+        val canSubmit = !selectedGoogleAccount && !isLoading && email.isNotBlank() && password.isNotEmpty() && (!isSignUp || name.isNotBlank())
+        if (!selectedGoogleAccount) {
+            Spacer(Modifier.height(16.dp))
+            Button(
                 onClick = onSubmit,
                 enabled = canSubmit,
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-                shape = CircleShape,
-                colors = ButtonDefaults.buttonColors(containerColor = Lime, contentColor = OnAccent, disabledContainerColor = InkElevated, disabledContentColor = TextMuted)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = SettingsVisuals.blue,
+                    contentColor = Color.White,
+                    disabledContainerColor = SettingsVisuals.cardRaised,
+                    disabledContentColor = SettingsVisuals.muted
+                )
             ) {
-                if (isLoading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = OnAccent)
-                else Text(if (isSignUp) "Create account" else if (selectedAccount != null) "Verify and switch" else "Add account", fontWeight = FontWeight.SemiBold)
-            }
-
-            if (selectedAccount == null) {
-                TextButton(onClick = onToggleSignUp, enabled = !isLoading, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (isSignUp) "Already have an account? Sign in" else "Create a new account", color = TextSecondary)
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                } else {
+                    Text(
+                        text = if (isSignUp) "Create account" else if (selectedAccount != null) "Verify and switch" else "Add account",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.5.sp
+                    )
                 }
             }
-            TextButton(onClick = onCancel, enabled = !isLoading, modifier = Modifier.fillMaxWidth()) {
-                Text("Cancel", color = TextMuted)
+        }
+
+        if (!isSignUp && (selectedAccount == null || selectedGoogleAccount)) {
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = onGoogle,
+                enabled = !isLoading,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(0.8.dp, SettingsVisuals.cardBorder),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = SettingsVisuals.cardRaised,
+                    contentColor = IosPalette.label
+                )
+            ) {
+                Text(
+                    text = "G",
+                    color = SettingsVisuals.cyan,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 16.sp
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = "Continue with Google",
+                    color = IosPalette.label,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                )
             }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        if (selectedAccount == null) {
+            TextButton(
+                onClick = onToggleSignUp,
+                enabled = !isLoading,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = if (isSignUp) "Already have an account? Sign in" else "Create a new account",
+                    color = SettingsVisuals.blue,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+        TextButton(
+            onClick = onCancel,
+            enabled = !isLoading,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = "Cancel",
+                color = SettingsVisuals.muted,
+                fontSize = 13.5.sp
+            )
         }
     }
 }
@@ -587,17 +815,22 @@ private fun AccountTextField(
         singleLine = true,
         visualTransformation = if (password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-        shape = RoundedCornerShape(17.dp),
+        shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth(),
         colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Color(0xFF69C9E7),
-            unfocusedBorderColor = InkGlassBorder,
-            focusedLabelColor = Color(0xFF69C9E7),
-            cursorColor = Color(0xFF69C9E7),
-            focusedTextColor = TextPrimary,
-            unfocusedTextColor = TextPrimary,
-            disabledTextColor = TextSecondary,
-            disabledBorderColor = InkGlassBorder
+            focusedContainerColor = SettingsVisuals.cardRaised,
+            unfocusedContainerColor = SettingsVisuals.cardRaised,
+            disabledContainerColor = SettingsVisuals.cardRaised.copy(alpha = 0.6f),
+            focusedBorderColor = SettingsVisuals.blue,
+            unfocusedBorderColor = SettingsVisuals.cardBorder,
+            disabledBorderColor = SettingsVisuals.cardBorder,
+            focusedLabelColor = SettingsVisuals.blue,
+            unfocusedLabelColor = IosPalette.secondaryLabel,
+            disabledLabelColor = SettingsVisuals.muted,
+            cursorColor = SettingsVisuals.blue,
+            focusedTextColor = IosPalette.label,
+            unfocusedTextColor = IosPalette.label,
+            disabledTextColor = IosPalette.secondaryLabel
         )
     )
 }
