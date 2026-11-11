@@ -42,7 +42,7 @@ HSPLcom/geekify/android/ui/glass/GlassEffectConfig;->isEnabledFor(Lcom/geekify/a
 Lcom/geekify/android/player/PlaybackService;
 HSPLcom/geekify/android/player/PlaybackService;-><init>()V
 HSPLcom/geekify/android/player/PlaybackService;->onCreate()V
-HSPLcom/geekify/android/player/StreamResolver;
+Lcom/geekify/android/player/StreamResolver;
 HSPLcom/geekify/android/player/StreamResolver;->resolve(Ljava/lang/String;Z)Lcom/geekify/android/player/StreamResolver$ResolvedStream;
 HSPLcom/geekify/android/player/StreamResolver;->prefetch(Ljava/util/List;)V
 Lcom/geekify/android/domain/listening/SmartQueueRanker;
@@ -51,8 +51,8 @@ HSPLcom/geekify/android/domain/listening/SmartQueueRanker;->rankWithSignals(Ljav
 # Room Database & Local DAOs
 Lcom/geekify/android/data/local/GeekifyDatabase_Impl;
 HSPLcom/geekify/android/data/local/GeekifyDatabase_Impl;-><init>()V
-HSPLcom/geekify/android/data/local/LikedDao_Impl;
-HSPLcom/geekify/android/data/local/HistoryDao_Impl;
-HSPLcom/geekify/android/data/local/ListeningSessionDao_Impl;
-HSPLcom/geekify/android/data/local/PlayStatDao_Impl;
-HSPLcom/geekify/android/data/local/ShelfCacheDao_Impl;
+Lcom/geekify/android/data/local/LikedDao_Impl;
+Lcom/geekify/android/data/local/HistoryDao_Impl;
+Lcom/geekify/android/data/local/ListeningSessionDao_Impl;
+Lcom/geekify/android/data/local/PlayStatDao_Impl;
+Lcom/geekify/android/data/local/ShelfCacheDao_Impl;
