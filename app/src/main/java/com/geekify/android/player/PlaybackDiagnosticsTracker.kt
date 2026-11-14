@@ -127,7 +127,7 @@ class PlaybackDiagnosticsTracker @Inject constructor(
         val snap = getSnapshot()
         val sb = StringBuilder()
         sb.appendLine("=== Geekify Playback Diagnostics Report ===")
-        sb.appendLine("App Version: Geekify v2.7.0")
+        sb.appendLine("App Version: Geekify v${com.geekify.android.BuildConfig.VERSION_NAME}")
         sb.appendLine("Android OS: SDK ${Build.VERSION.SDK_INT} (${Build.VERSION.RELEASE})")
         sb.appendLine("Network: ${snap.networkCondition}")
         sb.appendLine("Audio Pipeline: ${snap.audioFormat}")

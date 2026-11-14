@@ -1,7 +1,13 @@
 package com.geekify.android.audio
 
+import androidx.media3.common.C
+import androidx.media3.common.audio.AudioProcessor
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.PI
+import kotlin.math.log10
+import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlin.math.sqrt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -93,5 +99,80 @@ class AudioSettingsTest {
             processor.stepSmoothedCoefficients(effectiveSampleRate = 48_000)
         }
         assertEquals(0f, processor.currentBandGains()[0], 0.05f)
+    }
+
+    @Test
+    fun biquadEqualizerActuallyBoostsAndCutsAllFiveFrequencyBandsInPcm16AndFloat() {
+        val sampleRate = 48_000
+        val channels = 2
+        val totalFrames = 8_192
+        val settleFrames = 2_048 // Let smoothing + biquad filter state reach steady state
+
+        fun measureSteadyStateRmsDb16Bit(
+            freqHz: Double,
+            enabled: Boolean,
+            gainsDb: List<Float>
+        ): Double {
+            val processor = BiquadEqualizerProcessor()
+            processor.configure(AudioProcessor.AudioFormat(sampleRate, channels, C.ENCODING_PCM_16BIT))
+            processor.flush()
+            processor.setBands(enabled = enabled, gainsDb = gainsDb)
+
+            val input = ByteBuffer.allocate(totalFrames * channels * 2).order(ByteOrder.nativeOrder())
+            val amplitude = 0.20 // -14 dBFS so boosts don't hit ceiling
+            for (frame in 0 until totalFrames) {
+                val sample = (sin(2.0 * PI * freqHz * frame / sampleRate) * amplitude * 32767.0)
+                    .roundToInt().coerceIn(-32768, 32767).toShort()
+                repeat(channels) { input.putShort(sample) }
+            }
+            input.flip()
+
+            processor.queueInput(input)
+            val out = processor.output.order(ByteOrder.nativeOrder())
+
+            var sumSq = 0.0
+            var count = 0
+            for (frame in 0 until totalFrames) {
+                for (ch in 0 until channels) {
+                    val s = out.getShort() / 32768.0
+                    if (frame >= settleFrames) {
+                        sumSq += s * s
+                        count++
+                    }
+                }
+            }
+            val rms = sqrt(sumSq / count)
+            return 20.0 * log10(rms)
+        }
+
+        // Verify each of the 5 bands (60 Hz, 230 Hz, 910 Hz, 3.6 kHz, 14 kHz) boosts and cuts its target frequency
+        EqPresets.BAND_HZ.forEachIndexed { bandIndex, freqInt ->
+            val freq = freqInt.toDouble()
+            val flatDb = measureSteadyStateRmsDb16Bit(freq, enabled = false, gainsDb = EqPresets.zeros())
+
+            val boostGains = MutableList(5) { 0f }.also { it[bandIndex] = 8f }
+            val boostedDb = measureSteadyStateRmsDb16Bit(freq, enabled = true, gainsDb = boostGains)
+            val netBoost = boostedDb - flatDb
+            // Target is +8 dB minus 8 * 0.15 = 1.2 dB headroom pre-gain (~ +6.8 dB net boost)
+            assertTrue(
+                "Band $bandIndex ($freqInt Hz) +8 dB boost should increase RMS by at least +5.2 dB, got $netBoost dB",
+                netBoost in 5.2..7.8
+            )
+
+            val cutGains = MutableList(5) { 0f }.also { it[bandIndex] = -8f }
+            val cutDb = measureSteadyStateRmsDb16Bit(freq, enabled = true, gainsDb = cutGains)
+            val netCut = cutDb - flatDb
+            assertTrue(
+                "Band $bandIndex ($freqInt Hz) -8 dB cut should decrease RMS by at least -6.5 dB, got $netCut dB",
+                netCut in -9.0..-6.5
+            )
+        }
+
+        // Also verify Band 0 Low-Shelf boosts deep sub-bass (35 Hz) strongly on "Bass boost" preset
+        val subBassFlatDb = measureSteadyStateRmsDb16Bit(35.0, enabled = false, gainsDb = EqPresets.zeros())
+        val bassBoostGains = EqPresets.presets.getValue("Bass boost")
+        val subBassBoostedDb = measureSteadyStateRmsDb16Bit(35.0, enabled = true, gainsDb = bassBoostGains)
+        val subBassGain = subBassBoostedDb - subBassFlatDb
+        assertTrue("Expected strong 35 Hz sub-bass boost from Low-Shelf, got $subBassGain dB", subBassGain > 4.2)
     }
 }

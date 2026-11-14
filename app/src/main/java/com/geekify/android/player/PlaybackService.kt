@@ -415,6 +415,9 @@ class PlaybackService : MediaLibraryService() {
                     val pos = player.currentPosition
                     val dur = player.duration.coerceAtLeast(0L)
                     queueManager.setProgress(pos, dur)
+                    queueManager.state.value.current?.videoId?.let { currentId ->
+                        crossfadeController.maybeTriggerTrackEndFadeOut(player, currentId, pos, dur)
+                    }
 
                     // A link that has played for a while is good: allow fresh-link retries again for later failures.
                     retryCoordinator.onPlaybackProgressTick(500L)
@@ -485,7 +488,8 @@ class PlaybackService : MediaLibraryService() {
             // A user/account transition deliberately tears down the active item. Do not let this
             // observer resolve and prepare the old account's current track again during teardown.
             if (accountTransitionInProgress) return@onEach
-            if (player.volume != state.volume) player.volume = state.volume
+            crossfadeController.setBaseVolume(state.volume)
+            if (!crossfadeController.isFading && player.volume != state.volume) player.volume = state.volume
             val track = state.current ?: return@onEach
             if (activeListeningTrack != null && activeListeningTrack?.videoId != track.videoId && activeListeningSessionId != null) {
                 // A current-item change before STATE_ENDED is a manual skip or replacement, not a completion.

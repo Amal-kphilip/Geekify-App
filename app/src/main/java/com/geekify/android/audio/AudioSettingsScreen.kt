@@ -97,12 +97,23 @@ private fun Content(s: AudioSettings, vm: AudioSettingsViewModel) {
         ) {
             items(presetNames) { name ->
                 val selected = s.preset == name
+                val activeSelected = selected && s.eqEnabled
                 Box(
                     modifier = Modifier
                         .clip(CircleShape)
                         .background(
-                            if (selected) SettingsVisuals.blue
-                            else SettingsVisuals.cardRaised
+                            when {
+                                activeSelected -> SettingsVisuals.blue
+                                selected -> SettingsVisuals.cardRaised.copy(alpha = 0.85f)
+                                else -> SettingsVisuals.cardRaised
+                            }
+                        )
+                        .then(
+                            if (selected && !s.eqEnabled) {
+                                Modifier.border(1.dp, IosPalette.systemGray, CircleShape)
+                            } else {
+                                Modifier
+                            }
                         )
                         .clickable { vm.selectPreset(name) }
                         .padding(horizontal = 14.dp, vertical = 7.dp),
@@ -110,7 +121,11 @@ private fun Content(s: AudioSettings, vm: AudioSettingsViewModel) {
                 ) {
                     Text(
                         text = name,
-                        color = if (selected) Color.White else IosPalette.label,
+                        color = when {
+                            activeSelected -> Color.White
+                            selected -> IosPalette.secondaryLabel
+                            else -> IosPalette.label
+                        },
                         fontSize = 13.5.sp,
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
                     )

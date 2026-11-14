@@ -51,17 +51,24 @@ class AudioEffectsController @Inject constructor(
     private val _settings = MutableStateFlow(AudioSettings())
     val settings: StateFlow<AudioSettings> = _settings.asStateFlow()
     private var persistJob: Job? = null
+    @Volatile private var hasUserModified = false
 
     init {
         // Restore what was saved, then keep the processors in sync with every change.
         scope.launch {
-            runCatching { repository.settings.first() }.getOrNull()?.let { _settings.value = it }
+            runCatching { repository.settings.first() }.getOrNull()?.let { saved ->
+                if (!hasUserModified) {
+                    _settings.value = saved
+                }
+            }
         }
         _settings.onEach { apply(it) }.launchIn(scope)
     }
 
     fun update(transform: (AudioSettings) -> AudioSettings) {
+        hasUserModified = true
         val next = _settings.updateAndGet { transform(it).sanitized() }
+        apply(next)
         persistJob?.cancel()
         persistJob = scope.launch {
             delay(PERSIST_DELAY_MS)

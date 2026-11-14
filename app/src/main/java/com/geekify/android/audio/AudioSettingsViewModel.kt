@@ -28,18 +28,19 @@ class AudioSettingsViewModel @Inject constructor(
 
     fun selectPreset(name: String) {
         if (name == EqPresets.CUSTOM) {
-            controller.update { it.copy(preset = EqPresets.CUSTOM) }
+            controller.update { it.copy(eqEnabled = true, preset = EqPresets.CUSTOM) }
             return
         }
         val gains = EqPresets.presets[name] ?: return
-        controller.update { it.copy(preset = name, bandGainsDb = gains) }
+        controller.update { it.copy(eqEnabled = true, preset = name, bandGainsDb = gains) }
     }
 
-    /** Moving a slider switches the preset to "Custom" while keeping the user's current Equalizer on/off state. */
+    /** Moving a slider switches the preset to "Custom" and automatically activates the Equalizer. */
     fun setBand(index: Int, gainDb: Float) = controller.update { s ->
         // Snap near-zero to 0.0 dB and round to 0.5 dB steps for clean control.
         val snapped = if (abs(gainDb) < 0.25f) 0f else (gainDb * 2f).roundToInt() / 2f
         s.copy(
+            eqEnabled = true,
             preset = EqPresets.CUSTOM,
             bandGainsDb = s.bandGainsDb.toMutableList().also { if (index in it.indices) it[index] = snapped }
         )

@@ -25,6 +25,10 @@ class CrossfadeAudioTransitionController @Inject constructor(
     private var fadeJob: Job? = null
     private var isDucked = false
     private var userVolume = 1.0f
+    private var endFadeTriggeredForTrackId: String? = null
+
+    val isFading: Boolean
+        get() = fadeJob?.isActive == true
 
     var crossfadeDurationSeconds: Int = 0
         private set
@@ -35,6 +39,10 @@ class CrossfadeAudioTransitionController @Inject constructor(
                 crossfadeDurationSeconds = settings.crossfadeSeconds
             }
         }
+    }
+
+    fun setBaseVolume(volume: Float) {
+        userVolume = volume.coerceIn(0f, 1f)
     }
 
     /**
@@ -74,12 +82,25 @@ class CrossfadeAudioTransitionController @Inject constructor(
     }
 
     fun applyTrackStartFadeIn(player: ExoPlayer) {
+        endFadeTriggeredForTrackId = null
         if (crossfadeDurationSeconds <= 0) {
+            fadeJob?.cancel()
             player.volume = userVolume
             return
         }
         val durationMs = (crossfadeDurationSeconds * 1000L).coerceAtMost(6000L)
         fadeVolume(player, startVol = 0.05f, targetVol = userVolume, durationMs = durationMs)
+    }
+
+    fun maybeTriggerTrackEndFadeOut(player: ExoPlayer, trackId: String, positionMs: Long, durationMs: Long) {
+        if (crossfadeDurationSeconds <= 0 || durationMs <= 15_000L) return
+        if (endFadeTriggeredForTrackId == trackId) return
+        val fadeMs = (crossfadeDurationSeconds * 1000L).coerceAtMost(6000L)
+        val remainingMs = durationMs - positionMs
+        if (remainingMs in 200L..fadeMs) {
+            endFadeTriggeredForTrackId = trackId
+            fadeVolume(player, startVol = player.volume, targetVol = 0.05f, durationMs = remainingMs)
+        }
     }
 
     fun applyTrackEndFadeOut(player: ExoPlayer, onComplete: (() -> Unit)? = null) {
