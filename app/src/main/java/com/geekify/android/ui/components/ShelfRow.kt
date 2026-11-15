@@ -30,7 +30,7 @@ fun ShelfRow(
 
         // The same song/card can appear twice in one shelf; LazyRow crashes on duplicate keys, so keep the first of each.
         val uniqueItems = remember(shelf.items) { shelf.items.distinctBy { it.id } }
-        val allTracksInShelf = uniqueItems.filterIsInstance<ShelfTrack>().map { it.value }
+        val allTracksInShelf = remember(uniqueItems) { uniqueItems.filterIsInstance<ShelfTrack>().map { it.value } }
 
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
@@ -59,7 +59,20 @@ fun ShelfRow(
                     is ShelfCard -> {
                         CardItem(
                             card = item.value,
-                            onClick = { onCardClick(item.value) }
+                            onClick = { onCardClick(item.value) },
+                            onLongClick = item.value.videoId?.let { videoId ->
+                                {
+                                    onTrackLongClick(
+                                        Track(
+                                            videoId = videoId,
+                                            title = item.value.title,
+                                            artist = item.value.subtitle.orEmpty(),
+                                            duration = null,
+                                            thumbnails = item.value.thumbnails
+                                        )
+                                    )
+                                }
+                            }
                         )
                     }
                 }

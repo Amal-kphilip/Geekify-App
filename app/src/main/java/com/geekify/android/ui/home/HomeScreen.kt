@@ -56,10 +56,12 @@ private data class DiscoverItem(
 
 /** One row in the filtered daily content list. */
 private data class ListRowItem(
+    val id: String,
     val title: String,
     val subtitle: String,
     val art: String?,
-    val onClick: () -> Unit
+    val onClick: () -> Unit,
+    val onLongClick: (() -> Unit)? = null
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -85,35 +87,45 @@ fun HomeScreen(
     val firstName = userName?.trim()?.split(" ")?.firstOrNull()?.takeIf { it.isNotBlank() } ?: "there"
 
     // ---- Derived content for the home feed ----
-    val allItems = state.shelves.flatMap { it.items }.distinctBy { it.title }
-    val dailyItems = state.dailyRecommendations[state.selectedFilter].orEmpty().ifEmpty { allItems }
-
-    val mixCards = state.mixes.map { mix ->
-        val lead = mix.tracks.firstOrNull()
-        DiscoverItem(
-            key = "mix:${mix.id}:${mix.title}",
-            title = mix.title,
-            description = mix.subtitle,
-            art = lead?.thumbnails?.bestArtworkUrl(720),
-            lead = lead,
-            onPlay = { if (mix.tracks.isNotEmpty()) onTrackClick(mix.tracks.first(), mix.tracks) }
-        )
+    val allItems = remember(state.shelves) {
+        state.shelves.flatMap { it.items }.distinctBy { it.title }
     }
-    val feedCards = allItems
-        .filterIsInstance<ShelfCard>()
-        .filter { it.value.type == "album" || it.value.type == "playlist" }
-        .take(4)
-    val discover = (mixCards + feedCards.map { item ->
-        DiscoverItem(
-            key = "card:" + item.value.id,
-            title = item.value.title,
-            description = item.value.subtitle?.takeIf { it.isNotBlank() }
-                ?: item.value.type.replaceFirstChar { it.uppercase() },
-            art = item.value.thumbnails.bestArtworkUrl(720),
-            lead = null,
-            onPlay = { onCardClick(item.value) }
-        )
-    }).take(10)
+    val dailyItems = remember(state.dailyRecommendations, state.selectedFilter, allItems) {
+        state.dailyRecommendations[state.selectedFilter].orEmpty().ifEmpty { allItems }
+    }
+
+    val mixCards = remember(state.mixes, onTrackClick) {
+        state.mixes.map { mix ->
+            val lead = mix.tracks.firstOrNull()
+            DiscoverItem(
+                key = "mix:${mix.id}:${mix.title}",
+                title = mix.title,
+                description = mix.subtitle,
+                art = lead?.thumbnails?.bestArtworkUrl(720),
+                lead = lead,
+                onPlay = { if (mix.tracks.isNotEmpty()) onTrackClick(mix.tracks.first(), mix.tracks) }
+            )
+        }
+    }
+    val feedCards = remember(allItems) {
+        allItems
+            .filterIsInstance<ShelfCard>()
+            .filter { it.value.type == "album" || it.value.type == "playlist" }
+            .take(4)
+    }
+    val discover = remember(mixCards, feedCards, onCardClick) {
+        (mixCards + feedCards.map { item ->
+            DiscoverItem(
+                key = "card:" + item.value.id,
+                title = item.value.title,
+                description = item.value.subtitle?.takeIf { it.isNotBlank() }
+                    ?: item.value.type.replaceFirstChar { it.uppercase() },
+                art = item.value.thumbnails.bestArtworkUrl(720),
+                lead = null,
+                onPlay = { onCardClick(item.value) }
+            )
+        }).take(10)
+    }
 
     val isLooping = discover.size > 1
     val initialDiscoverIndex = if (isLooping) (DISCOVER_LOOP_FACTOR / 2) * discover.size else 0
@@ -132,7 +144,7 @@ fun HomeScreen(
 
     // Use stable item identities and only jump to the initial loop midpoint when not yet positioned
     // in the looping range, preventing a jarring snap when background mixes finish loading.
-    val discoverKeys = discover.map { it.key }
+    val discoverKeys = remember(discover) { discover.map { it.key } }
     LaunchedEffect(discoverKeys.size) {
         if (discoverKeys.size > 1) {
             if (discoverListState.firstVisibleItemIndex < discoverKeys.size) {
@@ -170,25 +182,45 @@ fun HomeScreen(
         }
     }
 
-    val usedIds = feedCards.map { it.id }.toSet()
-    val listItems = dailyItems.filter { it.id !in usedIds }.map { item ->
-        when (item) {
-            is ShelfTrack -> ListRowItem(
-                title = item.value.title,
-                subtitle = "By ${item.value.artist}",
-                art = item.value.thumbnails.bestArtworkUrl(480),
-                onClick = { onTrackClick(item.value, listOf(item.value)) }
-            )
-            is ShelfCard -> ListRowItem(
-                title = item.value.title,
-                subtitle = item.value.subtitle?.takeIf { it.isNotBlank() }
-                    ?: item.value.type.replaceFirstChar { it.uppercase() },
-                art = item.value.thumbnails.bestArtworkUrl(480),
-                onClick = { onCardClick(item.value) }
-            )
+    val listItems = remember(dailyItems, feedCards, onTrackClick, onCardClick, onTrackActions) {
+        val usedIds = feedCards.map { it.id }.toSet()
+        dailyItems.filter { it.id !in usedIds }.map { item ->
+            when (item) {
+                is ShelfTrack -> ListRowItem(
+                    id = item.id,
+                    title = item.value.title,
+                    subtitle = "By ${item.value.artist}",
+                    art = item.value.thumbnails.bestArtworkUrl(480),
+                    onClick = { onTrackClick(item.value, listOf(item.value)) },
+                    onLongClick = { onTrackActions(item.value) }
+                )
+                is ShelfCard -> ListRowItem(
+                    id = item.id,
+                    title = item.value.title,
+                    subtitle = item.value.subtitle?.takeIf { it.isNotBlank() }
+                        ?: item.value.type.replaceFirstChar { it.uppercase() },
+                    art = item.value.thumbnails.bestArtworkUrl(480),
+                    onClick = { onCardClick(item.value) },
+                    onLongClick = item.value.videoId?.let { videoId ->
+                        {
+                            onTrackActions(
+                                Track(
+                                    videoId = videoId,
+                                    title = item.value.title,
+                                    artist = item.value.subtitle.orEmpty(),
+                                    duration = null,
+                                    thumbnails = item.value.thumbnails
+                                )
+                            )
+                        }
+                    }
+                )
+            }
         }
     }
-    val visibleList = if (showAllPlaylists) listItems.take(20) else listItems.take(5)
+    val visibleList = remember(showAllPlaylists, listItems) {
+        if (showAllPlaylists) listItems.take(20) else listItems.take(5)
+    }
     val listSectionTitle = when (state.selectedFilter) {
         "Songs" -> "Top daily songs"
         "Albums" -> "Top daily albums"
@@ -198,6 +230,7 @@ fun HomeScreen(
     }
 
     val asciiEnabled = LocalAppSettings.current.ascii.enabled
+    val bottomInset = LocalBottomInset.current
 
     Box(modifier = Modifier.fillMaxSize().background(if (asciiEnabled) Color.Transparent else InkBackground)) {
         PullToRefreshBox(
@@ -205,7 +238,10 @@ fun HomeScreen(
             onRefresh = { viewModel.loadHome(true) },
             modifier = Modifier.fillMaxSize()
         ) {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 28.dp + bottomInset)
+            ) {
                 // ---- Header: glow, avatar, search / favourites, greeting, filter chips ----
                 item {
                     Column(
@@ -439,7 +475,7 @@ fun HomeScreen(
                     }
                     items(
                         count = visibleList.size,
-                        key = { index -> "daily:${visibleList[index].title}:${visibleList[index].subtitle}" },
+                        key = { index -> visibleList[index].id },
                         contentType = { "daily_row" }
                     ) { index ->
                         PlaylistRow(item = visibleList[index])
@@ -452,58 +488,76 @@ fun HomeScreen(
                     key = { index, shelf -> "shelf:$index:${shelf.title}" },
                     contentType = { _, _ -> "shelf" }
                 ) { _, shelf ->
-                    ShelfRow(shelf = shelf, onTrackClick = onTrackClick, onCardClick = onCardClick)
+                    ShelfRow(
+                        shelf = shelf,
+                        onTrackClick = onTrackClick,
+                        onCardClick = onCardClick,
+                        onTrackLongClick = onTrackActions
+                    )
                 }
-
-                item { Spacer(Modifier.height(24.dp + LocalBottomInset.current)) }
             }
+        }
+
+        // Soft gradient fade at the bottom so scrolling list items cleanly fade out behind floating dock
+        if (bottomInset > 0.dp) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(bottomInset + 24.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            0.35f to (if (asciiEnabled) InkBackground.copy(alpha = 0.70f) else InkBackground.copy(alpha = 0.85f)),
+                            1f to (if (asciiEnabled) InkBackground.copy(alpha = 0.95f) else InkBackground)
+                        )
+                    )
+            )
         }
     }
 }
+
+private class CachedHeaderGlow(val width: Float, val height: Float) {
+    val violet = Brush.radialGradient(
+        colors = listOf(Color(0xFF8A4DFF).copy(alpha = 0.55f), Color.Transparent),
+        center = Offset(width * 0.20f, height * 0.10f),
+        radius = width * 0.95f
+    )
+    val blue = Brush.radialGradient(
+        colors = listOf(Color(0xFF4A78FF).copy(alpha = 0.38f), Color.Transparent),
+        center = Offset(width * 0.45f, height * 0.18f),
+        radius = width * 0.50f
+    )
+    val pink = Brush.radialGradient(
+        colors = listOf(Color(0xFFFF8FC4).copy(alpha = 0.80f), Color.Transparent),
+        center = Offset(width * 0.08f, 0f),
+        radius = width * 0.58f
+    )
+    val white = Brush.radialGradient(
+        colors = listOf(Color.White.copy(alpha = 0.95f), Color.White.copy(alpha = 0f)),
+        center = Offset(width * 0.10f, -height * 0.02f),
+        radius = width * 0.30f
+    )
+    val vertical = Brush.verticalGradient(
+        0.45f to Color.Transparent,
+        1f to InkBackground
+    )
+}
+
+private var cachedGlowState: CachedHeaderGlow? = null
 
 /** Soft white / pink / violet light that blooms from the top-left corner and fades into the background. */
 private fun DrawScope.drawHeaderGlow() {
     val w = size.width
     val h = size.height
-    // violet bloom
-    drawRect(
-        Brush.radialGradient(
-            colors = listOf(Color(0xFF8A4DFF).copy(alpha = 0.55f), Color.Transparent),
-            center = Offset(w * 0.20f, h * 0.10f),
-            radius = w * 0.95f
-        )
-    )
-    // blue streak drifting right
-    drawRect(
-        Brush.radialGradient(
-            colors = listOf(Color(0xFF4A78FF).copy(alpha = 0.38f), Color.Transparent),
-            center = Offset(w * 0.45f, h * 0.18f),
-            radius = w * 0.50f
-        )
-    )
-    // pink core
-    drawRect(
-        Brush.radialGradient(
-            colors = listOf(Color(0xFFFF8FC4).copy(alpha = 0.80f), Color.Transparent),
-            center = Offset(w * 0.08f, 0f),
-            radius = w * 0.58f
-        )
-    )
-    // hot white centre
-    drawRect(
-        Brush.radialGradient(
-            colors = listOf(Color.White.copy(alpha = 0.95f), Color.White.copy(alpha = 0f)),
-            center = Offset(w * 0.10f, -h * 0.02f),
-            radius = w * 0.30f
-        )
-    )
-    // melt into the screen background
-    drawRect(
-        Brush.verticalGradient(
-            0.45f to Color.Transparent,
-            1f to InkBackground
-        )
-    )
+    val glow = cachedGlowState?.takeIf { it.width == w && it.height == h }
+        ?: CachedHeaderGlow(w, h).also { cachedGlowState = it }
+
+    drawRect(glow.violet)
+    drawRect(glow.blue)
+    drawRect(glow.pink)
+    drawRect(glow.white)
+    drawRect(glow.vertical)
 }
 
 @Composable
@@ -521,7 +575,13 @@ private fun DiscoverCard(
             .height(186.dp)
             .clip(RoundedCornerShape(28.dp))
             .background(color)
-            .bouncyClickable(pressedScale = 0.98f, onClick = item.onPlay)
+            .run {
+                if (item.lead != null) {
+                    bouncyCombinedClickable(pressedScale = 0.98f, onClick = item.onPlay, onLongClick = onMore)
+                } else {
+                    bouncyClickable(pressedScale = 0.98f, onClick = item.onPlay)
+                }
+            }
     ) {
         // Artwork on the right, melting into the card colour.
         Box(
@@ -640,7 +700,13 @@ private fun PlaylistRow(item: ListRowItem) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .bouncyClickable(pressedScale = 0.985f, onClick = item.onClick)
+            .run {
+                if (item.onLongClick != null) {
+                    bouncyCombinedClickable(pressedScale = 0.985f, onLongClick = item.onLongClick, onClick = item.onClick)
+                } else {
+                    bouncyClickable(pressedScale = 0.985f, onClick = item.onClick)
+                }
+            }
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
