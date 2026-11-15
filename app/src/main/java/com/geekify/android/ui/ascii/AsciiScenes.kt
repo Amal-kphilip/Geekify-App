@@ -13,77 +13,71 @@ import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.random.Random
 
 // =========================================================================
-// 15. RAIN ON WINDOW GLASS
+// 8. RAIN ON WINDOW GLASS
 // =========================================================================
-private class BokehOrb(
-    val x: Float, val y: Float, val r: Float,
-    val cr: Float, val cg: Float, val cb: Float,
-    val phase: Float
+private class BokehOrbSpec(
+    var x: Float, var y: Float, val rad: Float,
+    val r: Float, val g: Float, val b: Float
 )
 
-private class RainDrop(
-    var x: Float, var y: Float,
-    var vx: Float, var vy: Float,
-    var mass: Float, var stuckTimer: Float,
-    var seed: Float, var trailTimer: Float
-)
+private fun sampleBokeh(nx: Float, ny: Float, t: Float, out: FloatArray) {
+    var r = 18f + 16f * (1f - ny)
+    var g = 28f + 26f * (1f - ny)
+    var b = 52f + 44f * (1f - ny)
 
-private val BOKEH_COLORS = arrayOf(
-    floatArrayOf(255f, 168f, 76f),
-    floatArrayOf(82f, 198f, 255f),
-    floatArrayOf(255f, 92f, 148f),
-    floatArrayOf(118f, 238f, 186f),
-    floatArrayOf(255f, 218f, 112f)
-)
+    val orbs = arrayOf(
+        BokehOrbSpec(0.22f + 0.03f * sin(t * 0.2f), 0.62f, 0.26f, 255f, 165f, 68f),
+        BokehOrbSpec(0.48f + 0.04f * cos(t * 0.15f), 0.54f, 0.28f, 72f, 204f, 255f),
+        BokehOrbSpec(0.76f + 0.03f * sin(t * 0.25f + 1f), 0.58f, 0.25f, 248f, 92f, 168f),
+        BokehOrbSpec(0.35f, 0.36f, 0.22f, 110f, 235f, 190f),
+        BokehOrbSpec(0.64f, 0.32f, 0.22f, 255f, 210f, 95f)
+    )
+
+    for (o in orbs) {
+        val d = hypot(nx - o.x, (ny - o.y) * 1.15f)
+        if (d < o.rad) {
+            val w = (1f - d / o.rad).pow(1.8f) * 0.72f
+            r += o.r * w
+            g += o.g * w
+            b += o.b * w
+        }
+    }
+    out[0] = clampF(r, 0f, 255f)
+    out[1] = clampF(g, 0f, 255f)
+    out[2] = clampF(b, 0f, 255f)
+}
 
 class RainSim(private val tuning: AsciiTuning) : AsciiSimulation {
     override val id: String = "rain"
-    private var width = 1f
-    private var height = 1f
-    private val drops = ArrayList<RainDrop>(48)
-    private val bokeh = ArrayList<BokehOrb>(14)
+    private val flock = Flock(
+        tuning = tuning,
+        area = 28000f,
+        scale = 0.45f,
+        speed = 110f,
+        maxCreatures = 190,
+        windWeight = 0.9f
+    )
+    private val bokehRgb = FloatArray(3)
+    private val dropBokeh = FloatArray(3)
+    private val pose = Pose()
 
     override fun resize(width: Float, height: Float) {
-        this.width = width
-        this.height = height
-        bokeh.clear()
-        for (i in 0 until 14) {
-            val col = BOKEH_COLORS[i % BOKEH_COLORS.size]
-            bokeh.add(
-                BokehOrb(
-                    x = (0.08f + 0.84f * hash1(i * 13.7f)) * width,
-                    y = (0.12f + 0.76f * hash1(i * 29.3f)) * height,
-                    r = lerpF(26f, 64f, hash1(i * 7.1f)),
-                    cr = col[0], cg = col[1], cb = col[2],
-                    phase = i * 1.4f
-                )
-            )
-        }
-    }
-
-    private fun spawnDrop(x: Float = Random.nextFloat() * width, y: Float = Random.nextFloat() * height, big: Boolean = false): RainDrop {
-        return RainDrop(
-            x = x, y = y,
-            vx = 0f, vy = 0f,
-            mass = if (big) lerpF(1.35f, 2.2f, Random.nextFloat()) else lerpF(0.45f, 1.35f, Random.nextFloat()),
-            stuckTimer = lerpF(0.2f, 1.8f, Random.nextFloat()),
-            seed = Random.nextFloat() * 100f,
-            trailTimer = 0f
-        )
+        flock.resize(width, height)
     }
 
     override fun onPointerDown(x: Float, y: Float) {
-        for (k in 0 until 5) {
-            drops.add(
-                spawnDrop(
-                    x + (Random.nextFloat() - 0.5f) * 44f,
-                    y + (Random.nextFloat() - 0.5f) * 30f,
-                    big = true
-                )
-            )
+        flock.events.add(StampEvent(x, y, 5, 1.4f))
+        for (d in flock.creatures) {
+            val dist = hypot(d.x - x, d.y - y)
+            if (dist < 140f) {
+                d.mass = min(2.2f, d.mass + 0.65f * (1f - dist / 140f))
+                d.sliding = true
+                d.vy = max(d.vy, 110f)
+            }
         }
     }
 
@@ -93,475 +87,512 @@ class RainSim(private val tuning: AsciiTuning) : AsciiSimulation {
         val refraction = tuning["refraction", 1.35f]
         val pen = renderer.pen
 
-        // Blurred city bokeh lights behind glass
-        for (i in 0 until bokeh.size) {
-            val b = bokeh[i]
-            val pulse = 0.85f + 0.15f * sin(time * 1.2f + b.phase)
-            pen.disc(b.x, b.y, b.r * pulse * (0.7f + 0.3f * refraction), b.cr, b.cg, b.cb, 0.12f, 0.62f)
+        flock.step(dt) { d ->
+            d.mass = lerpF(0.22f, 1.05f, Random.nextFloat())
+            d.radius = (5f + d.mass * 11f) * (0.65f + 0.45f * d.depth) * tuning.size
+            d.sliding = d.mass > 0.75f
+            d.vx = 0f
+            d.vy = if (d.sliding) lerpF(45f, 115f, Random.nextFloat()) else 0f
+            d.wobble = Random.nextFloat() * TAU
         }
 
-        // Background rain streaks outside window
-        val streaks = max(12, roundToInt(28f * downpour * tuning.density))
-        for (s in 0 until streaks) {
-            val sx = ((hash1(s * 19.1f) * width + time * 42f) % width)
-            val sy = ((hash1(s * 31.7f) * height + time * (420f + (s % 5) * 60f) * tuning.speed) % height)
-            pen.dot(sx, sy, '|', 110f, 155f, 205f, 0.2f, 0.58f)
-            pen.dot(sx, sy + 11f, ':', 110f, 155f, 205f, 0.2f, 0.65f)
+        // Merging drops
+        val list = flock.creatures
+        for (i in 0 until list.size) {
+            val a = list[i]
+            for (j in i + 1 until list.size) {
+                val b = list[j]
+                val dist = hypot(b.x - a.x, b.y - a.y)
+                val touchR = (a.radius + b.radius) * 0.72f * mergeRate
+                if (dist < touchR) {
+                    val heavier = if (a.mass >= b.mass) a else b
+                    val lighter = if (heavier === a) b else a
+                    heavier.x = lerpF(heavier.x, lighter.x, 0.3f)
+                    heavier.y = lerpF(heavier.y, lighter.y, 0.3f)
+                    heavier.mass = min(2.4f, heavier.mass + lighter.mass * 0.65f)
+                    heavier.sliding = true
+                    heavier.vy = max(heavier.vy, 85f * downpour)
+                    flock.events.add(StampEvent(heavier.x, heavier.y, 1, 0.55f))
+
+                    lighter.x = Random.nextFloat() * flock.width
+                    lighter.y = lerpF(-15f, flock.height * 0.75f, Random.nextFloat())
+                    lighter.mass = lerpF(0.2f, 0.65f, Random.nextFloat())
+                    lighter.sliding = false
+                    lighter.vx = 0f
+                    lighter.vy = 0f
+                }
+            }
         }
 
-        val target = max(14, roundToInt(36f * tuning.density * downpour))
-        while (drops.size < target) drops.add(spawnDrop())
-        while (drops.size > target + 12) drops.removeAt(0)
+        for (d in list) {
+            d.mass += dt * 0.14f * downpour * (0.5f + 0.5f * Random.nextFloat())
+            d.radius = (5f + d.mass * 11f) * (0.65f + 0.45f * d.depth) * tuning.size
+            if (d.mass > 0.82f) d.sliding = true
 
-        for (i in drops.size - 1 downTo 0) {
-            val d = drops[i]
-            d.mass += dt * 0.08f * downpour
-            if (d.mass < 1.0f && d.stuckTimer > 0f) {
-                d.stuckTimer -= dt * downpour
-                d.vy *= 0.85f
+            if (!d.sliding) {
+                d.vx = flock.windX * 0.04f
+                d.vy = max(0f, d.mass - 0.55f) * 14f
+                d.x += d.vx * dt
+                d.y += d.vy * dt
             } else {
-                val grav = (42f + d.mass * 68f) * tuning.speed * downpour
-                d.vy = lerpF(d.vy, grav, min(1f, dt * 4.5f))
-                val meander = noise1(d.y * 0.035f + d.seed) * 28f
-                d.vx = lerpF(d.vx, meander, min(1f, dt * 6f))
+                d.wobble += dt * (4.5f + d.mass * 2.5f)
+                val terminal = (95f + d.mass * 115f) * tuning.speed * downpour
+                val slip = 0.65f + 0.35f * sin(d.wobble * 1.7f + d.id)
+                d.vy = lerpF(d.vy, terminal * slip, min(1f, dt * 5f))
+                d.vx = sin(d.wobble + d.y * 0.045f) * 34f + flock.windX * 0.35f
                 d.x += d.vx * dt
                 d.y += d.vy * dt
 
-                d.trailTimer -= dt
-                if (d.trailTimer <= 0f) {
-                    d.trailTimer = 0.03f
-                    pen.trail(d.x, d.y - 4f, 0.42f)
-                    if (d.mass > 1.25f && Random.nextFloat() < 0.35f) {
-                        d.mass *= 0.96f
-                    }
+                if (d.vy > 45f) {
+                    flock.events.add(StampEvent(d.x, d.y - d.radius * 0.6f, 0, 0.24f * d.depth))
+                    d.mass = max(0.55f, d.mass - dt * 0.08f)
                 }
             }
 
-            // Coalesce nearby droplets
-            val mergeDist = (10f + d.mass * 5.5f) * mergeRate * tuning.size
-            var j = i - 1
-            while (j >= 0) {
-                val o = drops[j]
-                if (hypot(o.x - d.x, o.y - d.y) < mergeDist) {
-                    val total = d.mass + o.mass
-                    d.x = (d.x * d.mass + o.x * o.mass) / total
-                    d.y = (d.y * d.mass + o.y * o.mass) / total
-                    d.mass = min(3.2f, total * 0.92f)
-                    d.stuckTimer = 0f
-                    drops.removeAt(j)
-                    break
+            if (d.y > flock.height + 40f || d.x < -40f || d.x > flock.width + 40f) {
+                d.x = Random.nextFloat() * flock.width
+                d.y = lerpF(-25f, flock.height * 0.25f, Random.nextFloat())
+                d.mass = lerpF(0.35f, 1.1f, Random.nextFloat())
+                d.sliding = d.mass > 0.75f
+                d.vy = if (d.sliding) lerpF(40f, 90f, Random.nextFloat()) else 0f
+            }
+        }
+
+        // Draw blurred city bokeh orbs behind window
+        val cols = pen.cols
+        val rows = pen.rows
+        var r = 0
+        while (r < rows) {
+            val ny = (r + 0.5f) / rows
+            var c = 0
+            while (c < cols) {
+                val nx = (c + 0.5f) / cols
+                sampleBokeh(nx, ny, time, bokehRgb)
+                val lum = (bokehRgb[0] + bokehRgb[1] + bokehRgb[2]) / 3f
+                if (lum > 46f) {
+                    pen.setCell(c, r, if (lum > 85f) ':' else '.', bokehRgb, null, 0.62f)
                 }
-                j--
+                c += 2
             }
-
-            if (d.y > height + 30f) {
-                drops[i] = spawnDrop(Random.nextFloat() * width, -10f)
-            }
+            r += 2
         }
 
-        for (i in 0 until drops.size) {
-            drawDrop(drops[i], refraction, pen)
-        }
-    }
+        // Draw droplets
+        val w = max(1f, flock.width)
+        val h = max(1f, flock.height)
+        for (d in flock.creatures) {
+            val rad = max(7f, d.radius)
+            val stretch = if (d.sliding) 1f + clampF(d.vy / 260f, 0f, 0.55f) else 1f
+            pose.x = d.x
+            pose.y = d.y
+            pose.heading = HALF_PI
+            pose.span = rad * 2.2f
+            pose.depth = d.depth
+            pose.id = d.id
 
-    private fun roundToInt(v: Float): Int = v.roundToInt()
-
-    private fun drawDrop(d: RainDrop, refraction: Float, pen: AsciiPen) {
-        val s = tuning.size
-        val rx = (5.5f + d.mass * 3.8f) * s
-        val ry = rx * (1f + clampF(d.vy / 220f, 0f, 0.65f))
-
-        var refR = 135f
-        var refG = 205f
-        var refB = 255f
-        for (i in 0 until bokeh.size) {
-            val b = bokeh[i]
-            val dist = hypot(b.x - d.x, b.y - d.y)
-            if (dist < b.r * 2.2f) {
-                val w = (1f - dist / (b.r * 2.2f)) * 0.7f * min(1.5f, refraction)
-                refR = lerpF(refR, b.cr, w)
-                refG = lerpF(refG, b.cg, w)
-                refB = lerpF(refB, b.cb, w)
-            }
-        }
-
-        pen.shape(d.x, d.y, max(rx, ry) * 1.25f, 0.75f, 0.05f, (d.seed * 10f).toInt()) { px, py, out ->
-            val dx = px - d.x
-            val dy = py - d.y
-            val taper = if (dy < 0f) (1f + dy / (ry * 1.6f)) else 1f
-            val dist = hypot(dx / max(2f, rx * clampF(taper, 0.35f, 1.1f)), dy / ry)
-            if (dist > 1f) return@shape false
-
-            if (hypot(dx + rx * 0.28f, dy + ry * 0.28f) < rx * 0.36f) {
-                return@shape out.set(INK_SHIMMER, 240f, 250f, 255f, 0f, 0f, 0f, 0f, '*')
-            }
-            if (dist > 0.76f) {
-                return@shape out.set(INK_LIT, min(255f, refR + 35f), min(255f, refG + 35f), min(255f, refB + 35f))
-            }
-            out.set(INK_GLASS, refR, refG, refB, refR * 0.25f, refG * 0.28f, refB * 0.35f, 0.55f)
+            pen.shape(pose, 0.65f, { u, v, px, py ->
+                val su = u / stretch
+                val taper = if (su < 0f) 1f + su * 0.65f else 1f
+                val sv = v / max(0.25f, taper)
+                val r2 = su * su + sv * sv
+                if (r2 > 0.22f) return@shape false
+                val rNorm = sqrt(r2 / 0.22f)
+                if (u > 0.08f && v < -0.04f && rNorm in 0.52f..0.86f) {
+                    return@shape pen.ink.set(240f, 250f, 255f, INK_SPOT, "o*")
+                }
+                if (rNorm > 0.84f) {
+                    return@shape pen.ink.set(95f, 165f, 225f, INK_GLASS, "()")
+                }
+                val refScale = 0.14f * refraction
+                val rnx = clampF(px / w - sv * refScale, 0f, 1f)
+                val rny = clampF(py / h - su * refScale, 0f, 1f)
+                sampleBokeh(rnx, rny, time, dropBokeh)
+                val boost = 1.35f + 0.35f * (1f - rNorm)
+                pen.ink.set(
+                    min(255f, dropBokeh[0] * boost + 35f),
+                    min(255f, dropBokeh[1] * boost + 45f),
+                    min(255f, dropBokeh[2] * boost + 60f),
+                    if (rNorm < 0.48f) INK_LIT else INK_GLOW,
+                    if (rNorm < 0.4f) "@#*" else ":+~"
+                )
+            }, light = 1.1f, fog = (1f - d.depth) * 0.35f)
         }
     }
 }
 
 // =========================================================================
-// 16. SNOWFALL & CRYSTALS
+// 9. SNOWFALL & 6-FOLD CRYSTALS
 // =========================================================================
-private class Snowflake(
-    var x: Float, var y: Float, var z: Float,
-    var angle: Float, var spin: Float,
-    var seed: Float, var radius: Float,
-    var vx: Float = 0f, var vy: Float = 0f
-)
-
-private class WindGust(var x: Float, var y: Float, var vx: Float, var vy: Float, var age: Float = 0f)
+private val SNOW_BRIGHT = floatArrayOf(242f, 248f, 255f)
+private val SNOW_ICE = floatArrayOf(178f, 214f, 252f)
+private val SNOW_FAR = floatArrayOf(132f, 166f, 214f)
 
 class SnowfallSim(private val tuning: AsciiTuning) : AsciiSimulation {
     override val id: String = "snowfall"
-    private var width = 1f
-    private var height = 1f
-    private val flakes = ArrayList<Snowflake>(80)
-    private val gusts = ArrayList<WindGust>(8)
+    private val flock = Flock(
+        tuning = tuning,
+        area = 21000f,
+        scale = 0.55f,
+        speed = 96f,
+        maxCreatures = 240,
+        windWeight = 1.8f
+    )
+    private val pose = Pose()
 
     override fun resize(width: Float, height: Float) {
-        this.width = width
-        this.height = height
-    }
-
-    private fun spawnFlake(initial: Boolean = false): Snowflake {
-        val z = Random.nextFloat().pow(1.35f)
-        return Snowflake(
-            x = Random.nextFloat() * width,
-            y = if (initial) Random.nextFloat() * height else -30f,
-            z = z,
-            angle = Random.nextFloat() * TWO_PI,
-            spin = (Random.nextFloat() - 0.5f) * 1.4f,
-            seed = Random.nextFloat() * 100f,
-            radius = lerpF(6f, 24f, z)
-        )
+        flock.resize(width, height)
     }
 
     override fun onPointerDown(x: Float, y: Float) {
-        if (gusts.size > 5) gusts.removeAt(0)
-        gusts.add(
-            WindGust(
-                x = x, y = y,
-                vx = (if (Random.nextFloat() < 0.5f) 1f else -1f) * 180f,
-                vy = -85f,
-                age = 0f
-            )
-        )
+        val gustStr = tuning["gustStrength", 1.35f]
+        val gustDir = if (x < flock.width * 0.5f) -0.15f else -PI.toFloat() + 0.15f
+        flock.triggerGust(gustDir, 1.45f * gustStr)
+        flock.events.add(StampEvent(x, y, 7, 1.3f))
+        for (s in flock.creatures) {
+            val dx = s.x - x
+            val dy = s.y - y
+            val d = hypot(dx, dy).coerceAtLeast(1f)
+            val falloff = clampF(1f - d / 560f, 0.2f, 1f)
+            val layerBoost = (0.4f + 0.9f * s.depth) * gustStr
+            s.vx += (dx / d * 260f + cos(gustDir) * 320f) * falloff * layerBoost
+            s.vy += (dy / d * 180f - 95f) * falloff * layerBoost
+            s.spinRate = lerpF(-5f, 5f, Random.nextFloat())
+            s.startledUntil = flock.time + lerpF(0.9f, 1.8f, Random.nextFloat())
+        }
     }
 
     override fun step(dt: Float, time: Float, renderer: AsciiRenderer) {
-        val gustStrength = tuning["gustStrength", 1.35f]
         val drift = tuning["drift", 1.2f]
         val crystalDetail = tuning["crystalDetail", 1.15f]
         val pen = renderer.pen
 
-        val target = max(20, (64f * tuning.density).roundToInt())
-        while (flakes.size < target) flakes.add(spawnFlake(true))
-        while (flakes.size > target) flakes.removeAt(flakes.lastIndex)
-
-        for (i in gusts.size - 1 downTo 0) {
-            val g = gusts[i]
-            g.age += dt
-            if (g.age > 2.2f) gusts.removeAt(i)
+        flock.step(dt) { s ->
+            s.spin = Random.nextFloat() * TAU
+            s.spinRate = lerpF(-2.2f, 2.2f, Random.nextFloat())
+            s.swayPhase = Random.nextFloat() * TAU
         }
 
-        val globalWind = sin(time * 0.35f) * 28f * gustStrength
+        for (i in 0 until flock.creatures.size) {
+            val s = flock.creatures[i]
+            val layerSpeed = 0.22f + 1.15f * (s.depth * s.depth)
+            val fallSpeed = flock.speed * layerSpeed * tuning.speed
+            flock.beginSteer()
 
-        for (i in 0 until flakes.size) {
-            val f = flakes[i]
-            val depthSpd = 0.35f + 0.85f * f.z
-            val flutter = sin(time * 1.8f + f.seed) * 24f * drift * (0.5f + 0.5f * f.z)
-            var gx = 0f
-            var gy = 0f
+            s.swayPhase += dt * (1.6f + s.depth * 1.4f)
+            val flutter = sin(s.swayPhase) * 42f * drift * (0.4f + 0.6f * s.depth)
+            val targetVx = cos(flock.heading) * fallSpeed + flutter + flock.windX * (0.5f + 0.9f * s.depth)
+            val targetVy = abs(sin(flock.heading)) * fallSpeed + 28f * layerSpeed
+            flock.accX += (targetVx - s.vx) * 2.4f
+            flock.accY += (targetVy - s.vy) * 2.4f
 
-            for (j in 0 until gusts.size) {
-                val g = gusts[j]
-                val dx = f.x - g.x
-                val dy = f.y - g.y
-                val d = hypot(dx, dy)
-                if (d < 220f && d > 1f) {
-                    val fade = (1f - g.age / 2.2f) * (1f - d / 220f) * gustStrength
-                    gx += (-dy / d * 190f + g.vx * 0.6f) * fade
-                    gy += (dx / d * 190f + g.vy * 0.6f) * fade
+            flock.move(s, dt, fallSpeed * 2.8f)
+            s.spin += s.spinRate * dt
+
+            val m = 45f
+            if (s.y > flock.height + m) {
+                s.y = -m
+                s.x = Random.nextFloat() * flock.width
+            }
+            if (s.x > flock.width + m) s.x = -m
+            if (s.x < -m) s.x = flock.width + m
+
+            // Draw flake
+            if (s.depth < 0.36f) {
+                pen.dot(s.x, s.y, if (s.depth < 0.22f) '.' else ':', SNOW_FAR, s.depth)
+                continue
+            }
+            if (s.depth < 0.68f) {
+                val g = if (sin(s.spin * 2f) > 0f) '*' else '+'
+                pen.dot(s.x, s.y, g, SNOW_ICE, s.depth)
+                if (Random.nextFloat() < 0.15f) pen.shed(s.x, s.y, 0.04f * s.depth)
+                continue
+            }
+
+            // Foreground 6-armed crystal
+            val bigSpan = s.span * 0.78f * crystalDetail
+            pose.x = s.x
+            pose.y = s.y
+            pose.heading = s.spin
+            pose.span = bigSpan
+            pose.depth = s.depth
+            pose.id = s.id
+
+            pen.shape(pose, 0.56f, { u, v, _, _ ->
+                val r = hypot(u, v)
+                if (r > 0.48f) return@shape false
+                if (r < 0.08f) return@shape pen.ink.set(SNOW_BRIGHT[0], SNOW_BRIGHT[1], SNOW_BRIGHT[2], INK_SPOT, "*#")
+
+                val a = atan2(v, u)
+                val sector = PI.toFloat() / 3f
+                val localA = abs((a % sector + sector + sector * 0.5f) % sector - sector * 0.5f)
+                val along = r * cos(localA)
+                val perp = r * sin(localA)
+                val onMain = perp < 0.032f && along < 0.46f
+                val b1 = abs(along - 0.22f - perp * 0.58f) < 0.026f && perp < 0.14f
+                val b2 = abs(along - 0.34f - perp * 0.58f) < 0.024f && perp < 0.10f
+                if (onMain || b1 || b2) {
+                    return@shape if (r < 0.26f) {
+                        pen.ink.set(SNOW_BRIGHT[0], SNOW_BRIGHT[1], SNOW_BRIGHT[2], INK_LIT, "*+#")
+                    } else {
+                        pen.ink.set(SNOW_ICE[0], SNOW_ICE[1], SNOW_ICE[2], INK_GLOW, "*+:")
+                    }
                 }
-            }
-
-            f.vx = (globalWind + flutter) * depthSpd + gx
-            f.vy = (32f + f.z * 58f) * tuning.speed + gy
-            f.x += f.vx * dt
-            f.y += f.vy * dt
-            f.angle += f.spin * dt
-
-            if (f.x < -40f) f.x = width + 35f
-            if (f.x > width + 40f) f.x = -35f
-            if (f.y > height + 40f) {
-                f.y = -30f
-                f.x = Random.nextFloat() * width
-            }
-        }
-
-        flakes.sortBy { it.z }
-        for (i in 0 until flakes.size) {
-            val f = flakes[i]
-            val fog = (1f - f.z) * tuning.fog
-            if (f.z < 0.68f) {
-                val ch = if (f.z < 0.32f) '.' else if (f.z < 0.52f) '+' else '*'
-                pen.dot(f.x, f.y, ch, 210f, 232f, 255f, f.z, fog)
-            } else {
-                if (Random.nextFloat() < 0.25f) pen.trail(f.x, f.y, 0.2f)
-                drawCrystal(f, fog, crystalDetail, pen)
-            }
-        }
-    }
-
-    private fun drawCrystal(f: Snowflake, fog: Float, crystalDetail: Float, pen: AsciiPen) {
-        val r = f.radius * tuning.size * crystalDetail
-        val cosA = cos(-f.angle)
-        val sinA = sin(-f.angle)
-
-        pen.shape(f.x, f.y, r * 1.2f, f.z, fog, (f.seed * 10f).toInt()) { px, py, out ->
-            val dx = px - f.x
-            val dy = py - f.y
-            val dist = hypot(dx, dy)
-            if (dist > r) return@shape false
-
-            val lx = dx * cosA - dy * sinA
-            val ly = dx * sinA + dy * cosA
-            val ang = atan2(ly, lx)
-            val sector = (PI / 3.0).toFloat()
-            val folded = abs((((ang % sector) + sector) % sector) - sector * 0.5f)
-            val u = dist * cos(folded)
-            val v = dist * sin(folded)
-
-            val onSpine = v < max(1.6f, r * 0.085f) && u <= r
-            val b1 = abs((u - r * 0.45f) * 0.7f - v * 0.7f) < max(1.4f, r * 0.07f) && u > r * 0.42f && u < r * 0.78f
-            val b2 = abs((u - r * 0.68f) * 0.7f - v * 0.7f) < max(1.3f, r * 0.065f) && u > r * 0.65f && u < r * 0.92f
-            val core = dist < r * 0.22f
-
-            if (core) {
-                return@shape out.set(INK_SHIMMER, 242f, 250f, 255f, 0f, 0f, 0f, 0f, '*')
-            }
-            if (onSpine || b1 || b2) {
-                return@shape out.set(INK_LIT, 218f, 238f, 255f)
-            }
-            false
+                false
+            }, light = 1.1f)
+            pen.shed(s.x, s.y, 0.07f * s.depth)
         }
     }
 }
 
 // =========================================================================
-// 17. AURORA BOREALIS
+// 10. OCEAN WAVES
 // =========================================================================
-class AuroraSim(private val tuning: AsciiTuning) : AsciiSimulation {
-    override val id: String = "aurora"
-    private var width = 1f
-    private var height = 1f
-    private var surge = 0f
-    private var surgeX = 0.5f
+private const val WAVE_GLYPHS = " .,-~:=+*#%@"
+
+private class StoneSplash(var x: Float, var y: Float, var t0: Float)
+
+class WavesSim(private val tuning: AsciiTuning) : AsciiSimulation {
+    override val id: String = "waves"
+    private val flock = Flock(
+        tuning = tuning,
+        area = 120000f,
+        scale = 1f,
+        speed = 55f,
+        water = true
+    )
+    private val stones = ArrayList<StoneSplash>(12)
+    private val waveCol = FloatArray(3)
+    private val waveFill = FloatArray(3)
 
     override fun resize(width: Float, height: Float) {
-        this.width = width
-        this.height = height
+        flock.resize(width, height)
     }
 
     override fun onPointerDown(x: Float, y: Float) {
-        surge = 1.35f
-        surgeX = x / max(1f, width)
+        stones.add(StoneSplash(x, y, flock.time))
+        if (stones.size > 10) stones.removeAt(0)
+        flock.ripple(x, y, 160f, 1.35f, 92f, 195f, 240f, 255f)
+        flock.ripple(x, y, 95f, 1.0f, 58f, 140f, 215f, 250f)
+        flock.events.add(StampEvent(x, y, 5, 1.6f))
     }
 
     override fun step(dt: Float, time: Float, renderer: AsciiRenderer) {
-        val ribbons = roundToInt(tuning["ribbons", 3f]).coerceIn(1, 5)
-        val waveAmt = tuning["curtainWave", 1.15f]
-        val glowAmt = tuning["coronaGlow", 1.2f]
+        flock.step(dt)
+
+        val swellH = tuning["swellHeight", 1.2f]
+        val foam = tuning["foam", 1.15f]
+        val ringStr = tuning["ringStrength", 1.35f]
         val pen = renderer.pen
 
-        if (surge > 0f) surge = max(0f, surge - dt * 0.55f)
+        val cols = pen.cols
+        val rows = pen.rows
+        val cw = pen.cw
+        val ch = pen.ch
+        val t = time * tuning.speed
+        val windBoost = 1f + flock.gust * 0.45f
 
-        val cols = renderer.cols
-        val rows = renderer.rows
-        val cw = renderer.cw
-        val ch = renderer.ch
+        val activeStones = stones.filter { time - it.t0 < 7.5f }
 
-        // Twinkling polar stars
-        for (i in 0 until 54) {
-            val sx = hash1(i * 17.3f) * width
-            val sy = hash1(i * 41.9f) * height * 0.72f
-            val tw = sin(time * (1.5f + (i % 5) * 0.4f) + i)
-            if (tw > -0.2f) {
-                pen.dot(sx, sy, if (tw > 0.65f) '+' else '.', 205f, 224f, 255f, 0.08f, 0.35f)
+        for (r in 0 until rows) {
+            val ny = r.toFloat() / max(1f, rows.toFloat())
+            val persp = 0.45f + 0.85f * ny
+            for (c in 0 until cols) {
+                val nx = c.toFloat() / max(1f, cols.toFloat())
+                val px = (c + 0.5f) * cw
+                val py = (r + 0.5f) * ch
+
+                val w1 = sin(ny * 11.5f / persp - t * 1.85f + sin(nx * 4.2f + t * 0.4f) * 1.4f)
+                val w2 = 0.55f * sin(ny * 21f - nx * 6.5f - t * 2.5f)
+                val w3 = 0.3f * cos(ny * 33f + nx * 12f - t * 3.2f)
+                var h = (w1 + w2 + w3) * 0.52f * swellH * windBoost
+
+                var ringFoam = 0f
+                for (st in activeStones) {
+                    val age = time - st.t0
+                    val d = hypot(px - st.x, (py - st.y) * 1.18f)
+                    val front = age * 118f
+                    val env = exp(-((d - front) / 56f).let { it * it }) * exp(-age * 0.42f)
+                    if (env > 0.01f) {
+                        val osc = cos((d - front) * 0.22f)
+                        h += osc * env * 0.85f * ringStr
+                        if (osc > 0.5f) ringFoam += env * osc * 0.7f
+                    }
+                }
+
+                val norm = clampF((h + 1f) * 0.5f, 0f, 1f)
+                val foamLine = norm + (hash3(c, r, floor(t * 4f).toInt()) - 0.5f) * 0.08f + ringFoam
+                val isFoam = foamLine > 1.02f - 0.22f * foam
+
+                if (isFoam) {
+                    val fBright = clampF((foamLine - 0.75f) * 2.2f, 0.65f, 1f)
+                    waveCol[0] = 215f * fBright + 40f
+                    waveCol[1] = 242f * fBright + 13f
+                    waveCol[2] = 255f
+                    waveFill[0] = 42f; waveFill[1] = 118f; waveFill[2] = 168f
+                    val glyph = if (foamLine > 1.08f) '@' else if (foamLine > 0.96f) '#' else '*'
+                    pen.setCell(c, r, glyph, waveCol, waveFill, (1f - ny) * 0.35f)
+                } else if (norm > 0.26f) {
+                    val idx = clampF(floor(norm * (WAVE_GLYPHS.length - 2)), 1f, (WAVE_GLYPHS.length - 3).toFloat()).toInt()
+                    waveCol[0] = lerpF(18f, 86f, norm)
+                    waveCol[1] = lerpF(68f, 188f, norm)
+                    waveCol[2] = lerpF(124f, 242f, norm)
+                    val fill = if (norm > 0.66f) {
+                        waveFill[0] = 16f; waveFill[1] = 52f; waveFill[2] = 96f
+                        waveFill
+                    } else {
+                        null
+                    }
+                    pen.setCell(c, r, WAVE_GLYPHS[idx], waveCol, fill, (1f - ny) * 0.45f)
+                }
             }
         }
+    }
+}
 
-        // Flowing aurora curtains across cell columns
-        for (r in 0 until ribbons) {
-            val rNorm = r.toFloat() / max(1, ribbons - 1).toFloat()
-            val baseYFrac = 0.24f + rNorm * 0.22f
-            val curtainH = (height * (0.28f + 0.06f * sin(r * 2.1f))) * tuning.size
+// =========================================================================
+// 11. AURORA BOREALIS
+// =========================================================================
+private const val AURORA_GLYPHS = ".,:;!|/\\+*#^@"
 
-            for (gx in 0 until cols) {
-                val u = gx.toFloat() / max(1, cols - 1).toFloat()
-                val px = (gx + 0.5f) * cw
-                val surgeWave = surge * exp(-((u - surgeX) * (u - surgeX)) / 0.06f) * sin(u * 18f - time * 6f) * 28f
-                val fold = sin(u * 6.5f * waveAmt + time * 0.75f * tuning.speed + r * 1.9f) * 34f * waveAmt +
-                    sin(u * 15f - time * 1.35f * tuning.speed + r * 3.1f) * 14f * waveAmt +
-                    surgeWave
+private class AuroraSurge(var x: Float, var y: Float, var t0: Float)
 
-                val pleat = 0.55f + 0.45f * sin(u * 26f + time * 1.8f + r * 4.2f)
-                val bottomY = height * baseYFrac + fold + curtainH * 0.48f
-                val topY = bottomY - curtainH * (0.65f + 0.35f * pleat)
+class AuroraSim(private val tuning: AsciiTuning) : AsciiSimulation {
+    override val id: String = "aurora"
+    private val flock = Flock(
+        tuning = tuning,
+        area = 120000f,
+        scale = 1f,
+        speed = 40f
+    )
+    private val surges = ArrayList<AuroraSurge>(8)
+    private val starCol = floatArrayOf(190f, 215f, 255f)
+    private val auroraCol = FloatArray(3)
+    private val auroraFill = FloatArray(3)
+    private val ridgeCol = floatArrayOf(26f, 44f, 52f)
+    private val ridgeFill = floatArrayOf(8f, 12f, 18f)
 
-                val gy0 = max(0, floor(topY / ch).toInt())
-                val gy1 = min(rows - 1, ceil(bottomY / ch).toInt())
+    override fun resize(width: Float, height: Float) {
+        flock.resize(width, height)
+    }
 
-                for (gy in gy0..gy1) {
-                    val py = (gy + 0.5f) * ch
-                    val v = (bottomY - py) / max(1f, bottomY - topY) // 0 at bright lower hem, 1 at top
-                    if (v < 0f || v > 1f) continue
+    override fun onPointerDown(x: Float, y: Float) {
+        surges.add(AuroraSurge(x, y, flock.time))
+        if (surges.size > 6) surges.removeAt(0)
+        flock.events.add(StampEvent(x, y, 8, 1.5f))
+    }
 
-                    val intensity = ((1f - v).pow(0.75f)) * pleat * glowAmt * (1f + surge * 0.45f)
-                    if (intensity < 0.16f) continue
+    override fun step(dt: Float, time: Float, renderer: AsciiRenderer) {
+        flock.step(dt)
 
-                    val cr = lerpF(52f, 188f, smoothstepF(0.15f, 0.92f, v))
-                    val cg = lerpF(248f, 78f, smoothstepF(0.25f, 0.95f, v))
-                    val cb = lerpF(158f, 238f, smoothstepF(0.10f, 0.85f, v))
+        val ribbons = roundToInt(tuning["ribbons", 3f]).coerceIn(1, 5)
+        val curtainWave = tuning["curtainWave", 1.15f]
+        val coronaGlow = tuning["coronaGlow", 1.2f]
+        val pen = renderer.pen
 
-                    val glyph = if (v < 0.16f) '#' else if (v < 0.38f) '|' else if (v < 0.68f) ':' else '.'
-                    val fillA = clampF((1f - v) * 0.48f * glowAmt, 0.08f, 0.55f)
-                    pen.dot(
-                        px, py, glyph,
-                        min(255f, cr * intensity),
-                        min(255f, cg * intensity),
-                        min(255f, cb * intensity),
-                        0.3f + r * 0.08f,
-                        v * 0.45f,
-                        cr * 0.28f, cg * 0.28f, cb * 0.32f, fillA
-                    )
+        val cols = pen.cols
+        val rows = pen.rows
+        val cw = pen.cw
+        val t = time * tuning.speed
+        val windShift = flock.windX * 0.003f
+
+        val activeSurges = surges.filter { time - it.t0 < 5f }
+
+        // Twinkling polar stars
+        val maxStarRow = (rows * 0.85f).roundToInt()
+        for (r in 0 until maxStarRow) {
+            for (c in 0 until cols) {
+                val h = hash3(c, r, 41)
+                if (h > 0.986f) {
+                    val twinkle = 0.5f + 0.5f * sin(t * 2.8f + h * 90f)
+                    if (twinkle > 0.35f) {
+                        pen.setCell(c, r, if (twinkle > 0.82f) '*' else '.', starCol, null, 1f - twinkle * 0.85f)
+                    }
                 }
             }
         }
 
-        // Mountain ridge silhouette along horizon
-        for (gx in 0 until cols) {
-            val u = gx.toFloat() / max(1, cols - 1).toFloat()
-            val px = (gx + 0.5f) * cw
-            val ridgeH = height * (0.13f + 0.055f * sin(u * 5.2f + 0.6f) + 0.03f * cos(u * 13.4f) + 0.015f * sin(u * 29f))
-            val ridgeY = height - ridgeH
-            val gy0 = max(0, floor(ridgeY / ch).toInt())
-            for (gy in gy0 until rows) {
-                val py = (gy + 0.5f) * ch
-                val rim = py - ridgeY < ch * 1.2f
-                pen.dot(
-                    px, py,
-                    if (rim) '^' else '#',
-                    if (rim) 58f else 22f,
-                    if (rim) 96f else 32f,
-                    if (rim) 88f else 44f,
-                    0.92f, 0f,
-                    10f, 14f, 22f, 0.95f
-                )
+        // Aurora ribbons
+        for (b in 0 until ribbons) {
+            val bandBaseY = 0.22f + b * 0.16f
+            val bandSpeed = (0.38f + b * 0.14f) * (if (b % 2 == 0) 1f else -1f)
+            for (c in 0 until cols) {
+                val nx = c.toFloat() / max(1f, cols.toFloat())
+                val fold = sin(nx * 5.2f * curtainWave + t * bandSpeed + b * 2.1f + windShift) * 0.09f +
+                    sin(nx * 13.5f * curtainWave - t * bandSpeed * 1.4f + b * 4.3f) * 0.038f
+
+                var surgeBoost = 0f
+                var surgeRipple = 0f
+                val px = c * cw
+                for (sg in activeSurges) {
+                    val age = time - sg.t0
+                    val dist = abs(px - sg.x)
+                    val waveFront = age * 360f
+                    val ring = exp(-((dist - waveFront) / 95f).let { it * it }) * exp(-age * 0.65f)
+                    surgeBoost += ring * 0.85f
+                    surgeRipple += ring * sin(dist * 0.08f - age * 12f) * 0.045f
+                }
+
+                val baseRow = ((bandBaseY + fold + surgeRipple) * rows).roundToInt()
+                val rayStrength = 0.55f + 0.45f * sin(nx * 34f + t * 1.9f + b * 7f) * cos(nx * 19f - t * 1.1f) + surgeBoost
+                val rayRows = max(4, (rows * (0.22f + 0.14f * rayStrength)).roundToInt())
+
+                for (dy in 0 until rayRows) {
+                    val r = baseRow - dy
+                    if (r < 0 || r >= rows) continue
+                    val vFrac = dy.toFloat() / rayRows.toFloat()
+                    val intensity = sin(vFrac.pow(0.45f) * PI.toFloat()) * (0.65f + 0.55f * rayStrength)
+                    if (intensity < 0.14f) continue
+
+                    val cr: Float
+                    val cg: Float
+                    val cb: Float
+                    if (vFrac < 0.48f) {
+                        val u = vFrac / 0.48f
+                        cr = lerpF(52f, 46f, u)
+                        cg = lerpF(255f, 224f, u)
+                        cb = lerpF(138f, 212f, u)
+                    } else {
+                        val u = (vFrac - 0.48f) / 0.52f
+                        cr = lerpF(46f, 218f * coronaGlow, u)
+                        cg = lerpF(224f, 78f, u)
+                        cb = lerpF(212f, 245f * coronaGlow, u)
+                    }
+
+                    val shift = clampF(
+                        intensity * (AURORA_GLYPHS.length - 1) + sin(t * 3.5f + c * 0.35f + dy * 0.5f) * 1.6f,
+                        0f,
+                        (AURORA_GLYPHS.length - 1).toFloat()
+                    ).toInt()
+
+                    auroraCol[0] = clampF(cr, 0f, 255f)
+                    auroraCol[1] = clampF(cg, 0f, 255f)
+                    auroraCol[2] = clampF(cb, 0f, 255f)
+
+                    val fill = if (intensity > 0.78f) {
+                        auroraFill[0] = auroraCol[0] * 0.35f
+                        auroraFill[1] = auroraCol[1] * 0.35f
+                        auroraFill[2] = auroraCol[2] * 0.35f
+                        auroraFill
+                    } else {
+                        null
+                    }
+                    pen.setCell(c, r, AURORA_GLYPHS[shift], auroraCol, fill, clampF(1f - intensity * 0.95f, 0.05f, 0.88f))
+                }
+            }
+        }
+
+        // Horizon mountain ridge
+        for (c in 0 until cols) {
+            val nx = c.toFloat() / max(1f, cols.toFloat())
+            val ridgeH = 0.04f + 0.035f * sin(nx * 8.5f + 0.7f) + 0.02f * cos(nx * 21f) + 0.008f * sin(c * 1.7f)
+            val topRow = rows - (ridgeH * rows).roundToInt()
+            for (r in max(0, topRow) until rows) {
+                pen.setCell(c, r, if (r == topRow) '^' else '#', ridgeCol, ridgeFill, 0f)
             }
         }
     }
 
     private fun roundToInt(v: Float): Int = v.roundToInt()
-}
-
-// =========================================================================
-// 18. OCEAN WAVES
-// =========================================================================
-private class WaveSplash(var x: Float, var y: Float, var age: Float = 0f)
-
-class WavesSim(private val tuning: AsciiTuning) : AsciiSimulation {
-    override val id: String = "waves"
-    private var width = 1f
-    private var height = 1f
-    private val splashes = ArrayList<WaveSplash>(8)
-
-    override fun resize(width: Float, height: Float) {
-        this.width = width
-        this.height = height
-    }
-
-    override fun onPointerDown(x: Float, y: Float) {
-        if (splashes.size > 6) splashes.removeAt(0)
-        splashes.add(WaveSplash(x, y, 0f))
-    }
-
-    override fun step(dt: Float, time: Float, renderer: AsciiRenderer) {
-        val swellH = tuning["swellHeight", 1.2f]
-        val foamAmt = tuning["foam", 1.15f]
-        val ringStr = tuning["ringStrength", 1.35f]
-        val pen = renderer.pen
-
-        for (i in splashes.size - 1 downTo 0) {
-            val s = splashes[i]
-            if (s.age == 0f) {
-                pen.ripple(s.x, s.y, 120f, 1.0f, 175f, 235f, 255f)
-            }
-            s.age += dt
-            if (s.age > 3.2f) splashes.removeAt(i)
-        }
-
-        val cols = renderer.cols
-        val rows = renderer.rows
-        val cw = renderer.cw
-        val ch = renderer.ch
-        val spd = tuning.speed
-
-        for (gy in 0 until rows) {
-            val v = gy.toFloat() / max(1, rows - 1).toFloat()
-            val py = (gy + 0.5f) * ch
-            for (gx in 0 until cols) {
-                val u = gx.toFloat() / max(1, cols - 1).toFloat()
-                val px = (gx + 0.5f) * cw
-
-                val w1 = sin(u * 7.5f + v * 5.2f - time * 1.85f * spd)
-                val w2 = sin(u * 4.2f - v * 8.4f - time * 1.35f * spd + 1.7f) * 0.7f
-                val w3 = cos(u * 13.0f + v * 9.5f - time * 2.4f * spd) * 0.35f
-                var h = (w1 + w2 + w3) * 0.48f * swellH
-
-                for (i in 0 until splashes.size) {
-                    val s = splashes[i]
-                    val d = hypot(px - s.x, (py - s.y) * 1.25f)
-                    val waveR = s.age * 165f
-                    val band = abs(d - waveR)
-                    if (band < 48f) {
-                        val env = (1f - band / 48f) * (1f - s.age / 3.2f) * ringStr
-                        h += cos((d - waveR) * 0.18f) * env * 0.85f
-                    }
-                }
-
-                val foamThresh = 1.02f - 0.24f * min(1.8f, foamAmt)
-                if (h > foamThresh) {
-                    val f = clampF((h - foamThresh) / 0.55f, 0f, 1f)
-                    val chGlyph = if (f > 0.55f) '#' else if (f > 0.25f) '*' else '~'
-                    pen.dot(
-                        px, py, chGlyph,
-                        lerpF(155f, 245f, f),
-                        lerpF(225f, 252f, f),
-                        255f,
-                        0.65f, 0.05f,
-                        55f, 125f, 165f, 0.55f * f
-                    )
-                } else if (h > 0.18f) {
-                    val c = clampF((h - 0.18f) / 0.85f, 0f, 1f)
-                    val chGlyph = if (c > 0.5f) '=' else '~'
-                    pen.dot(
-                        px, py, chGlyph,
-                        lerpF(38f, 96f, c),
-                        lerpF(132f, 206f, c),
-                        lerpF(192f, 246f, c),
-                        0.45f, 0.18f
-                    )
-                } else if (h > -0.25f && ((gx + gy) % 2 == 0)) {
-                    pen.dot(px, py, '.', 34f, 108f, 168f, 0.25f, 0.42f)
-                }
-            }
-        }
-    }
 }
 
 object AsciiSimulationFactory {
