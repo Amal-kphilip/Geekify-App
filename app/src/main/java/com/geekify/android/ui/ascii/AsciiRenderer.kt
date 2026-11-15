@@ -220,20 +220,28 @@ class AsciiRenderer(val tuning: AsciiTuning) {
         return packRgb(cr, cg, cb)
     }
 
+    private var prevCols: Int = -1
+    private var prevRows: Int = -1
+
     fun resize(w: Float, h: Float) {
         width = max(1f, w)
         height = max(1f, h)
 
-        // Detail 2.0 = max detail (finest grid, ~48-56 cols on mobile);
-        // Detail 1.0 = balanced (~36-42 cols); Detail 0.5 = chunky.
-        val baseCols = (34f * max(0.5f, tuning.detail)).coerceIn(24f, 60f)
-        cw = max(9f, floor(width / baseCols))
-        ch = max(13f, (cw * 1.45f).roundToInt().toFloat())
+        // Detail scaling: detail in [0.5, 2.0].
+        // At 0.5: targetCols ~ 32 cols (chunky retro character blocks)
+        // At 1.0: targetCols ~ 64 cols (balanced resolution)
+        // At 1.3: targetCols ~ 83 cols (reference file default)
+        // At 2.0: targetCols ~ 128 cols (ultra-crisp ASCII detail)
+        val targetCols = (64f * max(0.4f, tuning.detail)).coerceIn(24f, 160f)
+        cw = max(4f, floor(width / targetCols))
+        ch = max(6f, (cw * 1.45f).roundToInt().toFloat())
         cols = ceil(width / cw).toInt()
         rows = ceil(height / ch).toInt()
 
         val n = cols * rows
-        if (cellFlag.size != n) {
+        if (cellFlag.size != n || cols != prevCols || rows != prevRows) {
+            prevCols = cols
+            prevRows = rows
             energy = FloatArray(n)
             energyTmp = FloatArray(n)
             cellFlag = ByteArray(n)

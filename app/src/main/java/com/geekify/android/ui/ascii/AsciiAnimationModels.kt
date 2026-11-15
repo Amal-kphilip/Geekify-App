@@ -227,8 +227,9 @@ object AsciiCatalog {
             category = "creature",
             swatchR = 50, swatchG = 135, swatchB = 255,
             defaults = mapOf(
-                "density" to 1f, "speed" to 1f, "wind" to 0.25f, "sway" to 0.04f,
-                "spread" to 0.06f, "size" to 1f, "shimmer" to 0.3f, "trail" to 1f, "ripples" to 0.4f,
+                "density" to 1.05f, "speed" to 1.05f, "wind" to 0.25f, "sway" to 0f,
+                "spread" to 0f, "size" to 1.25f, "farthest" to 0.18f, "farBias" to 1.7f,
+                "grip" to 5f, "separation" to 700f, "trail" to 1.55f, "trailFade" to 0.15f,
                 "flutter" to 0f, "glide" to 2.75f, "flapRate" to 1f, "multiColorButterflies" to 1f
             ),
             sections = listOf(
@@ -237,8 +238,8 @@ object AsciiCatalog {
                     controls = listOf(
                         AsciiControlSpec("multiColorButterflies", "Multiple coloured butterflies", 0f, 1f, 1f, 1f, isToggle = true),
                         AsciiControlSpec("flutter", "Flutter", 0f, 3f, 0.05f, 0f),
-                        AsciiControlSpec("glide", "Glide pause", 0f, 4f, 0.05f, 2.75f),
-                        AsciiControlSpec("flapRate", "Wingbeat speed", 0.2f, 3f, 0.05f, 1f)
+                        AsciiControlSpec("glide", "Glide", 0f, 4f, 0.05f, 2.75f),
+                        AsciiControlSpec("flapRate", "Flap rate", 0.2f, 3f, 0.05f, 1f)
                     )
                 )
             )
@@ -249,23 +250,19 @@ object AsciiCatalog {
             category = "creature",
             swatchR = 244, swatchG = 196, swatchB = 44,
             defaults = mapOf(
-                "density" to 1f, "speed" to 0.75f, "wind" to 0.15f, "sway" to 0.18f,
-                "spread" to 0.15f, "size" to 1f, "shimmer" to 0.32f, "sparkle" to 0.08f,
-                "trail" to 1.4f, "trailFade" to 1.1f, "ripples" to 1.3f,
+                "fog" to 0.64f, "density" to 1.6f, "speed" to 1.6f, "wind" to 0.25f, "sway" to 0f,
+                "spread" to 0f, "size" to 1f, "farthest" to 0.33f, "farBias" to 1.3f,
+                "grip" to 2.65f, "separation" to 780f, "trail" to 4f, "trailFade" to 0.4f,
+                "shimmer" to 0.35f, "sparkle" to 0.08f, "ripples" to 1f,
                 "meander" to 0.4f, "tailBeat" to 1f, "foodRange" to 200f
             ),
             sections = listOf(
                 AsciiControlSection(
                     title = "Swimming",
                     controls = listOf(
-                        AsciiControlSpec("meander", "Lazy S-curves", 0f, 3f, 0.05f, 0.4f),
-                        AsciiControlSpec("tailBeat", "Tail beat", 0.2f, 3f, 0.05f, 1f)
-                    )
-                ),
-                AsciiControlSection(
-                    title = "Feeding",
-                    controls = listOf(
-                        AsciiControlSpec("foodRange", "Food attract range", 0f, 500f, 10f, 200f)
+                        AsciiControlSpec("meander", "Meander", 0f, 3f, 0.05f, 0.4f),
+                        AsciiControlSpec("tailBeat", "Tail beat", 0.2f, 3f, 0.05f, 1f),
+                        AsciiControlSpec("foodRange", "Food range", 0f, 500f, 10f, 200f)
                     )
                 )
             )
@@ -276,19 +273,19 @@ object AsciiCatalog {
             category = "creature",
             swatchR = 232, swatchG = 56, swatchB = 182,
             defaults = mapOf(
-                "density" to 1f, "corner" to 0f, "direction" to 65f, "speed" to 0.55f,
-                "wind" to 0.2f, "sway" to 0.15f, "spread" to 0.12f, "size" to 1f,
-                "shimmer" to 0.45f, "sparkle" to 0.15f, "trail" to 1.5f, "trailFade" to 0.9f, "ripples" to 0.6f,
+                "density" to 1f, "speed" to 1.05f, "sway" to 0.04f, "spread" to 0.08f,
+                "size" to 1f, "farthest" to 0.3f, "farBias" to 1.4f, "grip" to 1.4f,
+                "shimmer" to 0.3f, "sparkle" to 0.1f, "trail" to 0.8f, "trailFade" to 0.6f, "ripples" to 1f,
                 "pulseRate" to 1f, "pulsePower" to 1f, "pulseGlow" to 1f, "tentacles" to 1f
             ),
             sections = listOf(
                 AsciiControlSection(
-                    title = "Bell & tentacles",
+                    title = "Swimming",
                     controls = listOf(
                         AsciiControlSpec("pulseRate", "Pulse rate", 0.2f, 3f, 0.05f, 1f),
-                        AsciiControlSpec("pulsePower", "Jet surge", 0.2f, 3f, 0.05f, 1f),
+                        AsciiControlSpec("pulsePower", "Pulse power", 0.2f, 3f, 0.05f, 1f),
                         AsciiControlSpec("pulseGlow", "Pulse glow", 0f, 3f, 0.05f, 1f),
-                        AsciiControlSpec("tentacles", "Tentacle length", 0f, 2.5f, 0.05f, 1f)
+                        AsciiControlSpec("tentacles", "Arm length", 0f, 2.5f, 0.05f, 1f)
                     )
                 )
             )
@@ -299,18 +296,18 @@ object AsciiCatalog {
             category = "creature",
             swatchR = 104, swatchG = 184, swatchB = 76,
             defaults = mapOf(
-                "density" to 1f, "speed" to 1f, "wind" to 0f, "sway" to 0.02f,
-                "spread" to 0.12f, "size" to 1f, "shimmer" to 0.22f, "sparkle" to 0.08f,
-                "trail" to 1.1f, "trailFade" to 1.5f, "ripples" to 1.8f,
+                "fog" to 0f, "size" to 1.2f, "density" to 1.3f, "speed" to 1f, "sway" to 0f,
+                "spread" to 0f, "farthest" to 0.35f, "farBias" to 1.4f, "separation" to 450f,
+                "trail" to 3.45f, "trailFade" to 0.4f, "shimmer" to 0.15f, "sparkle" to 0.05f, "ripples" to 1f,
                 "hop" to 1f, "leap" to 0.45f, "height" to 1f
             ),
             sections = listOf(
                 AsciiControlSection(
-                    title = "Jumping",
+                    title = "Leaping",
                     controls = listOf(
-                        AsciiControlSpec("hop", "Rest between hops", 0.2f, 4f, 0.05f, 1f),
-                        AsciiControlSpec("leap", "Leap speed", 0.3f, 2.5f, 0.05f, 0.45f),
-                        AsciiControlSpec("height", "Jump arc", 0f, 2.5f, 0.05f, 1f)
+                        AsciiControlSpec("hop", "How often", 0.2f, 4f, 0.05f, 1f),
+                        AsciiControlSpec("leap", "Leap length", 0.3f, 2.5f, 0.05f, 0.45f),
+                        AsciiControlSpec("height", "Leap height", 0f, 2.5f, 0.05f, 1f)
                     )
                 )
             )
@@ -321,18 +318,18 @@ object AsciiCatalog {
             category = "creature",
             swatchR = 214, swatchG = 220, swatchB = 238,
             defaults = mapOf(
-                "density" to 1f, "speed" to 0.9f, "wind" to 0.15f, "sway" to 0.03f,
-                "spread" to 0.04f, "size" to 1f, "shimmer" to 0.2f, "sparkle" to 0.06f,
-                "trail" to 0.6f, "trailFade" to 1.8f, "ripples" to 0.3f,
+                "density" to 0.8f, "speed" to 1.5f, "sway" to 0f, "spread" to 0f,
+                "size" to 1f, "farthest" to 0.35f, "farBias" to 1.3f, "grip" to 3f,
+                "separation" to 150f, "trail" to 0f, "shimmer" to 0.1f, "sparkle" to 0.04f,
                 "wingbeat" to 1f, "glide" to 1f, "foldFlap" to 0f
             ),
             sections = listOf(
                 AsciiControlSection(
                     title = "Flight",
                     controls = listOf(
-                        AsciiControlSpec("wingbeat", "Wingbeat speed", 0.3f, 2.5f, 0.05f, 1f),
-                        AsciiControlSpec("glide", "Glide length", 0f, 4f, 0.1f, 1f),
-                        AsciiControlSpec("foldFlap", "Wrist-folding flap", 0f, 1f, 1f, 0f, isToggle = true)
+                        AsciiControlSpec("wingbeat", "Wingbeat", 0.3f, 2.5f, 0.05f, 1f),
+                        AsciiControlSpec("glide", "Glide", 0f, 4f, 0.05f, 1f),
+                        AsciiControlSpec("foldFlap", "Folding flap", 0f, 1f, 1f, 0f, isToggle = true)
                     )
                 )
             )
@@ -343,19 +340,20 @@ object AsciiCatalog {
             category = "creature",
             swatchR = 204, swatchG = 82, swatchB = 52,
             defaults = mapOf(
-                "density" to 1f, "speed" to 0.9f, "wind" to 0f, "sway" to 0.04f,
-                "spread" to 0.15f, "size" to 1f, "shimmer" to 0.25f, "sparkle" to 0.06f,
-                "trail" to 0.8f, "trailFade" to 1.1f, "ripples" to 1f,
+                "fog" to 0.12f, "density" to 1.8f, "speed" to 1f, "sway" to 0f,
+                "spread" to 0f, "size" to 1f, "farthest" to 0.25f, "farBias" to 0.7f,
+                "grip" to 3f, "separation" to 400f, "trail" to 1.2f, "trailFade" to 0.35f,
+                "shimmer" to 0.1f, "sparkle" to 0.03f,
                 "burst" to 1f, "rest" to 1f, "legSpeed" to 1f, "scare" to 0.55f
             ),
             sections = listOf(
                 AsciiControlSection(
                     title = "Scuttling",
                     controls = listOf(
-                        AsciiControlSpec("burst", "Run distance", 0.2f, 4f, 0.1f, 1f),
-                        AsciiControlSpec("rest", "Pause duration", 0f, 4f, 0.1f, 1f),
+                        AsciiControlSpec("burst", "Burst length", 0.2f, 4f, 0.05f, 1f),
+                        AsciiControlSpec("rest", "Pause length", 0f, 4f, 0.05f, 1f),
                         AsciiControlSpec("legSpeed", "Leg speed", 0.2f, 3f, 0.05f, 1f),
-                        AsciiControlSpec("scare", "Claw-up alertness", 0f, 3f, 0.05f, 0.55f)
+                        AsciiControlSpec("scare", "Scare", 0f, 3f, 0.05f, 0.55f)
                     )
                 )
             )
@@ -366,18 +364,18 @@ object AsciiCatalog {
             category = "creature",
             swatchR = 78, swatchG = 168, swatchB = 238,
             defaults = mapOf(
-                "density" to 1.1f, "speed" to 0.85f, "wind" to 0.1f, "sway" to 0.08f,
-                "spread" to 0.12f, "size" to 1f, "shimmer" to 0.4f, "sparkle" to 0.14f,
-                "trail" to 1.3f, "trailFade" to 1.1f, "ripples" to 1f,
+                "density" to 1f, "speed" to 1f, "size" to 0.65f, "farthest" to 0.35f,
+                "farBias" to 1.4f, "grip" to 2.4f, "separation" to 190f,
+                "trail" to 1.5f, "trailFade" to 0.75f, "shimmer" to 0.4f, "sparkle" to 0.15f,
                 "whaleSize" to 1.25f, "partDistance" to 1.25f, "whaleSpeed" to 0.9f
             ),
             sections = listOf(
                 AsciiControlSection(
-                    title = "Abyssal Giant & Shoal",
+                    title = "Whale & Shoal",
                     controls = listOf(
                         AsciiControlSpec("whaleSize", "Whale scale", 0.6f, 2.2f, 0.05f, 1.25f),
-                        AsciiControlSpec("partDistance", "Shoal parting", 0.5f, 2.2f, 0.05f, 1.25f),
-                        AsciiControlSpec("whaleSpeed", "Whale glide", 0.3f, 2f, 0.05f, 0.9f)
+                        AsciiControlSpec("partDistance", "Parting wake", 0.5f, 2.2f, 0.05f, 1.25f),
+                        AsciiControlSpec("whaleSpeed", "Whale pace", 0.3f, 2f, 0.05f, 0.9f)
                     )
                 )
             )
@@ -390,8 +388,9 @@ object AsciiCatalog {
             category = "scene",
             swatchR = 94, swatchG = 196, swatchB = 255,
             defaults = mapOf(
-                "density" to 1.15f, "speed" to 1f, "size" to 1f,
-                "shimmer" to 0.45f, "sparkle" to 0.22f, "trail" to 2.2f, "trailFade" to 0.85f, "ripples" to 1.2f,
+                "direction" to 270f, "density" to 1.4f, "speed" to 1f, "size" to 1f,
+                "farthest" to 0.35f, "farBias" to 1.4f,
+                "trail" to 2.2f, "trailFade" to 0.45f, "shimmer" to 0.4f, "sparkle" to 0.22f,
                 "downpour" to 1.2f, "mergeRate" to 1.15f, "refraction" to 1.35f
             ),
             hideShared = SCENE_HIDDEN_MOVEMENT,
@@ -400,8 +399,8 @@ object AsciiCatalog {
                     title = "Window Glass",
                     controls = listOf(
                         AsciiControlSpec("downpour", "Rain intensity", 0.2f, 3f, 0.05f, 1.2f),
-                        AsciiControlSpec("mergeRate", "Droplet merging", 0.3f, 2.5f, 0.05f, 1.15f),
-                        AsciiControlSpec("refraction", "Bokeh glow", 0.2f, 2.5f, 0.05f, 1.35f)
+                        AsciiControlSpec("mergeRate", "Drop merging", 0.3f, 2.5f, 0.05f, 1.15f),
+                        AsciiControlSpec("refraction", "Lens refraction", 0.2f, 2.5f, 0.05f, 1.35f)
                     )
                 )
             )
@@ -412,18 +411,19 @@ object AsciiCatalog {
             category = "scene",
             swatchR = 214, swatchG = 236, swatchB = 255,
             defaults = mapOf(
-                "density" to 1.2f, "speed" to 0.9f, "size" to 1f,
-                "shimmer" to 0.4f, "sparkle" to 0.22f, "trail" to 1.1f, "trailFade" to 1.4f, "ripples" to 0.3f,
+                "direction" to 258f, "density" to 1.6f, "speed" to 1f, "size" to 1.1f,
+                "farthest" to 0.14f, "farBias" to 1.85f, "grip" to 1.8f, "separation" to 60f,
+                "trail" to 0.9f, "trailFade" to 1.8f, "shimmer" to 0.4f, "sparkle" to 0.25f, "wind" to 0.45f,
                 "gustStrength" to 1.35f, "drift" to 1.2f, "crystalDetail" to 1.15f
             ),
             hideShared = SCENE_HIDDEN_MOVEMENT,
             sections = listOf(
                 AsciiControlSection(
-                    title = "Winter Flurry",
+                    title = "Blizzard & Layers",
                     controls = listOf(
-                        AsciiControlSpec("gustStrength", "Wind gust swirl", 0.2f, 3f, 0.05f, 1.35f),
-                        AsciiControlSpec("drift", "Lateral flutter", 0f, 2.5f, 0.05f, 1.2f),
-                        AsciiControlSpec("crystalDetail", "Foreground crystals", 0.5f, 2f, 0.05f, 1.15f)
+                        AsciiControlSpec("gustStrength", "Click gust", 0.2f, 3f, 0.05f, 1.35f),
+                        AsciiControlSpec("drift", "Sideways flutter", 0f, 2.5f, 0.05f, 1.2f),
+                        AsciiControlSpec("crystalDetail", "Crystal size", 0.5f, 2f, 0.05f, 1.15f)
                     )
                 )
             )
@@ -434,19 +434,18 @@ object AsciiCatalog {
             category = "scene",
             swatchR = 56, swatchG = 178, swatchB = 232,
             defaults = mapOf(
-                "density" to 1f, "speed" to 1f, "size" to 1f,
-                "detail" to MAX_ASCII_DETAIL, "grid" to MIN_ASCII_GRID,
-                "shimmer" to 0.45f, "sparkle" to 0.2f, "trail" to 1.3f, "trailFade" to 1.2f, "ripples" to 1.4f,
+                "speed" to 1f, "trail" to 1.2f, "trailFade" to 0.9f,
+                "shimmer" to 0.4f, "sparkle" to 0.2f,
                 "swellHeight" to 1.2f, "foam" to 1.15f, "ringStrength" to 1.35f
             ),
             hideShared = SCENE_HIDDEN_MOVEMENT,
             sections = listOf(
                 AsciiControlSection(
-                    title = "Swell & Surf",
+                    title = "Swell & Stones",
                     controls = listOf(
-                        AsciiControlSpec("swellHeight", "Swell amplitude", 0.3f, 2.5f, 0.05f, 1.2f),
+                        AsciiControlSpec("swellHeight", "Swell height", 0.3f, 2.5f, 0.05f, 1.2f),
                         AsciiControlSpec("foam", "Whitecap foam", 0f, 2.5f, 0.05f, 1.15f),
-                        AsciiControlSpec("ringStrength", "Splash wave rings", 0.3f, 2.5f, 0.05f, 1.35f)
+                        AsciiControlSpec("ringStrength", "Stone rings", 0.3f, 2.5f, 0.05f, 1.35f)
                     )
                 )
             )
@@ -457,9 +456,8 @@ object AsciiCatalog {
             category = "scene",
             swatchR = 64, swatchG = 242, swatchB = 168,
             defaults = mapOf(
-                "density" to 1f, "speed" to 1f, "size" to 1f,
-                "detail" to MAX_ASCII_DETAIL, "grid" to MIN_ASCII_GRID,
-                "shimmer" to 0.5f, "sparkle" to 0.25f, "trail" to 1.8f, "trailFade" to 1.1f, "ripples" to 0.5f,
+                "density" to 1f, "speed" to 1f, "trail" to 0.6f, "trailFade" to 1.5f,
+                "shimmer" to 0.45f, "sparkle" to 0.2f,
                 "ribbons" to 3f, "curtainWave" to 1.15f, "coronaGlow" to 1.2f
             ),
             hideShared = SCENE_HIDDEN_MOVEMENT,
@@ -467,9 +465,9 @@ object AsciiCatalog {
                 AsciiControlSection(
                     title = "Polar Sky",
                     controls = listOf(
-                        AsciiControlSpec("ribbons", "Ribbon curtains", 1f, 5f, 1f, 3f),
-                        AsciiControlSpec("curtainWave", "Pleat fold wave", 0.3f, 2.5f, 0.05f, 1.15f),
-                        AsciiControlSpec("coronaGlow", "Solar intensity", 0.2f, 2.5f, 0.05f, 1.2f)
+                        AsciiControlSpec("ribbons", "Ribbon bands", 1f, 5f, 1f, 3f),
+                        AsciiControlSpec("curtainWave", "Curtain folds", 0.3f, 2.5f, 0.05f, 1.15f),
+                        AsciiControlSpec("coronaGlow", "Violet corona", 0.2f, 2.5f, 0.05f, 1.2f)
                     )
                 )
             )

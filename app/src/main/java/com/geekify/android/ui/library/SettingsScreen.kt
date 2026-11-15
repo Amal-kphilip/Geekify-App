@@ -58,6 +58,7 @@ import com.geekify.android.notifications.NotificationSettingsViewModel
 import com.geekify.android.settings.AppSettingsState
 import com.geekify.android.settings.AudioQualityPreference
 import com.geekify.android.settings.SettingsViewModel
+import com.geekify.android.ui.ascii.AsciiBackgroundSettingsPage
 import com.geekify.android.ui.ascii.AsciiBackgroundSettingsSubPage
 import com.geekify.android.ui.ascii.AsciiCatalog
 import com.geekify.android.ui.components.*
@@ -463,19 +464,29 @@ fun SettingsScreen(
                         animationSpec = tween(200),
                         label = "splitSettingsDetail"
                     ) { detailPage ->
-                        val detailScroll = rememberSaveable(
-                            "split_${detailPage.name}",
-                            saver = ScrollState.Saver
-                        ) { ScrollState(0) }
-                        IosSettingsPageScaffold(
-                            title = detailPage.title,
-                            scrollState = detailScroll,
-                            onBack = onBack,
-                            showBackButton = false,
-                            maxContentWidth = 680.dp,
-                            bottomPadding = bottomInset + 40.dp
-                        ) {
-                            RenderSubPageContent(detailPage)
+                        if (detailPage == SettingsSubPage.BACKGROUND_TWEAKS) {
+                            AsciiBackgroundSettingsPage(
+                                config = state.ascii,
+                                viewModel = settingsViewModel,
+                                onBack = onBack,
+                                showBackButton = false,
+                                bottomPadding = bottomInset + 40.dp
+                            )
+                        } else {
+                            val detailScroll = rememberSaveable(
+                                "split_${detailPage.name}",
+                                saver = ScrollState.Saver
+                            ) { ScrollState(0) }
+                            IosSettingsPageScaffold(
+                                title = detailPage.title,
+                                scrollState = detailScroll,
+                                onBack = onBack,
+                                showBackButton = false,
+                                maxContentWidth = 680.dp,
+                                bottomPadding = bottomInset + 40.dp
+                            ) {
+                                RenderSubPageContent(detailPage)
+                            }
                         }
                     }
                 }
@@ -519,6 +530,14 @@ fun SettingsScreen(
                             onClearSearch = { searchQuery = "" }
                         )
                     }
+                } else if (page == SettingsSubPage.BACKGROUND_TWEAKS) {
+                    AsciiBackgroundSettingsPage(
+                        config = state.ascii,
+                        viewModel = settingsViewModel,
+                        onBack = { currentPage = SettingsSubPage.ROOT },
+                        showBackButton = true,
+                        bottomPadding = bottomInset + 40.dp
+                    )
                 } else {
                     val subScroll = rememberSaveable(page.name, saver = ScrollState.Saver) { ScrollState(0) }
                     IosSettingsPageScaffold(
