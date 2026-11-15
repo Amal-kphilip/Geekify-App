@@ -103,4 +103,52 @@ class AsciiAnimationTest {
         }
         assertTrue("Expected multiple butterfly palette colors, found ${uniqueColors.size}", uniqueColors.size >= 4)
     }
+
+    @Test
+    fun `single-threaded direct execution vs AsciiFrame buffered copy produces bit-for-bit identical cell arrays`() {
+        for (animalId in listOf("butterflies", "koi", "cranes", "rain", "aurora")) {
+            val spec = AsciiCatalog.byId(animalId)
+            val config = AsciiBackgroundConfig(animalId = animalId)
+            val tuning = AsciiTuning().apply { syncFrom(config, spec) }
+            val renderer = AsciiRenderer(tuning)
+            val sim = AsciiSimulationFactory.create(animalId, tuning)
+
+            renderer.resize(480f, 320f)
+            sim.resize(480f, 320f)
+            sim.onSelect()
+
+            val frame = AsciiFrame()
+            val dt = 0.033f
+            var time = 0f
+            for (step in 1..5) {
+                time += dt
+                renderer.begin(dt, time)
+                sim.step(dt, time, renderer)
+                frame.copyFrom(renderer, time)
+
+                // Assert bit-for-bit equivalence between renderer buffers and frame buffers
+                org.junit.Assert.assertArrayEquals("cellFlag mismatch at step $step for $animalId", renderer.cellFlag, frame.cellFlag)
+                org.junit.Assert.assertArrayEquals("cellFill mismatch at step $step for $animalId", renderer.cellFill, frame.cellFill)
+                org.junit.Assert.assertArrayEquals("cellColor mismatch at step $step for $animalId", renderer.cellColor, frame.cellColor)
+                org.junit.Assert.assertArrayEquals("cellGlyph mismatch at step $step for $animalId", renderer.cellGlyph, frame.cellGlyph)
+                assertEquals(renderer.width, frame.width, 0.001f)
+                assertEquals(renderer.height, frame.height, 0.001f)
+                assertEquals(renderer.cols, frame.cols)
+                assertEquals(renderer.rows, frame.rows)
+            }
+        }
+    }
+
+    @Test
+    fun `AsciiFrameRing cycles buffers without overwriting currently published frame`() {
+        val ring = AsciiFrameRing(3)
+        val f1 = ring.nextWriteBuffer()
+        val f2 = ring.nextWriteBuffer()
+        val f3 = ring.nextWriteBuffer()
+        val f4 = ring.nextWriteBuffer()
+
+        org.junit.Assert.assertNotSame(f1, f2)
+        org.junit.Assert.assertNotSame(f2, f3)
+        org.junit.Assert.assertSame(f1, f4)
+    }
 }

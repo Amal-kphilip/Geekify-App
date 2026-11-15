@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.geekify.android.core.FrameTimelineLogger
 import com.geekify.android.data.sync.SyncRepository
 import com.geekify.android.notifications.AppForeground
 import com.geekify.android.notifications.GeekifyNotifier
@@ -55,6 +56,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        FrameTimelineLogger.attach(this)
         lifecycleScope.launch {
             appSettings.state.collect { state ->
                 if (state.disableScreenshots) {

@@ -56,3 +56,13 @@ Lcom/geekify/android/data/local/HistoryDao_Impl;
 Lcom/geekify/android/data/local/ListeningSessionDao_Impl;
 Lcom/geekify/android/data/local/PlayStatDao_Impl;
 Lcom/geekify/android/data/local/ShelfCacheDao_Impl;
+
+# ASCII Background Rendering & Off-Thread Engine
+Lcom/geekify/android/ui/ascii/AsciiBackgroundCanvasKt;
+Lcom/geekify/android/ui/ascii/AsciiRenderer;
+HSPLcom/geekify/android/ui/ascii/AsciiRenderer;->render(Landroid/graphics/Canvas;)V
+Lcom/geekify/android/ui/ascii/AsciiFrame;
+HSPLcom/geekify/android/ui/ascii/AsciiFrame;->copyFrom(Lcom/geekify/android/ui/ascii/AsciiRenderer;F)V
+HSPLcom/geekify/android/ui/ascii/AsciiFrame;->record(Lcom/geekify/android/ui/ascii/AsciiRenderer;F)V
+Lcom/geekify/android/ui/ascii/AsciiFrameRing;
+HSPLcom/geekify/android/ui/ascii/AsciiFrameRing;->nextWriteBuffer()Lcom/geekify/android/ui/ascii/AsciiFrame;

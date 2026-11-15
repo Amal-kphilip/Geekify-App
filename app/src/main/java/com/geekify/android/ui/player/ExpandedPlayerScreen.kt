@@ -57,6 +57,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import coil3.compose.AsyncImage
 import com.geekify.android.R
 import com.geekify.android.data.model.Track
@@ -99,7 +101,11 @@ fun ExpandedPlayerScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val lastSkipDirection = viewModel.lastSkipDirection
     val isLiked by viewModel.isCurrentLiked.collectAsStateWithLifecycle()
-    val sleepTimerRemainingMs by viewModel.sleepTimerRemainingMs.collectAsStateWithLifecycle()
+    val hasActiveSleepTimer by remember(viewModel) {
+        viewModel.sleepTimerRemainingMs
+            .map { it != null }
+            .distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = false)
     var showSleepTimer by remember { mutableStateOf(false) }
 
     val track = state.current
@@ -338,11 +344,11 @@ fun ExpandedPlayerScreen(
                     )
                     CircleIconButton(
                         icon = GeekifyIcons.Timer,
-                        contentDescription = if (sleepTimerRemainingMs != null) "Sleep timer active" else "Sleep timer",
+                        contentDescription = if (hasActiveSleepTimer) "Sleep timer active" else "Sleep timer",
                         onClick = { if (expandedControlsInteractive()) showSleepTimer = true },
                         size = 50.dp,
                         container = Color.White.copy(alpha = 0.2f),
-                        tint = if (sleepTimerRemainingMs != null) Lime else TextPrimary
+                        tint = if (hasActiveSleepTimer) Lime else TextPrimary
                     )
                     Spacer(Modifier.width(8.dp))
                     CircleIconButton(
@@ -774,7 +780,7 @@ fun ExpandedPlayerScreen(
 
         if (showSleepTimer && transitionState.isFullyExpanded) {
             SleepTimerDialog(
-                remainingMs = sleepTimerRemainingMs,
+                remainingMsFlow = viewModel.sleepTimerRemainingMs,
                 onSelect = { minutes ->
                     viewModel.setSleepTimer(minutes)
                     showSleepTimer = false
@@ -792,12 +798,13 @@ fun ExpandedPlayerScreen(
 
 @Composable
 private fun SleepTimerDialog(
-    remainingMs: Long?,
+    remainingMsFlow: kotlinx.coroutines.flow.StateFlow<Long?>,
     onSelect: (Int) -> Unit,
     onCancelTimer: () -> Unit,
     onDismiss: () -> Unit,
     backdrop: com.geekify.android.ui.glass.GlassBackdrop
 ) {
+    val remainingMs by remainingMsFlow.collectAsStateWithLifecycle()
     GeekifyDialog(onDismissRequest = onDismiss, backdrop = backdrop) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(

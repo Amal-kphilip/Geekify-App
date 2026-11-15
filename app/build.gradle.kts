@@ -240,6 +240,7 @@ dependencies {
     // Testing
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
 }
 
 // InnerTubeX v0.8.4 contains Java 21 bytecode (class-file version 65).

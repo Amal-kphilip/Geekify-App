@@ -121,6 +121,17 @@ class Pen(val r: AsciiRenderer) {
     fun shape(
         p: Pose,
         reach: Float,
+        sampler: ShapeSampler,
+        light: Float = 1f,
+        tilt: Float = 0f,
+        fog: Float = fogFor(p.depth)
+    ) {
+        r.shape(p, reach, sampler, light, tilt, fog)
+    }
+
+    fun shape(
+        p: Pose,
+        reach: Float,
         sample: (u: Float, v: Float, px: Float, py: Float) -> Boolean,
         light: Float = 1f,
         tilt: Float = 0f,
@@ -160,6 +171,10 @@ class Pen(val r: AsciiRenderer) {
     fun cellIndex(x: Float, y: Float): Int {
         return r.cellIndex(x, y)
     }
+}
+
+fun interface ShapeSampler {
+    fun sample(u: Float, v: Float, px: Float, py: Float): Boolean
 }
 
 class AsciiRenderer(val tuning: AsciiTuning) {
@@ -333,8 +348,11 @@ class AsciiRenderer(val tuning: AsciiTuning) {
         }
     }
 
+    private val rippleCol = FloatArray(3)
+
     fun drawRipples(ripples: List<RippleEffect>) {
-        val baseCol = floatArrayOf(110f, 190f, 235f)
+        val baseCol = rippleCol
+        baseCol[0] = 110f; baseCol[1] = 190f; baseCol[2] = 235f
         for (rp in ripples) {
             val life = 1f - rp.r / rp.maxR
             if (life <= 0.02f) continue
@@ -361,7 +379,7 @@ class AsciiRenderer(val tuning: AsciiTuning) {
     }
 
     private fun probe(
-        sample: (u: Float, v: Float, px: Float, py: Float) -> Boolean,
+        sampler: ShapeSampler,
         p: Pose,
         hc: Float,
         hs: Float,
@@ -375,13 +393,22 @@ class AsciiRenderer(val tuning: AsciiTuning) {
         pen.ink.glyphs = null
         pen.ink.au = u
         pen.ink.av = v
-        return sample(u, v, px, py)
+        return sampler.sample(u, v, px, py)
     }
 
     fun shape(
         p: Pose,
         reach: Float,
         sample: (u: Float, v: Float, px: Float, py: Float) -> Boolean,
+        light: Float = 1f,
+        tilt: Float = 0f,
+        fog: Float = pen.fogFor(p.depth)
+    ) = shape(p, reach, ShapeSampler { u, v, px, py -> sample(u, v, px, py) }, light, tilt, fog)
+
+    fun shape(
+        p: Pose,
+        reach: Float,
+        sampler: ShapeSampler,
         light: Float = 1f,
         tilt: Float = 0f,
         fog: Float = pen.fogFor(p.depth)
@@ -403,7 +430,7 @@ class AsciiRenderer(val tuning: AsciiTuning) {
             val y = r * ch
             for (c in c0..c1) {
                 val x = c * cw
-                val center = probe(sample, p, hc, hs, x + cw * 0.5f, y + ch * 0.5f)
+                val center = probe(sampler, p, hc, hs, x + cw * 0.5f, y + ch * 0.5f)
                 var hits = if (center) 1 else 0
                 var ir = pen.ink.r
                 var ig = pen.ink.g
@@ -415,7 +442,7 @@ class AsciiRenderer(val tuning: AsciiTuning) {
 
                 var k2 = 0
                 while (k2 < SUBSAMPLES.size) {
-                    if (probe(sample, p, hc, hs, x + SUBSAMPLES[k2] * cw, y + SUBSAMPLES[k2 + 1] * ch)) {
+                    if (probe(sampler, p, hc, hs, x + SUBSAMPLES[k2] * cw, y + SUBSAMPLES[k2 + 1] * ch)) {
                         if (hits == 0) {
                             ir = pen.ink.r
                             ig = pen.ink.g

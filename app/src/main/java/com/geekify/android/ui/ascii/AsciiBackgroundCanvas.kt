@@ -40,6 +40,17 @@ import com.geekify.android.settings.SettingsViewModel
 import com.geekify.android.ui.components.*
 import com.geekify.android.ui.theme.GeekifyIcons
 import com.geekify.android.ui.theme.Lime
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicReference
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
@@ -76,6 +87,11 @@ private class AsciiEngineInstance(initialAnimalId: String) {
             simulation.resize(simWidth, simHeight)
         }
     }
+}
+
+private sealed class AsciiPointerEvent {
+    data class Down(val x: Float, val y: Float) : AsciiPointerEvent()
+    data class Move(val x: Float, val y: Float) : AsciiPointerEvent()
 }
 
 class AsciiPointerHub {
@@ -131,23 +147,26 @@ fun AsciiBackgroundCanvas(
         }
     }
 
-    val engine = remember { AsciiEngineInstance(config.animalId) }
-    val animalSpec = remember(config.animalId) { AsciiCatalog.byId(config.animalId) }
-
+    val pointerQueue = remember { ConcurrentLinkedQueue<AsciiPointerEvent>() }
+    val sizeRef = remember { AtomicReference<Pair<Float, Float>?>(null) }
+    val configRef = remember { AtomicReference(config) }
     SideEffect {
-        engine.tuning.syncFrom(config, animalSpec)
-        engine.ensureAnimal(config.animalId)
-        if (pointerHub != null) {
-            pointerHub.onDown = { rx, ry ->
-                engine.simulation.onPointerDown(rx / scaleFactor, ry / scaleFactor)
-            }
-            pointerHub.onMove = { rx, ry ->
-                engine.simulation.onPointerMove(rx / scaleFactor, ry / scaleFactor)
-            }
-        }
+        configRef.set(config)
     }
 
-    DisposableEffect(pointerHub) {
+    val frameRing = remember { AsciiFrameRing(3) }
+    val publishedFrame = remember { AtomicReference<AsciiFrame?>(null) }
+    var frameTick by remember { mutableLongStateOf(0L) }
+
+    DisposableEffect(pointerHub, scaleFactor) {
+        if (pointerHub != null) {
+            pointerHub.onDown = { rx, ry ->
+                pointerQueue.offer(AsciiPointerEvent.Down(rx / scaleFactor, ry / scaleFactor))
+            }
+            pointerHub.onMove = { rx, ry ->
+                pointerQueue.offer(AsciiPointerEvent.Move(rx / scaleFactor, ry / scaleFactor))
+            }
+        }
         onDispose {
             if (pointerHub != null) {
                 pointerHub.onDown = null
@@ -156,37 +175,79 @@ fun AsciiBackgroundCanvas(
         }
     }
 
-    var frameTick by remember { mutableIntStateOf(0) }
-    var lastDeltaSec by remember { mutableFloatStateOf(0.016f) }
-
-    // Throttled frame loop: ~33 FPS for ambient background (saving 75% CPU and preventing scroll jank), ~45 FPS for preview
+    val lifecycleOwner = LocalLifecycleOwner.current
     val frameIntervalNanos = remember(isPreview) {
         if (isPreview) 22_000_000L else 30_000_000L
     }
 
-    LaunchedEffect(config.enabled, config.animalId, isPreview) {
+    val engine = remember { AsciiEngineInstance(config.animalId) }
+
+    LaunchedEffect(config.enabled, isPreview) {
         if (!config.enabled && !isPreview) return@LaunchedEffect
-        var lastNanos = 0L
-        while (true) {
-            withFrameNanos { nowNanos ->
-                val elapsed = nowNanos - lastNanos
-                if (lastNanos != 0L && elapsed < frameIntervalNanos) {
-                    return@withFrameNanos
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            withContext(Dispatchers.Default.limitedParallelism(1)) {
+                var lastTimeNanos = System.nanoTime()
+
+                while (isActive) {
+                    val startStepNanos = System.nanoTime()
+                    val elapsedNanos = startStepNanos - lastTimeNanos
+                    val dt = if (lastTimeNanos == 0L) 0.016f else (elapsedNanos * 1e-9f).coerceIn(0.005f, 0.05f)
+                    lastTimeNanos = startStepNanos
+
+                    // 1. Drain queued pointer events in FIFO order
+                    while (true) {
+                        val event = pointerQueue.poll() ?: break
+                        when (event) {
+                            is AsciiPointerEvent.Down -> engine.simulation.onPointerDown(event.x, event.y)
+                            is AsciiPointerEvent.Move -> engine.simulation.onPointerMove(event.x, event.y)
+                        }
+                    }
+
+                    // 2. Thread-safe tuning and animal synchronization
+                    val currentCfg = configRef.get()
+                    val spec = AsciiCatalog.byId(currentCfg.animalId)
+                    engine.tuning.syncFrom(currentCfg, spec)
+                    engine.ensureAnimal(currentCfg.animalId)
+
+                    // 3. Thread-safe sizing
+                    val dims = sizeRef.get()
+                    if (dims != null && dims.first > 1f && dims.second > 1f) {
+                        engine.ensureSize(dims.first, dims.second)
+                    }
+
+                    if (engine.simWidth > 1f && engine.simHeight > 1f) {
+                        engine.timeSec += dt
+                        engine.renderer.begin(dt, engine.timeSec)
+                        engine.simulation.step(dt, engine.timeSec, engine.renderer)
+
+                        val writeFrame = frameRing.nextWriteBuffer()
+                        writeFrame.record(engine.renderer, engine.timeSec)
+                        publishedFrame.set(writeFrame)
+
+                        frameTick++
+                    }
+
+                    // 4. Throttle to target frame rate (~30ms ambient, ~22ms preview)
+                    val workTimeNanos = System.nanoTime() - startStepNanos
+                    val sleepNanos = frameIntervalNanos - workTimeNanos
+                    if (sleepNanos > 1_000_000L) {
+                        delay(sleepNanos / 1_000_000L)
+                    } else {
+                        yield()
+                    }
                 }
-                val dt = if (lastNanos == 0L) {
-                    0.016f
-                } else {
-                    (elapsed * 1e-9f).coerceIn(0.005f, 0.05f)
-                }
-                lastNanos = nowNanos
-                lastDeltaSec = dt
-                engine.timeSec += dt
-                frameTick++
             }
         }
     }
 
-    val pointerModifier = Modifier.pointerInput(engine, scaleFactor, consumeTouches) {
+    DisposableEffect(Unit) {
+        onDispose {
+            publishedFrame.set(null)
+            pointerQueue.clear()
+        }
+    }
+
+    val pointerModifier = Modifier.pointerInput(scaleFactor, consumeTouches) {
         awaitEachGesture {
             val pass = if (consumeTouches) PointerEventPass.Main else PointerEventPass.Initial
             while (true) {
@@ -197,10 +258,10 @@ fun AsciiBackgroundCanvas(
                 val sx = first.position.x / scaleFactor
                 val sy = first.position.y / scaleFactor
                 if (first.changedToDownIgnoreConsumed()) {
-                    engine.simulation.onPointerDown(sx, sy)
+                    pointerQueue.offer(AsciiPointerEvent.Down(sx, sy))
                     if (consumeTouches) first.consume()
                 } else if (first.pressed) {
-                    engine.simulation.onPointerMove(sx, sy)
+                    pointerQueue.offer(AsciiPointerEvent.Move(sx, sy))
                     if (consumeTouches) first.consume()
                 }
                 if (changes.none { it.pressed }) break
@@ -208,23 +269,50 @@ fun AsciiBackgroundCanvas(
         }
     }
 
-    Canvas(modifier = modifier.then(pointerModifier)) {
+    val fallbackFillPaint = remember {
+        android.graphics.Paint().apply {
+            isAntiAlias = true
+            style = android.graphics.Paint.Style.FILL
+        }
+    }
+    val fallbackTextPaint = remember {
+        android.graphics.Paint().apply {
+            isAntiAlias = true
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+    }
+    val fallbackCharBuf = remember { CharArray(1) }
+
+    Canvas(
+        modifier = modifier
+            .then(pointerModifier)
+            .onSizeChanged { intSize ->
+                if (intSize.width > 0 && intSize.height > 0) {
+                    sizeRef.set(Pair(intSize.width / scaleFactor, intSize.height / scaleFactor))
+                }
+            }
+    ) {
         @Suppress("UNUSED_EXPRESSION")
         frameTick
 
         val w = size.width / scaleFactor
         val h = size.height / scaleFactor
-        if (w <= 1f || h <= 1f) return@Canvas
+        if (w > 1f && h > 1f) {
+            sizeRef.set(Pair(w, h))
+        }
 
-        engine.ensureSize(w, h)
-        engine.renderer.begin(lastDeltaSec, engine.timeSec)
-        engine.simulation.step(lastDeltaSec, engine.timeSec, engine.renderer)
-
+        val frame = publishedFrame.get() ?: return@Canvas
         drawIntoCanvas { composeCanvas ->
             val native = composeCanvas.nativeCanvas
             val saveCount = native.save()
             native.scale(scaleFactor, scaleFactor)
-            engine.renderer.render(native)
+            val pic = frame.picture
+            if (pic != null) {
+                native.drawPicture(pic)
+            } else {
+                frame.renderFallback(native, fallbackFillPaint, fallbackTextPaint, fallbackCharBuf)
+            }
             native.restoreToCount(saveCount)
         }
     }

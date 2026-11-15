@@ -15,6 +15,8 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.random.Random
 
+private val SIDES_PAIR = intArrayOf(-1, 1)
+
 // =========================================================================
 // 1. BUTTERFLIES
 // =========================================================================
@@ -104,6 +106,57 @@ class ButterfliesSim(private val tuning: AsciiTuning) : AsciiSimulation {
     private val pose = Pose()
     private val atWorld = FloatArray(2)
 
+    private var curButterflyPal: ButterflySpeciesPalette = BUTTERFLY_SPECIES[0]
+    private var curButterflyS: Float = 0f
+    private var curButterflyOpen: Float = 1f
+    private var curButterflyMinBody: Float = 0f
+    private var curButterflyPen: Pen? = null
+
+    private val butterflySampler = ShapeSampler { u, v, _, _ ->
+        val pen = curButterflyPen ?: return@ShapeSampler false
+        val pal = curButterflyPal
+        val s = curButterflyS
+        val open = curButterflyOpen
+        val minBody = curButterflyMinBody
+
+        val av = abs(v)
+        val bw = bodyHalfWidth(u)
+        if (bw > 0f && av * s <= max(bw * s, minBody)) {
+            return@ShapeSampler pen.ink.set(BUTTERFLY_BODY[0], BUTTERFLY_BODY[1], BUTTERFLY_BODY[2], INK_BODY)
+        }
+        val vw = av / open
+        val part: Int
+        if (inLobe(BUTTERFLY_FORE, u - FORE_ROOT, vw, globalLobe)) {
+            part = 0
+        } else if (inLobe(BUTTERFLY_HIND, u - HIND_ROOT, vw, globalLobe)) {
+            part = 1
+        } else {
+            return@ShapeSampler false
+        }
+
+        val t = globalLobe.t
+        val r = globalLobe.r
+        if (r > 0.86f) {
+            if (part == 0 && r < 0.95f && abs(fracF(t * 5f) - 0.5f) < 0.14f) {
+                pen.ink.set(pal.spotR, pal.spotG, pal.spotB, INK_SPOT)
+            } else {
+                pen.ink.set(pal.darkR, pal.darkG, pal.darkB, INK_DARK)
+            }
+        } else if (r < 0.08f) {
+            pen.ink.set(pal.darkR + 4f, pal.darkG + 16f, pal.darkB + 48f, INK_DARK)
+        } else if (part == 0 && t > 0.9f) {
+            pen.ink.set(pal.darkR + 8f, pal.darkG + 22f, pal.darkB + 58f, INK_DARK)
+        } else {
+            pen.ink.set(
+                min(255f, pal.baseR + 70f * r),
+                min(255f, pal.baseG + 60f * r),
+                min(255f, pal.baseB + 40f * r),
+                INK_SHIMMER
+            )
+        }
+        true
+    }
+
     override fun resize(width: Float, height: Float) {
         flock.resize(width, height)
     }
@@ -186,48 +239,16 @@ class ButterfliesSim(private val tuning: AsciiTuning) : AsciiSimulation {
         }
 
         val minBody = pen.cw * 0.4f
-        pen.shape(pose, 0.75f, { u, v, _, _ ->
-            val av = abs(v)
-            val bw = bodyHalfWidth(u)
-            if (bw > 0f && av * s <= max(bw * s, minBody)) {
-                return@shape pen.ink.set(BUTTERFLY_BODY[0], BUTTERFLY_BODY[1], BUTTERFLY_BODY[2], INK_BODY)
-            }
-            val vw = av / open
-            val part: Int
-            if (inLobe(BUTTERFLY_FORE, u - FORE_ROOT, vw, globalLobe)) {
-                part = 0
-            } else if (inLobe(BUTTERFLY_HIND, u - HIND_ROOT, vw, globalLobe)) {
-                part = 1
-            } else {
-                return@shape false
-            }
-
-            val t = globalLobe.t
-            val r = globalLobe.r
-            if (r > 0.86f) {
-                if (part == 0 && r < 0.95f && abs(fracF(t * 5f) - 0.5f) < 0.14f) {
-                    pen.ink.set(pal.spotR, pal.spotG, pal.spotB, INK_SPOT)
-                } else {
-                    pen.ink.set(pal.darkR, pal.darkG, pal.darkB, INK_DARK)
-                }
-            } else if (r < 0.08f) {
-                pen.ink.set(pal.darkR + 4f, pal.darkG + 16f, pal.darkB + 48f, INK_DARK)
-            } else if (part == 0 && t > 0.9f) {
-                pen.ink.set(pal.darkR + 8f, pal.darkG + 22f, pal.darkB + 58f, INK_DARK)
-            } else {
-                pen.ink.set(
-                    min(255f, pal.baseR + 70f * r),
-                    min(255f, pal.baseG + 60f * r),
-                    min(255f, pal.baseB + 40f * r),
-                    INK_SHIMMER
-                )
-            }
-            true
-        }, light = 0.6f + 0.4f * b.open, tilt = b.open * 3f)
+        curButterflyPen = pen
+        curButterflyPal = pal
+        curButterflyS = s
+        curButterflyOpen = open
+        curButterflyMinBody = minBody
+        pen.shape(pose, 0.75f, butterflySampler, light = 0.6f + 0.4f * b.open, tilt = b.open * 3f)
 
         // Antennae
         val sway = 0.012f * sin(pen.t * 3f + b.id)
-        for (side in intArrayOf(-1, 1)) {
+        for (side in SIDES_PAIR) {
             pen.lineBody(pose, 0.16f, 0.012f * side, 0.37f + sway, (0.12f + sway) * side, pen.contrast, if (s > 120f) 'o' else null)
         }
 
@@ -236,7 +257,7 @@ class ButterfliesSim(private val tuning: AsciiTuning) : AsciiSimulation {
         val phi = BUTTERFLY_FORE.from + (BUTTERFLY_FORE.to - BUTTERFLY_FORE.from) * BUTTERFLY_FORE.peak
         val tipU = FORE_ROOT + sin(phi) * BUTTERFLY_FORE.reach * 0.95f
         val tipV = cos(phi) * BUTTERFLY_FORE.reach * 0.95f * b.open
-        for (side in intArrayOf(-1, 1)) {
+        for (side in SIDES_PAIR) {
             pen.toWorld(pose, tipU, tipV * side, atWorld)
             pen.shed(atWorld[0], atWorld[1], (0.02f + 0.1f * stroke) * b.depth)
         }
@@ -544,7 +565,7 @@ class KoiSim(private val tuning: AsciiTuning) : AsciiSimulation {
             val dy = (spine[idx * 2 + 3] - spine[idx * 2 + 1]) / sl
             val hx = spine[idx * 2] + dx * q * sl
             val hy = spine[idx * 2 + 1] + dy * q * sl
-            for (side in intArrayOf(-1, 1)) {
+            for (side in SIDES_PAIR) {
                 pen.spot(hx - dy * across * side, hy + dx * across * side, '\u25CF', KOI_GLINT, KOI_EYE, f.depth)
             }
         }
@@ -692,7 +713,7 @@ class JellyfishSim(private val tuning: AsciiTuning) : AsciiSimulation {
                 val fog = min(0.95f, baseFog + 0.3f * f)
                 pen.toWorld(pose, u, v, atWorld)
                 pen.dot(atWorld[0], atWorld[1], if (i % 3 != 0) ':' else '|', JELLY_CORE, min(0.95f, fog + 0.15f))
-                for (side in intArrayOf(-1, 1)) {
+                for (side in SIDES_PAIR) {
                     pen.toWorld(pose, u, v + w * side, atWorld)
                     val ch = frillChars[abs((i + n + (if (side > 0) 1 else 0)) % frillChars.length)]
                     pen.dot(atWorld[0], atWorld[1], ch, JELLY_FRILL, fog)
@@ -925,7 +946,7 @@ class FrogsSim(private val tuning: AsciiTuning) : AsciiSimulation {
         val blinking = !f.leaping && fracF(pen.t * 0.21f + f.id * 0.37f) < 0.035f
 
         // Webbed toes
-        for (side in intArrayOf(-1, 1)) {
+        for (side in SIDES_PAIR) {
             val drawToes = { from: FloatArray, to: FloatArray, count: Int, length: Float, fan: Float ->
                 val dir = atan2(to[1] - from[1], to[0] - from[0])
                 for (ti in 0 until count) {
@@ -971,7 +992,7 @@ class FrogsSim(private val tuning: AsciiTuning) : AsciiSimulation {
         }, light = 1f + 0.15f * h)
 
         // Eyes
-        for (side in intArrayOf(-1, 1)) {
+        for (side in SIDES_PAIR) {
             pen.toWorld(pose, 0.18f, 0.1f * side, atWorld)
             if (blinking) {
                 pen.spot(atWorld[0], atWorld[1], '-', FROG_LID, FROG_SKIN, f.depth)
@@ -996,6 +1017,7 @@ private val CRANE_EYE = floatArrayOf(14f, 12f, 16f)
 private val CRANE_GLINT = floatArrayOf(255f, 252f, 246f)
 private val CRANE_BILL = floatArrayOf(196f, 196f, 150f)
 private val CRANE_LEGS = floatArrayOf(60f, 60f, 66f)
+private val CRANE_BEAK_COL = floatArrayOf(255f, 214f, 200f)
 
 private class CraneWingResult {
     var s: Float = 0f
@@ -1154,7 +1176,7 @@ class CranesSim(private val tuning: AsciiTuning) : AsciiSimulation {
         val neckW = max(0.018f, pen.cw * 0.45f / s)
         val headR = max(0.032f, pen.cw * 0.6f / s)
 
-        for (side in intArrayOf(-1, 1)) {
+        for (side in SIDES_PAIR) {
             pen.lineBody(pose, -0.2f, 0.014f * side, -0.62f, 0.022f * side, CRANE_LEGS)
         }
         pen.lineBody(pose, 0.47f, 0f, 0.6f, 0f, CRANE_BILL)
@@ -1188,11 +1210,11 @@ class CranesSim(private val tuning: AsciiTuning) : AsciiSimulation {
 
         // Crown spot
         pen.toWorld(pose, 0.445f, 0f, atWorld)
-        pen.spot(atWorld[0], atWorld[1], '@', floatArrayOf(255f, 214f, 200f), CRANE_CROWN, c.depth)
+        pen.spot(atWorld[0], atWorld[1], '@', CRANE_BEAK_COL, CRANE_CROWN, c.depth)
 
         if (0.064f * s >= pen.cw * 1.2f) {
             val eyeV = max(0.032f, pen.cw / s)
-            for (side in intArrayOf(-1, 1)) {
+            for (side in SIDES_PAIR) {
                 pen.toWorld(pose, 0.44f, eyeV * side, atWorld)
                 pen.spot(atWorld[0], atWorld[1], '\u25CF', CRANE_GLINT, CRANE_EYE, c.depth)
             }
@@ -1302,7 +1324,7 @@ class CrabsSim(private val tuning: AsciiTuning) : AsciiSimulation {
         pose.id = c.id
 
         // 4 walking legs on each side
-        for (side in intArrayOf(-1, 1)) {
+        for (side in SIDES_PAIR) {
             for (idx in CRAB_HIPS.indices) {
                 val hu = CRAB_HIPS[idx]
                 val ph = c.gait + idx * PI.toFloat() * 0.5f + (if (side > 0) PI.toFloat() else 0f)
@@ -1360,7 +1382,7 @@ class CrabsSim(private val tuning: AsciiTuning) : AsciiSimulation {
 
         // Eyes
         val eyeV = clampF(pen.cw * 0.55f / s, 0.06f, 0.14f)
-        for (side in intArrayOf(-1, 1)) {
+        for (side in SIDES_PAIR) {
             pen.toWorld(pose, 0.2f, eyeV * side, atWorld)
             pen.spot(atWorld[0], atWorld[1], '\u25CF', CRAB_GLINT, CRAB_EYE, c.depth)
         }
@@ -1623,7 +1645,7 @@ class WhaleSim(private val tuning: AsciiTuning) : AsciiSimulation {
             }
 
             // Pectoral flippers
-            for (side in intArrayOf(-1, 1)) {
+            for (side in SIDES_PAIR) {
                 val fa = shAngle + PI.toFloat() + side * (PI.toFloat() * 0.5f - finSweep)
                 val fx = shX + cos(fa) * finLen
                 val fy = shY + sin(fa) * finLen
@@ -1637,7 +1659,7 @@ class WhaleSim(private val tuning: AsciiTuning) : AsciiSimulation {
             }
 
             // Flukes
-            for (side in intArrayOf(-1, 1)) {
+            for (side in SIDES_PAIR) {
                 val la = tAngle + PI.toFloat() + side * 1.18f
                 val lx = tx + cos(la) * flukeSpan
                 val ly = ty + sin(la) * flukeSpan

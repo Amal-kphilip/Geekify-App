@@ -55,6 +55,18 @@ class GeekifyApplication : Application(), SingletonImageLoader.Factory {
 
         if (BuildConfig.DEBUG) {
             Timber.plant(Timber.DebugTree())
+            android.os.StrictMode.setThreadPolicy(
+                android.os.StrictMode.ThreadPolicy.Builder()
+                    .detectAll()
+                    .penaltyLog()
+                    .build()
+            )
+            android.os.StrictMode.setVmPolicy(
+                android.os.StrictMode.VmPolicy.Builder()
+                    .detectAll()
+                    .penaltyLog()
+                    .build()
+            )
         } else {
             Timber.plant(ReleaseLoggingTree())
         }

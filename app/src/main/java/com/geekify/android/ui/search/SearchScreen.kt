@@ -385,6 +385,7 @@ fun SearchScreen(
                                 items(
                                     count = state.recentSearches.size,
                                     key = { "recent_${state.recentSearches[it]}" },
+                                    contentType = { "recent_search" },
                                     span = { GridItemSpan(maxLineSpan) }
                                 ) { idx ->
                                     val queryItem = state.recentSearches[idx]

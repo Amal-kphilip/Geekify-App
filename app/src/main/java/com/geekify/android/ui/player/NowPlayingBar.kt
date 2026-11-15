@@ -20,7 +20,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -393,14 +395,12 @@ private fun MiniProgressLine(
             .height(if (isInline) 1.5.dp else 2.dp)
             .clip(RoundedCornerShape(1.dp))
             .background(Color.White.copy(alpha = 0.16f))
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxHeight()
-                .fillMaxWidth(progress)
-                .background(Lime)
-        )
-    }
+            .drawBehind {
+                if (progress > 0f) {
+                    drawRect(Lime, size = Size(size.width * progress, size.height))
+                }
+            }
+    )
 }
 
 /** Heart that pops with a spring when toggled; lime when liked. */
