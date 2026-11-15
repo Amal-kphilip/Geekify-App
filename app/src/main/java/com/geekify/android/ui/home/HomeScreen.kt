@@ -233,77 +233,86 @@ fun HomeScreen(
     val bottomInset = LocalBottomInset.current
 
     Box(modifier = Modifier.fillMaxSize().background(if (asciiEnabled) Color.Transparent else InkBackground)) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(280.dp)
+                .drawBehind { drawHeaderGlow() }
+        )
+
         PullToRefreshBox(
             isRefreshing = state.isLoading && (state.shelves.isNotEmpty() || state.mixes.isNotEmpty()),
             onRefresh = { viewModel.loadHome(true) },
             modifier = Modifier.fillMaxSize()
         ) {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 28.dp + bottomInset)
-            ) {
-                // ---- Header: glow, avatar, search / favourites, greeting, filter chips ----
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .drawBehind { drawHeaderGlow() }
-                            .statusBarsPadding()
-                            .padding(top = 14.dp)
-                    ) {
-                        Row(
+            Column(modifier = Modifier.fillMaxSize()) {
+                // ---- Pinned Top Action Row (Avatar + Search + Liked buttons) ----
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(top = 14.dp, start = 20.dp, end = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Avatar(photoUrl = photoUrl, name = userName, size = 58.dp, onClick = onAccountClick)
+                    Spacer(Modifier.weight(1f))
+                    CircleIconButton(
+                        icon = GeekifyIcons.Search,
+                        contentDescription = "Search",
+                        onClick = onSearchClick,
+                        size = 50.dp,
+                        container = Color.White.copy(alpha = 0.14f)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    CircleIconButton(
+                        icon = GeekifyIcons.FavoriteBorder,
+                        contentDescription = "Liked songs",
+                        onClick = onLikedClick,
+                        size = 50.dp,
+                        container = Color.White.copy(alpha = 0.14f)
+                    )
+                }
+
+                // ---- Scrolling Content ----
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentPadding = PaddingValues(bottom = 28.dp + bottomInset)
+                ) {
+                    // ---- Greeting & filter chips scroll with content ----
+                    item(key = "header_greeting_and_filters") {
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 20.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                                .padding(top = 16.dp)
                         ) {
-                            Avatar(photoUrl = photoUrl, name = userName, size = 58.dp, onClick = onAccountClick)
-                            Spacer(Modifier.weight(1f))
-                            CircleIconButton(
-                                icon = GeekifyIcons.Search,
-                                contentDescription = "Search",
-                                onClick = onSearchClick,
-                                size = 50.dp,
-                                container = Color.White.copy(alpha = 0.14f)
+                            Text(
+                                text = "Hi, $firstName",
+                                color = TextPrimary,
+                                fontSize = 32.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 20.dp)
                             )
-                            Spacer(Modifier.width(12.dp))
-                            CircleIconButton(
-                                icon = GeekifyIcons.FavoriteBorder,
-                                contentDescription = "Liked songs",
-                                onClick = onLikedClick,
-                                size = 50.dp,
-                                container = Color.White.copy(alpha = 0.14f)
-                            )
-                        }
 
-                        Spacer(Modifier.height(16.dp))
+                            Spacer(Modifier.height(20.dp))
 
-                        Text(
-                            text = "Hi, $firstName",
-                            color = TextPrimary,
-                            fontSize = 32.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(horizontal = 20.dp)
-                        )
-
-                        Spacer(Modifier.height(20.dp))
-
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 20.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            items(filters, key = { it }) { filter ->
-                                PillChip(
-                                    text = if (filter == "Everything") "All" else filter,
-                                    selected = state.selectedFilter == filter,
-                                    onClick = { viewModel.setFilter(filter) }
-                                )
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                items(filters, key = { it }) { filter ->
+                                    PillChip(
+                                        text = if (filter == "Everything") "All" else filter,
+                                        selected = state.selectedFilter == filter,
+                                        onClick = { viewModel.setFilter(filter) }
+                                    )
+                                }
                             }
                         }
                     }
-                }
 
                 // ---- Loading / error ----
                 if (state.isLoading && state.shelves.isEmpty()) {
@@ -497,6 +506,7 @@ fun HomeScreen(
                 }
             }
         }
+    }
 
         // Soft gradient fade at the bottom so scrolling list items cleanly fade out behind floating dock
         if (bottomInset > 0.dp) {
