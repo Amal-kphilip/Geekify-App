@@ -52,7 +52,9 @@ import com.geekify.android.ui.account.AddAccountScreen
 import com.geekify.android.ui.account.EditProfileScreen
 import com.geekify.android.ui.components.CreatePlaylistDialog
 import com.geekify.android.ui.components.LocalBottomInset
+import com.geekify.android.ui.components.LocalIsPlaying
 import com.geekify.android.ui.components.LocalNowPlayingId
+import com.geekify.android.ui.components.LocalTogglePlay
 import com.geekify.android.ui.components.bouncyClickable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -337,6 +339,8 @@ fun MainScreen(
 
     CompositionLocalProvider(
         LocalNowPlayingId provides playerState.current?.videoId,
+        LocalIsPlaying provides playerState.isPlaying,
+        LocalTogglePlay provides { playerViewModel.togglePlay() },
         LocalBottomInset provides animatedFloatingBarsHeight,
         LocalGlassOverlayHost provides overlayHost,
         LocalGlassBackdrop provides contentBackdrop,

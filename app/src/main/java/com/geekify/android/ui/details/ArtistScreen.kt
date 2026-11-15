@@ -24,6 +24,9 @@ import com.geekify.android.data.model.Track
 import com.geekify.android.ui.components.AuroraBackground
 import com.geekify.android.ui.components.CardItem
 import com.geekify.android.ui.components.CircleIconButton
+import com.geekify.android.ui.components.LocalIsPlaying
+import com.geekify.android.ui.components.LocalNowPlayingId
+import com.geekify.android.ui.components.LocalTogglePlay
 import com.geekify.android.ui.components.SectionTitle
 import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.components.rememberArtColor
@@ -106,16 +109,29 @@ fun ArtistScreen(
                             fontWeight = FontWeight.SemiBold
                         )
                         if (artist.songs.isNotEmpty()) {
+                            val currentTrackId = LocalNowPlayingId.current
+                            val isPlayingNow = LocalIsPlaying.current
+                            val togglePlay = LocalTogglePlay.current
+                            val isCurrentArtistSong = currentTrackId != null && artist.songs.any { it.videoId == currentTrackId }
+                            val isArtistPlaying = isCurrentArtistSong && isPlayingNow
+
                             Spacer(Modifier.height(16.dp))
                             Box(
                                 modifier = Modifier
                                     .size(56.dp)
                                     .clip(CircleShape)
                                     .background(SpotifyGreen)
-                                    .bouncyClickable(pressedScale = 0.92f) { onTrackClick(artist.songs.first(), artist.songs) },
+                                    .bouncyClickable(pressedScale = 0.92f) {
+                                        if (isCurrentArtistSong) togglePlay() else onTrackClick(artist.songs.first(), artist.songs)
+                                    },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(GeekifyIcons.Play, contentDescription = "Play top songs", tint = OnAccent, modifier = Modifier.size(24.dp))
+                                Icon(
+                                    imageVector = if (isArtistPlaying) GeekifyIcons.Pause else GeekifyIcons.Play,
+                                    contentDescription = if (isArtistPlaying) "Pause" else "Play top songs",
+                                    tint = OnAccent,
+                                    modifier = Modifier.size(24.dp)
+                                )
                             }
                         }
                         Spacer(Modifier.height(12.dp))

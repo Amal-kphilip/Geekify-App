@@ -18,6 +18,9 @@ import androidx.compose.ui.unit.sp
 import com.geekify.android.data.model.Track
 import com.geekify.android.ui.components.AuroraBackground
 import com.geekify.android.ui.components.DetailHeader
+import com.geekify.android.ui.components.LocalIsPlaying
+import com.geekify.android.ui.components.LocalNowPlayingId
+import com.geekify.android.ui.components.LocalTogglePlay
 import com.geekify.android.ui.components.TrackRow
 import com.geekify.android.ui.components.totalDurationText
 import com.geekify.android.ui.theme.*
@@ -30,6 +33,11 @@ fun LikedScreen(
     onShufflePlay: ((List<Track>) -> Unit)? = null
 ) {
     val liked by viewModel.liked.collectAsStateWithLifecycle()
+    val currentTrackId = LocalNowPlayingId.current
+    val isPlayingNow = LocalIsPlaying.current
+    val togglePlay = LocalTogglePlay.current
+    val isCurrentInLiked = currentTrackId != null && liked.any { it.videoId == currentTrackId }
+    val isLikedPlaying = isCurrentInLiked && isPlayingNow
 
     AuroraBackground(tint = Color(0xFF5B2C8F)) {
         LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -39,7 +47,8 @@ fun LikedScreen(
                     title = "Liked Songs",
                     subtitle = null,
                     meta = listOfNotNull("${liked.size} songs", totalDurationText(liked)).joinToString(" • "),
-                    onPlay = if (liked.isNotEmpty()) ({ onPlayTrack(liked.first(), liked) }) else null,
+                    isPlaying = isLikedPlaying,
+                    onPlay = if (isCurrentInLiked) ({ togglePlay() }) else if (liked.isNotEmpty()) ({ onPlayTrack(liked.first(), liked) }) else null,
                     onShuffle = if (liked.isNotEmpty() && onShufflePlay != null) ({ onShufflePlay(liked) }) else null,
                     art = {
                         Box(

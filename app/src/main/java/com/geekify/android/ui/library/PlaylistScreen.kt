@@ -22,6 +22,9 @@ import androidx.compose.ui.layout.ContentScale
 import com.geekify.android.data.model.Track
 import com.geekify.android.ui.components.AuroraBackground
 import com.geekify.android.ui.components.DetailHeader
+import com.geekify.android.ui.components.LocalIsPlaying
+import com.geekify.android.ui.components.LocalNowPlayingId
+import com.geekify.android.ui.components.LocalTogglePlay
 import com.geekify.android.ui.components.TrackRow
 import com.geekify.android.ui.components.totalDurationText
 import com.geekify.android.ui.components.rememberArtColor
@@ -39,6 +42,11 @@ fun PlaylistScreen(
     val tracks by viewModel.playlistTracks(playlistId).collectAsStateWithLifecycle(initialValue = emptyList())
     val coverUrl = tracks.firstOrNull()?.thumbnails?.lastOrNull()?.url
     val tint by rememberArtColor(coverUrl, fallback = InkElevated)
+    val currentTrackId = LocalNowPlayingId.current
+    val isPlayingNow = LocalIsPlaying.current
+    val togglePlay = LocalTogglePlay.current
+    val isCurrentInPlaylist = currentTrackId != null && tracks.any { it.videoId == currentTrackId }
+    val isPlaylistPlaying = isCurrentInPlaylist && isPlayingNow
 
     AuroraBackground(tint = tint) {
         LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -48,7 +56,8 @@ fun PlaylistScreen(
                     title = playlistName,
                     subtitle = null,
                     meta = listOfNotNull("${tracks.size} tracks", totalDurationText(tracks)).joinToString(" • "),
-                    onPlay = if (tracks.isNotEmpty()) ({ onPlayTrack(tracks.first(), tracks) }) else null,
+                    isPlaying = isPlaylistPlaying,
+                    onPlay = if (isCurrentInPlaylist) ({ togglePlay() }) else if (tracks.isNotEmpty()) ({ onPlayTrack(tracks.first(), tracks) }) else null,
                     onShuffle = if (tracks.isNotEmpty() && onShufflePlay != null) ({ onShufflePlay(tracks) }) else null,
                     trailing = {
                         IconButton(onClick = {

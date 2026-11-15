@@ -822,6 +822,16 @@ private fun TopResultCard(
     onClick: () -> Unit,
     onMoreClick: () -> Unit
 ) {
+    val isSongOrVideo = topResult.kind == "song" || topResult.kind == "video"
+    val trackId = topResult.videoId ?: topResult.id
+    val currentTrackId = LocalNowPlayingId.current
+    val isPlaying = LocalIsPlaying.current
+    val togglePlay = LocalTogglePlay.current
+
+    val isCurrent = isSongOrVideo && trackId == currentTrackId
+    val isCurrentPlaying = isCurrent && isPlaying
+    val playButtonAction = if (isCurrent) togglePlay else onClick
+
     Surface(
         color = IosPalette.secondarySystemGroupedBackground,
         shape = IosCardShape,
@@ -918,12 +928,12 @@ private fun TopResultCard(
                     .size(44.dp)
                     .clip(CircleShape)
                     .background(Lime)
-                    .bouncyClickable(pressedScale = 0.92f, onClick = onClick),
+                    .bouncyClickable(pressedScale = 0.92f, onClick = playButtonAction),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = GeekifyIcons.Play,
-                    contentDescription = "Play",
+                    imageVector = if (isCurrentPlaying) GeekifyIcons.Pause else GeekifyIcons.Play,
+                    contentDescription = if (isCurrentPlaying) "Pause" else "Play",
                     tint = OnAccent,
                     modifier = Modifier.size(20.dp)
                 )
@@ -942,11 +952,16 @@ private fun TopResultCard(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TopResultSongCard(
+internal fun TopResultSongCard(
     track: Track,
     onClick: () -> Unit,
     onMoreClick: () -> Unit
 ) {
+    val isCurrent = track.videoId == LocalNowPlayingId.current
+    val isPlaying = isCurrent && LocalIsPlaying.current
+    val togglePlay = LocalTogglePlay.current
+    val playButtonAction = if (isCurrent) togglePlay else onClick
+
     Surface(
         color = IosPalette.secondarySystemGroupedBackground,
         shape = IosCardShape,
@@ -1028,12 +1043,12 @@ private fun TopResultSongCard(
                     .size(42.dp)
                     .clip(CircleShape)
                     .background(Lime)
-                    .bouncyClickable(pressedScale = 0.92f, onClick = onClick),
+                    .bouncyClickable(pressedScale = 0.92f, onClick = playButtonAction),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = GeekifyIcons.Play,
-                    contentDescription = "Play",
+                    imageVector = if (isPlaying) GeekifyIcons.Pause else GeekifyIcons.Play,
+                    contentDescription = if (isPlaying) "Pause" else "Play",
                     tint = OnAccent,
                     modifier = Modifier.size(18.dp)
                 )

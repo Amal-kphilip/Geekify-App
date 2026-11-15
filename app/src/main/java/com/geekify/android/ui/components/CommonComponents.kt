@@ -47,6 +47,12 @@ import com.geekify.android.ui.theme.*
 /** videoId of the track that is currently playing; lets every TrackRow highlight itself. */
 val LocalNowPlayingId = compositionLocalOf<String?> { null }
 
+/** Whether playback is actively playing (vs paused). Scoped so only readers recompose. */
+val LocalIsPlaying = compositionLocalOf { false }
+
+/** Action to toggle playback play/pause. */
+val LocalTogglePlay = compositionLocalOf<() -> Unit> { {} }
+
 /** Extra bottom space that scrolling lists need so their last row clears the floating nav + mini player. */
 val LocalBottomInset = compositionLocalOf { 0.dp }
 

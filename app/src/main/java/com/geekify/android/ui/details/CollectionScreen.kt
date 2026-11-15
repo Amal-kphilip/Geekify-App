@@ -20,6 +20,9 @@ import com.geekify.android.data.model.CollectionKind
 import com.geekify.android.data.model.Track
 import com.geekify.android.ui.components.AuroraBackground
 import com.geekify.android.ui.components.DetailHeader
+import com.geekify.android.ui.components.LocalIsPlaying
+import com.geekify.android.ui.components.LocalNowPlayingId
+import com.geekify.android.ui.components.LocalTogglePlay
 import com.geekify.android.ui.components.TrackRow
 import com.geekify.android.ui.components.totalDurationText
 import com.geekify.android.ui.components.rememberArtColor
@@ -56,21 +59,29 @@ fun CollectionScreen(
             state.error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(state.error ?: "Failed to load collection", color = ErrorRed)
             }
-            collection != null -> LazyColumn(modifier = Modifier.fillMaxSize()) {
-                item {
-                    DetailHeader(
-                        onBack = onBack,
-                        title = collection.title,
-                        subtitle = collection.artist,
-                        description = collection.description,
-                        meta = listOfNotNull(
-                            if (kind == CollectionKind.ALBUM) "Album" else "Playlist",
-                            collection.year,
-                            "${collection.tracks.size} tracks",
-                            totalDurationText(collection.tracks)
-                        ).joinToString(" • "),
-                        onPlay = if (collection.tracks.isNotEmpty()) ({ onPlayTrack(collection.tracks.first(), collection.tracks) }) else null,
-                        onShuffle = if (collection.tracks.isNotEmpty() && onShufflePlay != null) ({ onShufflePlay(collection.tracks) }) else null,
+            collection != null -> {
+                val currentTrackId = LocalNowPlayingId.current
+                val isPlayingNow = LocalIsPlaying.current
+                val togglePlay = LocalTogglePlay.current
+                val isCurrentInCollection = currentTrackId != null && collection.tracks.any { it.videoId == currentTrackId }
+                val isCollectionPlaying = isCurrentInCollection && isPlayingNow
+
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    item {
+                        DetailHeader(
+                            onBack = onBack,
+                            title = collection.title,
+                            subtitle = collection.artist,
+                            description = collection.description,
+                            meta = listOfNotNull(
+                                if (kind == CollectionKind.ALBUM) "Album" else "Playlist",
+                                collection.year,
+                                "${collection.tracks.size} tracks",
+                                totalDurationText(collection.tracks)
+                            ).joinToString(" • "),
+                            isPlaying = isCollectionPlaying,
+                            onPlay = if (isCurrentInCollection) ({ togglePlay() }) else if (collection.tracks.isNotEmpty()) ({ onPlayTrack(collection.tracks.first(), collection.tracks) }) else null,
+                            onShuffle = if (collection.tracks.isNotEmpty() && onShufflePlay != null) ({ onShufflePlay(collection.tracks) }) else null,
                         isSaved = isSaved,
                         onToggleSaved = if (onToggleSaved != null) ({
                             onToggleSaved(
@@ -115,4 +126,5 @@ fun CollectionScreen(
             }
         }
     }
+}
 }

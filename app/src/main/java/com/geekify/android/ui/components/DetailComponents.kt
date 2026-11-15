@@ -44,6 +44,7 @@ fun DetailHeader(
     onShuffle: (() -> Unit)? = null,
     isSaved: Boolean = false,
     onToggleSaved: (() -> Unit)? = null,
+    isPlaying: Boolean = false,
     trailing: @Composable RowScope.() -> Unit = {},
     art: @Composable BoxScope.() -> Unit
 ) {
@@ -161,7 +162,12 @@ fun DetailHeader(
                         .bouncyClickable(pressedScale = 0.92f, onClick = onPlay),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(GeekifyIcons.Play, contentDescription = "Play", tint = OnAccent, modifier = Modifier.size(26.dp))
+                    Icon(
+                        imageVector = if (isPlaying) GeekifyIcons.Pause else GeekifyIcons.Play,
+                        contentDescription = if (isPlaying) "Pause" else "Play",
+                        tint = OnAccent,
+                        modifier = Modifier.size(26.dp)
+                    )
                 }
             }
         }

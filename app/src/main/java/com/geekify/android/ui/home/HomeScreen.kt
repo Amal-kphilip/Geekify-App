@@ -570,6 +570,13 @@ private fun DiscoverCard(
     onMore: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val currentTrackId = LocalNowPlayingId.current
+    val isPlayingNow = LocalIsPlaying.current
+    val togglePlay = LocalTogglePlay.current
+    val isCurrent = item.lead != null && item.lead.videoId == currentTrackId
+    val isCurrentPlaying = isCurrent && isPlayingNow
+    val playButtonAction = if (isCurrent) togglePlay else item.onPlay
+
     Box(
         modifier = modifier
             .height(186.dp)
@@ -649,10 +656,15 @@ private fun DiscoverCard(
                     .size(52.dp)
                     .clip(CircleShape)
                     .background(OnPastel)
-                    .bouncyClickable(pressedScale = 0.92f, onClick = item.onPlay),
+                    .bouncyClickable(pressedScale = 0.92f, onClick = playButtonAction),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(GeekifyIcons.Play, contentDescription = "Play", tint = Color.White, modifier = Modifier.size(22.dp))
+                Icon(
+                    imageVector = if (isCurrentPlaying) GeekifyIcons.Pause else GeekifyIcons.Play,
+                    contentDescription = if (isCurrentPlaying) "Pause" else "Play",
+                    tint = Color.White,
+                    modifier = Modifier.size(22.dp)
+                )
             }
             if (item.lead != null) {
                 Spacer(Modifier.width(10.dp))
