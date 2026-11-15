@@ -210,9 +210,13 @@ class AsciiRenderer(val tuning: AsciiTuning) {
         val br = activeBg[0]
         val bg = activeBg[1]
         val bb = activeBg[2]
-        val cr = clampF(r + (br - r) * f, 0f, 255f).roundToInt()
-        val cg = clampF(g + (bg - g) * f, 0f, 255f).roundToInt()
-        val cb = clampF(b + (bb - b) * f, 0f, 255f).roundToInt()
+        val safeR = if (r.isNaN()) 0f else r
+        val safeG = if (g.isNaN()) 0f else g
+        val safeB = if (b.isNaN()) 0f else b
+        val safeF = clampF(f, 0f, 1f)
+        val cr = clampF(safeR + (br - safeR) * safeF, 0f, 255f).safeRoundToInt()
+        val cg = clampF(safeG + (bg - safeG) * safeF, 0f, 255f).safeRoundToInt()
+        val cb = clampF(safeB + (bb - safeB) * safeF, 0f, 255f).safeRoundToInt()
         return packRgb(cr, cg, cb)
     }
 
@@ -431,7 +435,7 @@ class AsciiRenderer(val tuning: AsciiTuning) {
                 ig *= k
                 ib *= k
 
-                val key = (hash3((au * S / (cw * 0.9f)).roundToInt(), (av * S / (cw * 0.9f)).roundToInt(), p.id) * 4294967295.0).toLong()
+                val key = (hash3((au * S / (cw * 0.9f)).safeRoundToInt(), (av * S / (cw * 0.9f)).safeRoundToInt(), p.id) * 4294967295.0).toLong()
                 val keyInt = key.toInt()
 
                 if (!solid) {
@@ -529,7 +533,7 @@ class AsciiRenderer(val tuning: AsciiTuning) {
                     val sIdx = abs(keyInt % 3)
                     packRgb(SPARKLE_R[sIdx], SPARKLE_G[sIdx], SPARKLE_B[sIdx])
                 } else {
-                    packRgb(clampF(gr, 0f, 255f).roundToInt(), clampF(gg, 0f, 255f).roundToInt(), clampF(gb, 0f, 255f).roundToInt())
+                    packRgb(clampF(gr, 0f, 255f).safeRoundToInt(), clampF(gg, 0f, 255f).safeRoundToInt(), clampF(gb, 0f, 255f).safeRoundToInt())
                 }
             }
         }
@@ -613,16 +617,16 @@ class AsciiRenderer(val tuning: AsciiTuning) {
 
         // 1. Solid canvas background
         fp.color = packRgb(
-            clampF(activeBg[0], 0f, 255f).roundToInt(),
-            clampF(activeBg[1], 0f, 255f).roundToInt(),
-            clampF(activeBg[2], 0f, 255f).roundToInt()
+            clampF(activeBg[0], 0f, 255f).safeRoundToInt(),
+            clampF(activeBg[1], 0f, 255f).safeRoundToInt(),
+            clampF(activeBg[2], 0f, 255f).safeRoundToInt()
         )
         canvas.drawRect(0f, 0f, width, height, fp)
 
         // 2. Subtle grid (default 0.0 min, only drawn if grid > 0.01f)
         if (tuning.grid > 0.01f) {
             val ga = clampF(0.055f * tuning.grid, 0f, 0.35f)
-            fp.color = packArgb((ga * 255f).roundToInt(), 255, 255, 255)
+            fp.color = packArgb((ga * 255f).safeRoundToInt(), 255, 255, 255)
             var c = 0
             while (c <= cols) {
                 val px = c * cw
@@ -657,7 +661,7 @@ class AsciiRenderer(val tuning: AsciiTuning) {
                 val twinkle = 0.75f + 0.25f * sin(t * 5f + hash3(col, row, 3) * 40f)
                 val alpha = clampF(e * twinkle * 0.42f, 0.08f, 0.75f)
                 val size = if (e > 0.6f) dotSize + 1f else dotSize
-                fp.color = packArgb((alpha * 255f).roundToInt(), ir, ig, ib)
+                fp.color = packArgb((alpha * 255f).safeRoundToInt(), ir, ig, ib)
                 canvas.drawRect(col * cw + ox, row * ch + oy, col * cw + ox + size, row * ch + oy + size, fp)
             }
         }

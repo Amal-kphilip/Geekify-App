@@ -40,7 +40,7 @@ private fun sampleBokeh(nx: Float, ny: Float, t: Float, out: FloatArray) {
     for (o in orbs) {
         val d = hypot(nx - o.x, (ny - o.y) * 1.15f)
         if (d < o.rad) {
-            val w = (1f - d / o.rad).pow(1.8f) * 0.72f
+            val w = max(0f, 1f - d / o.rad).pow(1.8f) * 0.72f
             r += o.r * w
             g += o.g * w
             b += o.b * w
@@ -540,7 +540,7 @@ class AuroraSim(private val tuning: AsciiTuning) : AsciiSimulation {
                     val r = baseRow - dy
                     if (r < 0 || r >= rows) continue
                     val vFrac = dy.toFloat() / rayRows.toFloat()
-                    val intensity = sin(vFrac.pow(0.45f) * PI.toFloat()) * (0.65f + 0.55f * rayStrength)
+                    val intensity = sin(max(0f, vFrac).pow(0.45f) * PI.toFloat()) * (0.65f + 0.55f * rayStrength)
                     if (intensity < 0.14f) continue
 
                     val cr: Float

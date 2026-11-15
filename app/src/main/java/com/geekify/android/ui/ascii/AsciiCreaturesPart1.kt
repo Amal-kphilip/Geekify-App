@@ -64,7 +64,7 @@ private val BUTTERFLY_SPECIES = arrayOf(
 private fun lobeReach(l: LobeSpec, phi: Float, tIn: Float = (phi - l.from) / (l.to - l.from)): Float {
     if (tIn <= 0f || tIn >= 1f) return 0f
     val s = if (tIn < l.peak) (tIn / l.peak) * 0.5f else 0.5f + (tIn - l.peak) / (1f - l.peak) * 0.5f
-    val r = l.reach * sin(PI.toFloat() * s).pow(l.round)
+    val r = l.reach * max(0f, sin(PI.toFloat() * s)).pow(l.round)
     return if (l.scallop > 0f) r * (1f - l.scallop * (0.5f + 0.5f * cos(tIn * PI.toFloat() * 14f))) else r
 }
 
@@ -140,7 +140,7 @@ class ButterfliesSim(private val tuning: AsciiTuning) : AsciiSimulation {
             flock.beginSteer()
             flock.steer(b, flock.heading + b.bias * tuning.spread, cruise, tuning.grip)
 
-            val kick = sqrt(dt) * 520f * BUTTERFLY_FLUTTER * kFlutter * (1f - 0.8f * b.glide) * (0.5f + 0.5f * b.depth)
+            val kick = sqrt(max(0f, dt)) * 520f * BUTTERFLY_FLUTTER * kFlutter * (1f - 0.8f * b.glide) * (0.5f + 0.5f * b.depth)
             b.flutterX += -b.flutterX * 3f * dt + (Random.nextFloat() * 2f - 1f) * kick
             b.flutterY += -b.flutterY * 3f * dt + (Random.nextFloat() * 2f - 1f) * kick
             flock.accX += b.flutterX
@@ -162,7 +162,7 @@ class ButterfliesSim(private val tuning: AsciiTuning) : AsciiSimulation {
 
             val urgency = clampF(spd / (cruise * 2f), 0f, 1f)
             b.phase += dt * TAU * FLAP_HZ * kFlapRate * (0.8f + 0.6f * urgency) * (1f - 0.9f * b.glide)
-            val beat = (0.5f + 0.5f * cos(b.phase)).pow(0.8f)
+            val beat = max(0f, 0.5f + 0.5f * cos(b.phase)).pow(0.8f)
             b.open = 0.1f + 0.9f * (beat * (1f - b.glide) + 0.96f * b.glide)
 
             drawButterfly(b, pen)
@@ -260,7 +260,7 @@ private val KOI_GLINT = floatArrayOf(255f, 252f, 246f)
 private val KOI_VARIETIES = arrayOf("kohaku", "sanke", "showa", "ogon", "chagoi")
 
 private fun koiHalfWidth(s: Float): Float {
-    if (s < 0.12f) return 0.1f * sin(s / 0.12f * PI.toFloat() / 2f).pow(0.6f)
+    if (s < 0.12f) return 0.1f * max(0f, sin(s / 0.12f * PI.toFloat() / 2f)).pow(0.6f)
     if (s < 0.35f) return 0.1f + 0.016f * sin((s - 0.12f) / 0.23f * (PI.toFloat() / 2f))
     if (s < 0.82f) return 0.116f - 0.088f * smoothstepF(0.35f, 0.82f, s)
     return 0.028f + (s - 0.82f) / 0.18f * 0.1f
@@ -432,7 +432,7 @@ class KoiSim(private val tuning: AsciiTuning) : AsciiSimulation {
             val tl = hypot(tx, ty).coerceAtLeast(1f)
             tx /= tl
             ty /= tl
-            val off = L * 0.06f * s.pow(1.6f) * sin(f.phase - s * 4.5f) * min(1.5f, tuning["tailBeat", 1f])
+            val off = L * 0.06f * max(0f, s).pow(1.6f) * sin(f.phase - s * 4.5f) * min(1.5f, tuning["tailBeat", 1f])
             spine[i * 2] = n[i * 2] - ty * off
             spine[i * 2 + 1] = n[i * 2 + 1] + tx * off
             if (i > 0) {
@@ -1010,7 +1010,7 @@ private fun onCraneWing(u: Float, vw: Float, out: CraneWingResult = globalWing):
     val le = 0.12f + 0.03f * s - 0.09f * s * s
     var te0 = (-0.075f + 0.03f * s) * 1.2f
     if (s < 0.78f) te0 += 0.012f * (0.5f + 0.5f * cos(s * TAU * 9f))
-    val te = if (s > 0.72f) lerpF(te0, le - 0.015f, ((s - 0.72f) / 0.28f).pow(1.4f)) else te0
+    val te = if (s > 0.72f) lerpF(te0, le - 0.015f, max(0f, (s - 0.72f) / 0.28f).pow(1.4f)) else te0
     if (u > le || u < te) return false
     val q = (u - te) / (le - te)
     if (s > 0.78f && q < 0.92f && fracF(q * 6f) < 0.24f) return false
@@ -1029,7 +1029,7 @@ private class CraneStroke {
 private val craneStroke = CraneStroke()
 
 private fun evenStroke(c: FlockCreature) {
-    val beat = (0.5f + 0.5f * cos(c.phase)).pow(0.8f)
+    val beat = max(0f, 0.5f + 0.5f * cos(c.phase)).pow(0.8f)
     val open = max(0.12f, 0.25f + 0.75f * (beat * (1f - c.glide) + c.glide))
     craneStroke.arm = open
     craneStroke.hand = open
@@ -1328,7 +1328,7 @@ class CrabsSim(private val tuning: AsciiTuning) : AsciiSimulation {
             val su = abs(u / 0.17f)
             val sv = av / 0.27f
             val teeth = if (u > 0.06f) 0.06f * (0.5f + 0.5f * cos(sv * PI.toFloat() * 7f)) else 0f
-            if (su.pow(2.2f) + sv.pow(2.4f) <= 1f - teeth) {
+            if (max(0f, su).pow(2.2f) + max(0f, sv).pow(2.4f) <= 1f - teeth) {
                 if (spotted(u, v, 0.05f, 0.012f, c.id)) return@shape pen.ink.set(CRAB_FLECK[0], CRAB_FLECK[1], CRAB_FLECK[2], INK_DARK)
                 if (abs(av - 0.08f) < 0.01f && u > -0.08f && u < 0.05f) return@shape pen.ink.set(CRAB_FLECK[0], CRAB_FLECK[1], CRAB_FLECK[2], INK_DARK, "|")
                 return@shape if (inEllipse(u, av, 0.01f, 0f, 0.1f, 0.13f)) {
@@ -1516,7 +1516,7 @@ class WhaleSim(private val tuning: AsciiTuning) : AsciiSimulation {
                     val d = hypot(dx, dy).coerceAtLeast(1f)
                     val segR = partR * (if (node == 2) 1.35f else 1f - (node.toFloat() / WHALE_NODES.toFloat()) * 0.35f)
                     if (d < segR) {
-                        val push = (1f - d / segR).pow(1.3f) * 1150f
+                        val push = max(0f, 1f - d / segR).pow(1.3f) * 1150f
                         flock.accX += (dx / d) * push
                         flock.accY += (dy / d) * push
                         f.startledUntil = max(f.startledUntil, time + 0.25f)
@@ -1604,7 +1604,7 @@ class WhaleSim(private val tuning: AsciiTuning) : AsciiSimulation {
                 }
             }
 
-            val halfW = s * (if (bodyS < 0.25f) 0.145f * sin(max(0.02f, bodyS) / 0.25f * (PI.toFloat() / 2f)).pow(0.65f) else 0.145f * max(0.08f, 1f - (bodyS - 0.25f) / 0.75f).pow(1.35f))
+            val halfW = s * (if (bodyS < 0.25f) 0.145f * max(0f, sin(max(0.02f, bodyS) / 0.25f * (PI.toFloat() / 2f))).pow(0.65f) else 0.145f * max(0.08f, 1f - (bodyS - 0.25f) / 0.75f).pow(1.35f))
             if (bestD <= halfW) {
                 pen.ink.au = bodyS - 0.5f
                 pen.ink.av = (bestD / max(1f, halfW)) * signedSide * 0.2f

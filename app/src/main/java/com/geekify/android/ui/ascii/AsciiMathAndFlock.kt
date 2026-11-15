@@ -21,7 +21,11 @@ const val HALF_PI = (PI * 0.5).toFloat()
 
 @Suppress("NOTHING_TO_INLINE")
 inline fun clampF(v: Float, lo: Float, hi: Float): Float =
-    if (v < lo) lo else if (v > hi) hi else v
+    if (v.isNaN() || v < lo) lo else if (v > hi) hi else v
+
+@Suppress("NOTHING_TO_INLINE")
+inline fun Float.safeRoundToInt(default: Int = 0): Int =
+    if (this.isNaN() || this.isInfinite()) default else this.roundToInt()
 
 @Suppress("NOTHING_TO_INLINE")
 inline fun lerpF(a: Float, b: Float, t: Float): Float = a + (b - a) * t
