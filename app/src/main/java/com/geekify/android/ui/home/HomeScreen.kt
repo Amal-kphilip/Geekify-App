@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.geekify.android.data.model.*
+import com.geekify.android.settings.LocalAppSettings
 import com.geekify.android.ui.components.*
 import com.geekify.android.ui.theme.*
 import kotlinx.coroutines.delay
@@ -196,7 +197,9 @@ fun HomeScreen(
         else -> "Top daily picks"
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(InkBackground)) {
+    val asciiEnabled = LocalAppSettings.current.ascii.enabled
+
+    Box(modifier = Modifier.fillMaxSize().background(if (asciiEnabled) Color.Transparent else InkBackground)) {
         PullToRefreshBox(
             isRefreshing = state.isLoading && (state.shelves.isNotEmpty() || state.mixes.isNotEmpty()),
             onRefresh = { viewModel.loadHome(true) },

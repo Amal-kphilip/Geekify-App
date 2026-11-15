@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import com.geekify.android.settings.LocalAppSettings
 import com.geekify.android.ui.theme.InkBackground
 
 /**
@@ -24,10 +25,22 @@ fun AuroraBackground(
     tint: Color = InkBackground,
     content: @Composable BoxScope.() -> Unit
 ) {
+    val asciiEnabled = LocalAppSettings.current.ascii.enabled
     val animatedTint by animateColorAsState(tint, tween(600), label = "bgTint")
-    Box(
-        modifier = modifier
-            .fillMaxSize()
+    val bgModifier = if (asciiEnabled) {
+        if (tint == InkBackground) {
+            Modifier
+        } else {
+            Modifier.background(
+                Brush.verticalGradient(
+                    0f to animatedTint.copy(alpha = 0.42f),
+                    0.48f to Color.Transparent,
+                    1f to Color.Transparent
+                )
+            )
+        }
+    } else {
+        Modifier
             .background(InkBackground)
             .background(
                 Brush.verticalGradient(
@@ -35,7 +48,12 @@ fun AuroraBackground(
                     0.55f to InkBackground,
                     1f to InkBackground
                 )
-            ),
+            )
+    }
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .then(bgModifier),
         content = content
     )
 }

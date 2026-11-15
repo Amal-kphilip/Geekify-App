@@ -44,6 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.geekify.android.settings.LocalAppSettings
 import com.geekify.android.ui.theme.GeekifyIcons
 
 /**
@@ -132,10 +133,12 @@ fun IosSettingsPageScaffold(
         label = "iosLargeTitleAlpha"
     )
 
+    val asciiEnabled = LocalAppSettings.current.ascii.enabled
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(IosPalette.systemGroupedBackground)
+            .background(if (asciiEnabled) Color.Transparent else IosPalette.systemGroupedBackground)
     ) {
         // Scrollable body
         Box(

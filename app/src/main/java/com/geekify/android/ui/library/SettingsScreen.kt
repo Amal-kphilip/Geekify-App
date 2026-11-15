@@ -58,6 +58,8 @@ import com.geekify.android.notifications.NotificationSettingsViewModel
 import com.geekify.android.settings.AppSettingsState
 import com.geekify.android.settings.AudioQualityPreference
 import com.geekify.android.settings.SettingsViewModel
+import com.geekify.android.ui.ascii.AsciiBackgroundSettingsSubPage
+import com.geekify.android.ui.ascii.AsciiCatalog
 import com.geekify.android.ui.components.*
 import com.geekify.android.ui.glass.GlassStyle
 import com.geekify.android.ui.glass.LocalGlassBackdrop
@@ -75,6 +77,7 @@ import kotlinx.coroutines.delay
 private enum class SettingsSubPage(val title: String) {
     ROOT("Settings"),
     APPEARANCE("Appearance"),
+    BACKGROUND_TWEAKS("Background & Tweaks"),
     PLAYER("Player & playback"),
     CONTENT("Content & region"),
     NOTIFICATIONS("Notifications"),
@@ -204,7 +207,7 @@ fun SettingsScreen(
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(IosPalette.systemGroupedBackground)
+            .background(if (state.ascii.enabled) Color.Transparent else IosPalette.systemGroupedBackground)
     ) {
         val isSplitLayout = maxWidth >= 840.dp
 
@@ -226,6 +229,16 @@ fun SettingsScreen(
                         tint = IosPalette.systemCyan,
                         subPage = SettingsSubPage.APPEARANCE,
                         onClick = { openSubPage(SettingsSubPage.APPEARANCE, isSplitLayout) }
+                    ),
+                    SettingsRootItem(
+                        key = "background_tweaks",
+                        title = "Background Animations & Tweaks",
+                        subtitle = "ASCII creatures, scenes, live preview, colour cycle & butterfly palettes",
+                        value = if (state.ascii.enabled) AsciiCatalog.byId(state.ascii.animalId).name else "Off",
+                        icon = GeekifyIcons.Tune,
+                        tint = IosPalette.systemPurple,
+                        subPage = SettingsSubPage.BACKGROUND_TWEAKS,
+                        onClick = { openSubPage(SettingsSubPage.BACKGROUND_TWEAKS, isSplitLayout) }
                     ),
                     SettingsRootItem(
                         key = "app_icon",
@@ -352,6 +365,11 @@ fun SettingsScreen(
             when (page) {
                 SettingsSubPage.APPEARANCE -> AppearanceGlassSubPage(
                     state = state,
+                    viewModel = settingsViewModel
+                )
+
+                SettingsSubPage.BACKGROUND_TWEAKS -> AsciiBackgroundSettingsSubPage(
+                    config = state.ascii,
                     viewModel = settingsViewModel
                 )
 
@@ -1722,6 +1740,20 @@ private fun buildSearchRegistry(
         icon = GeekifyIcons.AutoAwesome,
         tint = IosPalette.systemCyan,
         onSelect = { openPage(SettingsSubPage.APPEARANCE) }
+    ),
+    SearchableSettingEntry(
+        title = "Background Animations & Tweaks",
+        subtitle = "Live ASCII creatures, scenes, preview, colour changing & multi-coloured butterflies",
+        category = "Background & Tweaks",
+        keywords = listOf(
+            "ascii", "background", "animations", "tweaks", "preview", "butterfly", "butterflies",
+            "multi color", "multicolor", "colour", "color", "hue", "koi", "jellyfish",
+            "frog", "crane", "crab", "whale", "rain", "snow", "snowfall", "waves", "ocean waves",
+            "aurora", "detail", "grid"
+        ),
+        icon = GeekifyIcons.Tune,
+        tint = IosPalette.systemPurple,
+        onSelect = { openPage(SettingsSubPage.BACKGROUND_TWEAKS) }
     ),
     SearchableSettingEntry(
         title = "Adaptive Bottom Bar & Default Tab",

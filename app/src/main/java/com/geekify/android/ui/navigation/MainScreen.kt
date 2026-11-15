@@ -93,6 +93,9 @@ import com.geekify.android.ui.library.AppIconSettingsScreen
 import com.geekify.android.settings.LocalAppSettings
 import com.geekify.android.settings.LocalGlassConfig
 import com.geekify.android.settings.SettingsViewModel
+import com.geekify.android.ui.ascii.AsciiBackgroundCanvas
+import com.geekify.android.ui.ascii.asciiPointerObserver
+import com.geekify.android.ui.ascii.rememberAsciiPointerHub
 import com.geekify.android.ui.player.ExpandedPlayerScreen
 import com.geekify.android.ui.player.NowPlayingBar
 import com.geekify.android.ui.player.PlayerViewModel
@@ -324,6 +327,7 @@ fun MainScreen(
     val contentBackdrop = rememberGlassBackdrop()
     val sceneBackdrop = rememberGlassBackdrop()
     val overlayHost = remember { GlassOverlayHost() }
+    val asciiPointerHub = rememberAsciiPointerHub()
 
     val animatedFloatingBarsHeight by animateDpAsState(
         targetValue = with(LocalDensity.current) { floatingBarsHeightPx.toDp() },
@@ -343,7 +347,21 @@ fun MainScreen(
       // ---- SCENE: everything that sits underneath popups / dialogs / panels ----
       Box(modifier = Modifier.fillMaxSize().glassBackdropSource(sceneBackdrop, enabled = overlayHost.entries.isNotEmpty()).background(InkBackground)) {
         // Main content stays clean, sharp and opaque. It is only RECORDED so the floating bars can sample it.
-        Box(modifier = Modifier.fillMaxSize().glassBackdropSource(contentBackdrop).nestedScroll(scrollConnection).background(InkBackground)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .glassBackdropSource(contentBackdrop)
+                .nestedScroll(scrollConnection)
+                .asciiPointerObserver(asciiPointerHub, enabled = appSettingsState.ascii.enabled)
+                .background(InkBackground)
+        ) {
+                if (appSettingsState.ascii.enabled) {
+                    AsciiBackgroundCanvas(
+                        config = appSettingsState.ascii,
+                        pointerHub = asciiPointerHub,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
                 NavHost(
                     modifier = Modifier.fillMaxSize(),
                     navController = navController,

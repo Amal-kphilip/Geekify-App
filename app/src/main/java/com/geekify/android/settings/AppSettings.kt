@@ -10,6 +10,9 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.geekify.android.ui.ascii.AsciiBackgroundConfig
+import com.geekify.android.ui.ascii.MAX_ASCII_DETAIL
+import com.geekify.android.ui.ascii.MIN_ASCII_GRID
 import com.geekify.android.ui.navigation.FloatingTabBarInlineBehavior
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -55,6 +58,7 @@ data class AppSettingsState(
 
     // Liquid Glass & Appearance
     val glass: GlassConfig = GlassConfig(),
+    val ascii: AsciiBackgroundConfig = AsciiBackgroundConfig(),
     val navInlineBehavior: FloatingTabBarInlineBehavior = FloatingTabBarInlineBehavior.OnScrollDown,
     val defaultTab: String = "home",
 
@@ -96,6 +100,16 @@ class AppSettingsRepository @Inject constructor(
         val KEY_GLASS_TINT_ALPHA = floatPreferencesKey("settings_glass_tint_alpha")
         val KEY_GLASS_MINI_PLAYER = booleanPreferencesKey("settings_glass_mini_player")
         val KEY_GLASS_NAV_BAR = booleanPreferencesKey("settings_glass_nav_bar")
+
+        val KEY_ASCII_ENABLED = booleanPreferencesKey("settings_ascii_enabled")
+        val KEY_ASCII_ANIMAL_ID = stringPreferencesKey("settings_ascii_animal_id")
+        val KEY_ASCII_DETAIL = floatPreferencesKey("settings_ascii_detail")
+        val KEY_ASCII_GRID = floatPreferencesKey("settings_ascii_grid")
+        val KEY_ASCII_HUE_SHIFT = floatPreferencesKey("settings_ascii_hue_shift")
+        val KEY_ASCII_COLOR_CYCLE = booleanPreferencesKey("settings_ascii_color_cycle")
+        val KEY_ASCII_COLOR_CYCLE_SPEED = floatPreferencesKey("settings_ascii_color_cycle_speed")
+        val KEY_ASCII_MULTI_COLOR_BUTTERFLIES = booleanPreferencesKey("settings_ascii_multi_color_butterflies")
+        val KEY_ASCII_PARAMS_RAW = stringPreferencesKey("settings_ascii_params_raw")
 
         val KEY_NAV_INLINE_BEHAVIOR = stringPreferencesKey("settings_nav_inline_behavior")
         val KEY_DEFAULT_TAB = stringPreferencesKey("settings_default_tab")
@@ -142,6 +156,17 @@ class AppSettingsRepository @Inject constructor(
                     tintAlpha = (prefs[KEY_GLASS_TINT_ALPHA] ?: 0.12f).coerceIn(0f, 0.60f),
                     miniPlayerGlass = prefs[KEY_GLASS_MINI_PLAYER] ?: true,
                     navBarGlass = prefs[KEY_GLASS_NAV_BAR] ?: true
+                ),
+                ascii = AsciiBackgroundConfig(
+                    enabled = prefs[KEY_ASCII_ENABLED] ?: true,
+                    animalId = prefs[KEY_ASCII_ANIMAL_ID] ?: "butterflies",
+                    detail = (prefs[KEY_ASCII_DETAIL] ?: MAX_ASCII_DETAIL).coerceIn(0.5f, MAX_ASCII_DETAIL),
+                    grid = (prefs[KEY_ASCII_GRID] ?: MIN_ASCII_GRID).coerceIn(MIN_ASCII_GRID, 4.0f),
+                    hueShift = (prefs[KEY_ASCII_HUE_SHIFT] ?: 0f).coerceIn(-180f, 180f),
+                    colorCycle = prefs[KEY_ASCII_COLOR_CYCLE] ?: false,
+                    colorCycleSpeed = (prefs[KEY_ASCII_COLOR_CYCLE_SPEED] ?: 0.6f).coerceIn(0.1f, 3.0f),
+                    multiColorButterflies = prefs[KEY_ASCII_MULTI_COLOR_BUTTERFLIES] ?: true,
+                    params = decodeAsciiParams(prefs[KEY_ASCII_PARAMS_RAW])
                 ),
                 navInlineBehavior = inlineBehavior,
                 defaultTab = prefs[KEY_DEFAULT_TAB] ?: "home",
@@ -284,4 +309,86 @@ class AppSettingsRepository @Inject constructor(
     suspend fun setDisableScreenshots(enabled: Boolean) {
         dataStore.edit { it[KEY_DISABLE_SCREENSHOTS] = enabled }
     }
+
+    // ---- ASCII Background Animations & Tweaks ----
+    suspend fun setAsciiEnabled(enabled: Boolean) {
+        dataStore.edit { it[KEY_ASCII_ENABLED] = enabled }
+    }
+
+    suspend fun setAsciiAnimal(animalId: String) {
+        dataStore.edit {
+            it[KEY_ASCII_ANIMAL_ID] = animalId
+            // Always start each selected animation with max ASCII detail (2.0f) and min Grid (0.0f)
+            it[KEY_ASCII_DETAIL] = MAX_ASCII_DETAIL
+            it[KEY_ASCII_GRID] = MIN_ASCII_GRID
+        }
+    }
+
+    suspend fun setAsciiDetail(value: Float) {
+        dataStore.edit { it[KEY_ASCII_DETAIL] = value.coerceIn(0.5f, MAX_ASCII_DETAIL) }
+    }
+
+    suspend fun setAsciiGrid(value: Float) {
+        dataStore.edit { it[KEY_ASCII_GRID] = value.coerceIn(MIN_ASCII_GRID, 4.0f) }
+    }
+
+    suspend fun setAsciiHueShift(value: Float) {
+        dataStore.edit { it[KEY_ASCII_HUE_SHIFT] = value.coerceIn(-180f, 180f) }
+    }
+
+    suspend fun setAsciiColorCycle(enabled: Boolean) {
+        dataStore.edit { it[KEY_ASCII_COLOR_CYCLE] = enabled }
+    }
+
+    suspend fun setAsciiColorCycleSpeed(value: Float) {
+        dataStore.edit { it[KEY_ASCII_COLOR_CYCLE_SPEED] = value.coerceIn(0.1f, 3.0f) }
+    }
+
+    suspend fun setAsciiMultiColorButterflies(enabled: Boolean) {
+        dataStore.edit { it[KEY_ASCII_MULTI_COLOR_BUTTERFLIES] = enabled }
+    }
+
+    suspend fun setAsciiParam(animalId: String, key: String, value: Float) {
+        dataStore.edit { prefs ->
+            val currentMap = decodeAsciiParams(prefs[KEY_ASCII_PARAMS_RAW]).toMutableMap()
+            currentMap["$animalId:$key"] = value
+            prefs[KEY_ASCII_PARAMS_RAW] = encodeAsciiParams(currentMap)
+        }
+    }
+
+    suspend fun resetAsciiDefaults(animalId: String) {
+        dataStore.edit { prefs ->
+            prefs[KEY_ASCII_DETAIL] = MAX_ASCII_DETAIL
+            prefs[KEY_ASCII_GRID] = MIN_ASCII_GRID
+            prefs[KEY_ASCII_HUE_SHIFT] = 0f
+            prefs[KEY_ASCII_COLOR_CYCLE] = false
+            prefs[KEY_ASCII_COLOR_CYCLE_SPEED] = 0.6f
+            prefs[KEY_ASCII_MULTI_COLOR_BUTTERFLIES] = true
+            val currentMap = decodeAsciiParams(prefs[KEY_ASCII_PARAMS_RAW]).toMutableMap()
+            val prefix = "$animalId:"
+            val keysToRemove = currentMap.keys.filter { it.startsWith(prefix) }
+            keysToRemove.forEach { currentMap.remove(it) }
+            prefs[KEY_ASCII_PARAMS_RAW] = encodeAsciiParams(currentMap)
+        }
+    }
+}
+
+private fun decodeAsciiParams(raw: String?): Map<String, Float> {
+    if (raw.isNullOrBlank()) return emptyMap()
+    val out = LinkedHashMap<String, Float>()
+    raw.split(';').forEach { entry ->
+        val eq = entry.indexOf('=')
+        if (eq > 0) {
+            val k = entry.substring(0, eq)
+            val v = entry.substring(eq + 1).toFloatOrNull()
+            if (v != null && v.isFinite()) {
+                out[k] = v
+            }
+        }
+    }
+    return out
+}
+
+private fun encodeAsciiParams(map: Map<String, Float>): String {
+    return map.entries.joinToString(";") { (k, v) -> "$k=$v" }
 }

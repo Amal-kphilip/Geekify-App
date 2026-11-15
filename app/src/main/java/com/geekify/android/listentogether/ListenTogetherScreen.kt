@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.geekify.android.core.UiState
+import com.geekify.android.settings.LocalAppSettings
 import com.geekify.android.ui.components.CircleIconButton
 import com.geekify.android.ui.components.LocalBottomInset
 import com.geekify.android.ui.components.bouncyClickable
@@ -42,7 +43,9 @@ fun ListenTogetherScreen(
     val ui by viewModel.state.collectAsState()
     val nowPlaying by viewModel.nowPlaying.collectAsState()
 
-    Box(modifier = Modifier.fillMaxSize().background(InkBackground)) {
+    val asciiEnabled = LocalAppSettings.current.ascii.enabled
+
+    Box(modifier = Modifier.fillMaxSize().background(if (asciiEnabled) Color.Transparent else InkBackground)) {
         Column(
             modifier = Modifier
                 .fillMaxSize()

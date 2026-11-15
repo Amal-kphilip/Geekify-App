@@ -833,6 +833,7 @@ object GeekifyIcons {
     }
 
     val Tune: ImageVector get() = Sliders
+    val Palette: ImageVector get() = AutoAwesome
     val PlayArrow: ImageVector get() = Play
 
     val Whatshot: ImageVector by lazy {

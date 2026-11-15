@@ -46,6 +46,7 @@ import coil3.compose.AsyncImage
 import com.geekify.android.data.model.Card
 import com.geekify.android.data.model.SearchTopResult
 import com.geekify.android.data.model.Track
+import com.geekify.android.settings.LocalAppSettings
 import com.geekify.android.ui.components.*
 import com.geekify.android.ui.theme.*
 import java.util.Locale
@@ -97,10 +98,12 @@ fun SearchScreen(
         }
     }
 
+    val asciiEnabled = LocalAppSettings.current.ascii.enabled
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(IosPalette.systemGroupedBackground),
+            .background(if (asciiEnabled) Color.Transparent else IosPalette.systemGroupedBackground),
         contentAlignment = Alignment.TopCenter
     ) {
         Column(

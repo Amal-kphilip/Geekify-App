@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.geekify.android.data.local.SavedCollection
 import com.geekify.android.data.model.Track
+import com.geekify.android.settings.LocalAppSettings
 import com.geekify.android.ui.components.*
 import com.geekify.android.ui.theme.*
 
@@ -68,7 +69,9 @@ fun LibraryScreen(
     val shownPlaylists = if (showPlaylists) playlists else emptyList()
     val isEmpty = !showLiked && shownPlaylists.isEmpty() && shownSaved.isEmpty()
 
-    Box(modifier = Modifier.fillMaxSize().background(InkBackground)) {
+    val asciiEnabled = LocalAppSettings.current.ascii.enabled
+
+    Box(modifier = Modifier.fillMaxSize().background(if (asciiEnabled) Color.Transparent else InkBackground)) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             Row(
                 modifier = Modifier

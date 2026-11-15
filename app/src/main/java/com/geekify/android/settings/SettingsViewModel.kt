@@ -215,6 +215,50 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { repository.setDefaultTab(tab) }
     }
 
+    // ---- ASCII Background Animations & Tweaks ----
+    fun setAsciiEnabled(enabled: Boolean) {
+        viewModelScope.launch { repository.setAsciiEnabled(enabled) }
+    }
+
+    fun setAsciiAnimal(animalId: String) {
+        viewModelScope.launch { repository.setAsciiAnimal(animalId) }
+    }
+
+    fun setAsciiDetail(value: Float) {
+        viewModelScope.launch { repository.setAsciiDetail(value) }
+    }
+
+    fun setAsciiGrid(value: Float) {
+        viewModelScope.launch { repository.setAsciiGrid(value) }
+    }
+
+    fun setAsciiHueShift(value: Float) {
+        viewModelScope.launch { repository.setAsciiHueShift(value) }
+    }
+
+    fun setAsciiColorCycle(enabled: Boolean) {
+        viewModelScope.launch { repository.setAsciiColorCycle(enabled) }
+    }
+
+    fun setAsciiColorCycleSpeed(value: Float) {
+        viewModelScope.launch { repository.setAsciiColorCycleSpeed(value) }
+    }
+
+    fun setAsciiMultiColorButterflies(enabled: Boolean) {
+        viewModelScope.launch { repository.setAsciiMultiColorButterflies(enabled) }
+    }
+
+    fun setAsciiParam(animalId: String, key: String, value: Float) {
+        viewModelScope.launch { repository.setAsciiParam(animalId, key, value) }
+    }
+
+    fun resetAsciiDefaults(animalId: String) {
+        viewModelScope.launch {
+            repository.resetAsciiDefaults(animalId)
+            _statusMessage.value = "Animation tweaks restored (Max detail 2.00 · Min grid 0.00)"
+        }
+    }
+
     // ---- Content & Region ----
     fun setContentCountry(countryCode: String) {
         viewModelScope.launch {

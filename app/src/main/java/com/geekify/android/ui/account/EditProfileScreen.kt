@@ -11,7 +11,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import com.geekify.android.settings.LocalAppSettings
 import com.geekify.android.ui.theme.InkBackground
 
 /** Full-screen Edit profile: change photo, rename, delete account. */
@@ -27,7 +29,9 @@ fun EditProfileScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
     // Signing out or deleting the account leaves nothing to edit.
     LaunchedEffect(state.user) { if (state.user == null) onBack() }
 
-    Box(modifier = Modifier.fillMaxSize().background(InkBackground)) {
+    val asciiEnabled = LocalAppSettings.current.ascii.enabled
+
+    Box(modifier = Modifier.fillMaxSize().background(if (asciiEnabled) Color.Transparent else InkBackground)) {
         ProfileEditor(
             state = state,
             onBack = onBack,
