@@ -9,6 +9,7 @@
 [![Latest release](https://img.shields.io/github/v/release/Amal-kphilip/Geekify-App?style=for-the-badge&labelColor=0d1117)](https://github.com/Amal-kphilip/Geekify-App/releases)
 [![License](https://img.shields.io/github/license/Amal-kphilip/Geekify-App?style=for-the-badge&labelColor=0d1117)](https://github.com/Amal-kphilip/Geekify-App/blob/main/LICENSE)
 [![Download APK](https://img.shields.io/badge/Download-APK-0d1117?style=for-the-badge&logo=android&logoColor=white)](https://github.com/Amal-kphilip/Geekify-App/releases/latest/download/Geekify-latest.apk)
+[![Total Downloads](https://img.shields.io/github/downloads/Amal-kphilip/Geekify-App/total?style=for-the-badge&labelColor=0d1117)](https://github.com/Amal-kphilip/Geekify-App/releases)
 
 <br/>
 
