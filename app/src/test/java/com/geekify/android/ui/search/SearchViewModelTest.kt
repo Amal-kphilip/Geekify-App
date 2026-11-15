@@ -377,18 +377,117 @@ class SearchViewModelTest {
         assertTrue(ids.contains("v_edit"))
     }
 
+    @Test
+    fun `resetState clears all search and library state from ViewModel`() = runTest(testDispatcher) {
+        val fakeSource = ControlledMusicSource()
+        val recentDao = FakeRecentSearchDao()
+        recentDao.insert(RecentSearchEntity("Coldplay"))
+        val vm = createViewModel(fakeSource, recentSearchDao = recentDao)
+        advanceUntilIdle()
+
+        assertEquals(listOf("Coldplay"), vm.uiState.value.recentSearches)
+        vm.onQueryChange("Radiohead")
+        advanceTimeBy(SearchViewModel.SEARCH_DEBOUNCE_MS + 50)
+        advanceUntilIdle()
+
+        assertEquals("Radiohead", vm.uiState.value.query)
+        assertNotNull(vm.uiState.value.response)
+
+        // Reset state
+        vm.resetState()
+        advanceUntilIdle()
+
+        assertEquals("", vm.uiState.value.query)
+        assertNull(vm.uiState.value.response)
+        assertTrue(vm.uiState.value.suggestions.isEmpty())
+        assertTrue(vm.uiState.value.libraryTracks.isEmpty())
+        assertTrue(vm.uiState.value.recentSearches.isEmpty())
+    }
+
+    @Test
+    fun `account switch resets SearchViewModel and isolates searches between accounts`() = runTest(testDispatcher) {
+        val accountFlow = MutableStateFlow<String?>("account_A")
+        val fakeSource = ControlledMusicSource()
+        val recentDao = FakeRecentSearchDao()
+        recentDao.insert(RecentSearchEntity("Coldplay"))
+
+        val vm = createViewModel(
+            musicSource = fakeSource,
+            recentSearchDao = recentDao,
+            accountFlowOverride = accountFlow
+        )
+        advanceUntilIdle()
+
+        assertEquals(listOf("Coldplay"), vm.uiState.value.recentSearches)
+        vm.onQueryChange("Yellow")
+        advanceTimeBy(SearchViewModel.SEARCH_DEBOUNCE_MS + 50)
+        advanceUntilIdle()
+        assertEquals("Yellow", vm.uiState.value.query)
+        assertNotNull(vm.uiState.value.response)
+
+        // Account transition: recentSearches cleared on transition, account switches to B
+        recentDao.clearAll()
+        accountFlow.value = "account_B"
+        advanceUntilIdle()
+
+        // B must not see A's searches or in-flight query/results
+        assertEquals("", vm.uiState.value.query)
+        assertNull(vm.uiState.value.response)
+        assertTrue(vm.uiState.value.recentSearches.isEmpty())
+
+        // User B performs search
+        vm.onSubmit("Oasis")
+        advanceUntilIdle()
+        recentDao.insert(RecentSearchEntity("Oasis"))
+        advanceUntilIdle()
+
+        assertEquals(listOf("Oasis"), vm.uiState.value.recentSearches)
+        assertFalse(vm.uiState.value.recentSearches.contains("Coldplay"))
+    }
+
+    @Test
+    fun `signOut clears recent_searches table and SearchViewModel uiState`() = runTest(testDispatcher) {
+        val accountFlow = MutableStateFlow<String?>("account_A")
+        val fakeSource = ControlledMusicSource()
+        val recentDao = FakeRecentSearchDao()
+        recentDao.insert(RecentSearchEntity("Song 1"))
+        recentDao.insert(RecentSearchEntity("Song 2"))
+
+        val vm = createViewModel(
+            musicSource = fakeSource,
+            recentSearchDao = recentDao,
+            accountFlowOverride = accountFlow
+        )
+        advanceUntilIdle()
+
+        assertEquals(listOf("Song 2", "Song 1"), vm.uiState.value.recentSearches)
+
+        // Sign out: recentSearches cleared and account becomes null
+        recentDao.clearAll()
+        accountFlow.value = null
+        advanceUntilIdle()
+
+        assertTrue(recentDao.getRecentOnce().isEmpty())
+        assertTrue(vm.uiState.value.recentSearches.isEmpty())
+        assertEquals("", vm.uiState.value.query)
+    }
+
     private fun createViewModel(
         musicSource: MusicSource,
-        likedDao: FakeLikedDao = FakeLikedDao()
+        likedDao: FakeLikedDao = FakeLikedDao(),
+        recentSearchDao: RecentSearchDao = FakeRecentSearchDao(),
+        accountFlowOverride: Flow<String?>? = null
     ): SearchViewModel = SearchViewModel(
         musicSource = musicSource,
-        recentSearchDao = FakeRecentSearchDao(),
+        recentSearchDao = recentSearchDao,
         likedDao = likedDao,
         historyDao = FakeHistoryDao(),
         playlistDao = FakePlaylistDao(),
         playStatDao = FakePlayStatDao(),
+        auth = null,
         defaultDispatcher = testDispatcher,
-        ioDispatcher = testDispatcher
+        ioDispatcher = testDispatcher,
+        accountFlowOverride = accountFlowOverride
     )
 
     private class ControlledMusicSource(

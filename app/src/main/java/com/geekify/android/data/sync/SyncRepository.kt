@@ -66,7 +66,8 @@ class SyncRepository @Inject constructor(
     private val listeningStats: ListeningStatsRepository,
     private val queueManager: QueueManager,
     private val dataStore: DataStore<Preferences>,
-    private val engineDao: com.geekify.android.data.local.RecommendationEngineDao
+    private val engineDao: com.geekify.android.data.local.RecommendationEngineDao,
+    private val recentSearchDao: com.geekify.android.data.local.RecentSearchDao
 ) {
     companion object {
         private const val PUSH_DELAY_MS = 2_000L
@@ -886,6 +887,7 @@ class SyncRepository @Inject constructor(
         applyCloud(CloudData(emptyList(), emptyList(), emptyList(), emptyList()), wipeHistory = true)
         history.clearStats()
         listeningStats.clear()
+        recentSearchDao.clearAll()
         if (!departingUid.isNullOrBlank()) {
             runCatching {
                 engineDao.deleteUserProfile(departingUid)

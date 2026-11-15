@@ -2,6 +2,7 @@ package com.geekify.android.ui.search
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.geekify.android.data.auth.AuthRepository
 import com.geekify.android.data.local.*
 import com.geekify.android.data.model.*
 import com.geekify.android.data.source.MusicResult
@@ -20,9 +21,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -50,16 +56,42 @@ data class SearchUiState(
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
-class SearchViewModel @Inject constructor(
+class SearchViewModel internal constructor(
     private val musicSource: MusicSource,
     private val recentSearchDao: RecentSearchDao,
     private val likedDao: LikedDao,
     private val historyDao: HistoryDao,
     private val playlistDao: PlaylistDao,
     private val playStatDao: PlayStatDao,
+    private val auth: AuthRepository?,
     @DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher,
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    accountFlowOverride: kotlinx.coroutines.flow.Flow<String?>?
 ) : ViewModel() {
+
+    @Inject
+    constructor(
+        musicSource: MusicSource,
+        recentSearchDao: RecentSearchDao,
+        likedDao: LikedDao,
+        historyDao: HistoryDao,
+        playlistDao: PlaylistDao,
+        playStatDao: PlayStatDao,
+        auth: AuthRepository,
+        @DefaultDispatcher defaultDispatcher: CoroutineDispatcher,
+        @IoDispatcher ioDispatcher: CoroutineDispatcher
+    ) : this(
+        musicSource = musicSource,
+        recentSearchDao = recentSearchDao,
+        likedDao = likedDao,
+        historyDao = historyDao,
+        playlistDao = playlistDao,
+        playStatDao = playStatDao,
+        auth = auth,
+        defaultDispatcher = defaultDispatcher,
+        ioDispatcher = ioDispatcher,
+        accountFlowOverride = null
+    )
 
     companion object {
         const val SUGGESTIONS_DEBOUNCE_MS = 150L
@@ -107,6 +139,14 @@ class SearchViewModel @Inject constructor(
     )
 
     init {
+        (accountFlowOverride ?: auth?.user?.map { it?.uid })
+            ?.distinctUntilChanged()
+            ?.drop(1)
+            ?.onEach {
+                resetState()
+            }
+            ?.launchIn(viewModelScope)
+
         viewModelScope.launch(ioDispatcher) {
             recentSearchDao.observeRecent().collect { list ->
                 _uiState.update { it.copy(recentSearches = list.map { r -> r.query }) }
@@ -283,6 +323,32 @@ class SearchViewModel @Inject constructor(
         if (q.isBlank()) return
         cancelSuggestions()
         triggerImmediateSearch(q, _uiState.value.selectedTab, force = true)
+    }
+
+    fun resetState() {
+        searchRequestFlow.value = null
+        suggestionRequestFlow.value = null
+        loadMoreJob?.cancel()
+        loadMoreJob = null
+        activeContinuationToken = null
+        requestGeneration.incrementAndGet()
+        suggestionGeneration.incrementAndGet()
+        inFlightRequestKey = null
+        lastCompletedRequestKey = null
+        _uiState.update {
+            it.copy(
+                query = "",
+                selectedTab = "All",
+                suggestions = emptyList(),
+                recentSearches = emptyList(),
+                libraryTracks = emptyList(),
+                libraryPlaylists = emptyList(),
+                response = null,
+                isLoading = false,
+                isLoadingMore = false,
+                error = null
+            )
+        }
     }
 
     fun deleteRecentSearch(query: String) {
