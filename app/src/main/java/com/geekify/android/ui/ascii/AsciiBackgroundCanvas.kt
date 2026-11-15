@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
@@ -286,6 +287,7 @@ fun AsciiBackgroundCanvas(
 
     Canvas(
         modifier = modifier
+            .graphicsLayer()
             .then(pointerModifier)
             .onSizeChanged { intSize ->
                 if (intSize.width > 0 && intSize.height > 0) {
@@ -307,11 +309,16 @@ fun AsciiBackgroundCanvas(
             val native = composeCanvas.nativeCanvas
             val saveCount = native.save()
             native.scale(scaleFactor, scaleFactor)
-            val pic = frame.picture
-            if (pic != null) {
-                native.drawPicture(pic)
+            val bmp = frame.bitmap
+            if (bmp != null && !bmp.isRecycled) {
+                native.drawBitmap(bmp, 0f, 0f, null)
             } else {
-                frame.renderFallback(native, fallbackFillPaint, fallbackTextPaint, fallbackCharBuf)
+                val pic = frame.picture
+                if (pic != null) {
+                    native.drawPicture(pic)
+                } else {
+                    frame.renderFallback(native, fallbackFillPaint, fallbackTextPaint, fallbackCharBuf)
+                }
             }
             native.restoreToCount(saveCount)
         }
