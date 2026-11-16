@@ -11,7 +11,7 @@ import org.robolectric.annotation.GraphicsMode
 import kotlin.math.abs
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [33])
+@Config(sdk = [33], application = android.app.Application::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class AsciiDrawPathTest {
 

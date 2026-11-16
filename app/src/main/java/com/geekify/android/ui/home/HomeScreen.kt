@@ -55,13 +55,14 @@ private data class DiscoverItem(
 )
 
 /** One row in the filtered daily content list. */
-private data class ListRowItem(
+internal data class ListRowItem(
     val id: String,
     val title: String,
     val subtitle: String,
     val art: String?,
     val onClick: () -> Unit,
-    val onLongClick: (() -> Unit)? = null
+    val onLongClick: (() -> Unit)? = null,
+    val trackId: String? = null
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -192,29 +193,34 @@ fun HomeScreen(
                     subtitle = "By ${item.value.artist}",
                     art = item.value.thumbnails.bestArtworkUrl(480),
                     onClick = { onTrackClick(item.value, listOf(item.value)) },
-                    onLongClick = { onTrackActions(item.value) }
+                    onLongClick = { onTrackActions(item.value) },
+                    trackId = item.value.videoId
                 )
-                is ShelfCard -> ListRowItem(
-                    id = item.id,
-                    title = item.value.title,
-                    subtitle = item.value.subtitle?.takeIf { it.isNotBlank() }
-                        ?: item.value.type.replaceFirstChar { it.uppercase() },
-                    art = item.value.thumbnails.bestArtworkUrl(480),
-                    onClick = { onCardClick(item.value) },
-                    onLongClick = item.value.videoId?.let { videoId ->
-                        {
-                            onTrackActions(
-                                Track(
-                                    videoId = videoId,
-                                    title = item.value.title,
-                                    artist = item.value.subtitle.orEmpty(),
-                                    duration = null,
-                                    thumbnails = item.value.thumbnails
+                is ShelfCard -> {
+                    val isSingleSong = item.value.videoId != null && (item.value.type == "song" || item.value.type == "video")
+                    ListRowItem(
+                        id = item.id,
+                        title = item.value.title,
+                        subtitle = item.value.subtitle?.takeIf { it.isNotBlank() }
+                            ?: item.value.type.replaceFirstChar { it.uppercase() },
+                        art = item.value.thumbnails.bestArtworkUrl(480),
+                        onClick = { onCardClick(item.value) },
+                        onLongClick = item.value.videoId?.let { videoId ->
+                            {
+                                onTrackActions(
+                                    Track(
+                                        videoId = videoId,
+                                        title = item.value.title,
+                                        artist = item.value.subtitle.orEmpty(),
+                                        duration = null,
+                                        thumbnails = item.value.thumbnails
+                                    )
                                 )
-                            )
-                        }
-                    }
-                )
+                            }
+                        },
+                        trackId = if (isSingleSong) item.value.videoId else null
+                    )
+                }
             }
         }
     }
@@ -718,7 +724,7 @@ private fun CardAction(icon: ImageVector, description: String, onClick: () -> Un
 }
 
 @Composable
-private fun PlaylistRow(item: ListRowItem) {
+internal fun PlaylistRow(item: ListRowItem) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -770,12 +776,26 @@ private fun PlaylistRow(item: ListRowItem) {
             )
         }
         Spacer(Modifier.width(12.dp))
-        CircleIconButton(
-            icon = GeekifyIcons.Play,
-            contentDescription = "Play",
-            onClick = item.onClick,
-            size = 42.dp,
-            iconSize = 18.dp
-        )
+        PlaylistRowPlayButton(item = item)
     }
+}
+
+@Composable
+private fun PlaylistRowPlayButton(item: ListRowItem) {
+    val trackId = item.trackId
+    val isCurrent = trackId != null && LocalNowPlayingId.current == trackId
+    val isPlaying = if (isCurrent) LocalIsPlaying.current else false
+    val togglePlay = LocalTogglePlay.current
+
+    val icon = if (isCurrent && isPlaying) GeekifyIcons.Pause else GeekifyIcons.Play
+    val contentDescription = if (isCurrent && isPlaying) "Pause" else "Play"
+    val onButtonClick = if (isCurrent) togglePlay else item.onClick
+
+    CircleIconButton(
+        icon = icon,
+        contentDescription = contentDescription,
+        onClick = onButtonClick,
+        size = 42.dp,
+        iconSize = 18.dp
+    )
 }

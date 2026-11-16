@@ -74,8 +74,8 @@ class GeekifyApplication : Application(), SingletonImageLoader.Factory {
         AppIconManager.ensureValidSelection(this)
         NotificationChannels.ensureAll(this)
         // KEEP policy: scheduling on every launch never duplicates or resets the existing periodic job.
-        NotificationWorker.schedule(this)
-        com.geekify.android.domain.recommend.RecommendationPruneWorker.schedule(this)
+        runCatching { NotificationWorker.schedule(this) }
+        runCatching { com.geekify.android.domain.recommend.RecommendationPruneWorker.schedule(this) }
     }
 
     private class ReleaseLoggingTree : Timber.Tree() {
