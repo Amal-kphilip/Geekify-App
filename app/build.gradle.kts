@@ -199,7 +199,7 @@ dependencies {
     ksp("androidx.room:room-compiler:2.8.5")
 
     // Backdrop blur for the Liquid Glass floating surfaces
-    implementation("dev.chrisbanes.haze:haze:1.7.0")
+    implementation("dev.chrisbanes.haze:haze:2.1.0")
 
     // Background checks for update/engagement notifications (about twice a day)
     implementation("androidx.work:work-runtime-ktx:2.10.0")
