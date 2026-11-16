@@ -33,6 +33,9 @@ const val INK_GLOW = 5
 const val INK_BODY = 6
 const val INK_LIT = 7
 
+const val REF_PHONE_WIDTH_DP = 411f
+const val MAX_CELLS = 80_000
+
 const val CELL_NONE: Byte = 0
 const val CELL_EMPTY: Byte = 0
 const val CELL_SOLID: Byte = 1
@@ -238,7 +241,7 @@ class AsciiRenderer(val tuning: AsciiTuning) {
     private var prevCols: Int = -1
     private var prevRows: Int = -1
 
-    fun resize(w: Float, h: Float) {
+    fun resize(w: Float, h: Float, widthDp: Float = 0f) {
         width = max(1f, w)
         height = max(1f, h)
 
@@ -247,11 +250,21 @@ class AsciiRenderer(val tuning: AsciiTuning) {
         // At 1.0: targetCols ~ 64 cols (balanced resolution)
         // At 1.3: targetCols ~ 83 cols (reference file default)
         // At 2.0: targetCols ~ 128 cols (ultra-crisp ASCII detail)
-        val targetCols = (64f * max(0.4f, tuning.detail)).coerceIn(24f, 160f)
+        // On tablets, scale targetCols with screen width to preserve physical cell size (in dp):
+        val scaleMultiplier = max(1f, widthDp / REF_PHONE_WIDTH_DP)
+        val targetCols = (64f * max(0.4f, tuning.detail) * scaleMultiplier).coerceAtLeast(24f)
         cw = max(4f, floor(width / targetCols))
         ch = max(6f, (cw * 1.45f).roundToInt().toFloat())
         cols = ceil(width / cw).toInt()
         rows = ceil(height / ch).toInt()
+
+        // Performance guard: prevent cell count explosion on very wide / dense displays
+        while (cols * rows > MAX_CELLS && cw < width) {
+            cw += 1f
+            ch = max(6f, (cw * 1.45f).roundToInt().toFloat())
+            cols = ceil(width / cw).toInt()
+            rows = ceil(height / ch).toInt()
+        }
 
         val n = cols * rows
         if (cellFlag.size != n || cols != prevCols || rows != prevRows) {

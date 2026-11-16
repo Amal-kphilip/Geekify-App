@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 class AsciiAnimationTest {
 
@@ -150,5 +152,81 @@ class AsciiAnimationTest {
         org.junit.Assert.assertNotSame(f1, f2)
         org.junit.Assert.assertNotSame(f2, f3)
         org.junit.Assert.assertSame(f1, f4)
+    }
+
+    @Test
+    fun `resize with widthDp up to 411dp produces identical output to legacy formula across details`() {
+        val details = floatArrayOf(0.4f, 0.5f, 1.0f, 1.3f, 2.0f)
+        val testSizes = listOf(
+            Triple(360f, 640f, 360f),
+            Triple(411f, 800f, 411f),
+            Triple(320f, 480f, 320f),
+            Triple(400f, 700f, 0f) // default 0f widthDp (tests without widthDp)
+        )
+
+        for (detail in details) {
+            val tuning = AsciiTuning().apply { this.detail = detail }
+            val renderer = AsciiRenderer(tuning)
+
+            for ((w, h, wDp) in testSizes) {
+                renderer.resize(w, h, wDp)
+
+                val legacyTargetCols = (64f * max(0.4f, detail)).coerceIn(24f, 160f)
+                val legacyCw = max(4f, kotlin.math.floor(w / legacyTargetCols))
+                val legacyCh = max(6f, (legacyCw * 1.45f).roundToInt().toFloat())
+                val legacyCols = kotlin.math.ceil(w / legacyCw).toInt()
+                val legacyRows = kotlin.math.ceil(h / legacyCh).toInt()
+
+                assertEquals("cw mismatch for detail=$detail, w=$w, wDp=$wDp", legacyCw, renderer.cw, 0.001f)
+                assertEquals("ch mismatch for detail=$detail, w=$w, wDp=$wDp", legacyCh, renderer.ch, 0.001f)
+                assertEquals("cols mismatch for detail=$detail, w=$w, wDp=$wDp", legacyCols, renderer.cols)
+                assertEquals("rows mismatch for detail=$detail, w=$w, wDp=$wDp", legacyRows, renderer.rows)
+            }
+        }
+    }
+
+    @Test
+    fun `resize scales targetCols on tablets to maintain roughly constant on-screen cell size in dp`() {
+        val tuning = AsciiTuning().apply { this.detail = 2.0f }
+        val renderer = AsciiRenderer(tuning)
+
+        // Baseline: phone 411dp
+        val phoneDensity = 2.625f
+        val phoneScaleFactor = (phoneDensity * 0.58f).coerceIn(1.0f, 2.2f)
+        val phoneSimW = (411f * phoneDensity) / phoneScaleFactor
+        val phoneSimH = (891f * phoneDensity) / phoneScaleFactor
+        renderer.resize(phoneSimW, phoneSimH, 411f)
+        val phoneCellDp = (renderer.cw * phoneScaleFactor) / phoneDensity
+
+        // Tablets: 600dp, 800dp, 1280dp
+        val tabletDensity = 2.0f
+        val tabletScaleFactor = (tabletDensity * 0.58f).coerceIn(1.0f, 2.2f)
+
+        for (tabletWdp in listOf(600f, 800f, 1280f)) {
+            val simW = (tabletWdp * tabletDensity) / tabletScaleFactor
+            val simH = (900f * tabletDensity) / tabletScaleFactor
+            renderer.resize(simW, simH, tabletWdp)
+
+            val tabletCellDp = (renderer.cw * tabletScaleFactor) / tabletDensity
+
+            // The cell size in dp on tablets should be close to phone cell size (~2.5 - 3.8 dp)
+            assertTrue("Expected tablet cell size in dp ($tabletCellDp) to stay close to phone ($phoneCellDp)",
+                kotlin.math.abs(tabletCellDp - phoneCellDp) < 1.5f)
+
+            // Total cells must respect MAX_CELLS
+            assertTrue("Cell count ${renderer.cols * renderer.rows} must not exceed MAX_CELLS",
+                renderer.cols * renderer.rows <= MAX_CELLS)
+        }
+    }
+
+    @Test
+    fun `MAX_CELLS guard prevents buffer explosion on ultra large displays`() {
+        val tuning = AsciiTuning().apply { this.detail = 2.0f }
+        val renderer = AsciiRenderer(tuning)
+
+        // Simulated ultra-wide 4K canvas (e.g. 3840x2160, widthDp = 2500f)
+        renderer.resize(3840f, 2160f, 2500f)
+        val totalCells = renderer.cols * renderer.rows
+        assertTrue("Expected cells ($totalCells) <= $MAX_CELLS", totalCells <= MAX_CELLS)
     }
 }

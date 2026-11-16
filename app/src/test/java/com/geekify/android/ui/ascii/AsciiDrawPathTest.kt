@@ -146,4 +146,72 @@ class AsciiDrawPathTest {
     fun testKoiFidelity() {
         testSceneFidelity("koi")
     }
+
+    @Test
+    fun testAsciiGlyphAtlasCaching() {
+        val atlas1 = AsciiGlyphAtlas.getOrCreate(8f, 12f)
+        val atlas2 = AsciiGlyphAtlas.getOrCreate(8f, 12f)
+        org.junit.Assert.assertSame("Same (cw, ch) must return cached atlas", atlas1, atlas2)
+
+        val atlas3 = AsciiGlyphAtlas.getOrCreate(10f, 15f)
+        org.junit.Assert.assertNotSame("Different (cw, ch) must return new atlas", atlas1, atlas3)
+    }
+
+    @Test
+    fun benchmarkTabletPerformanceWavesAndAurora() {
+        // Pixel Tablet landscape: 2560x1600 at density 2.0 (1280dp wide)
+        // scaleFactor = (2.0 * 0.58).coerceIn(1.0, 2.2) = 1.16
+        val simW = 2560f / 1.16f
+        val simH = 1600f / 1.16f
+        val widthDp = 1280f
+        val detail = 2.0f
+
+        for (sceneId in listOf("waves", "aurora")) {
+            val spec = AsciiCatalog.byId(sceneId)
+            val config = AsciiBackgroundConfig(animalId = sceneId, detail = detail)
+            val tuning = AsciiTuning().apply { syncFrom(config, spec) }
+            val renderer = AsciiRenderer(tuning)
+            val sim = AsciiSimulationFactory.create(sceneId, tuning)
+
+            renderer.resize(simW, simH, widthDp)
+            sim.resize(simW, simH)
+            sim.onSelect()
+
+            val frame = AsciiFrame()
+            val dt = 0.033f
+            var time = 0f
+
+            // Warmup
+            for (i in 0 until 10) {
+                time += dt
+                renderer.begin(dt, time)
+                sim.step(dt, time, renderer)
+                frame.record(renderer, time)
+            }
+
+            // Timed run: 60 frames
+            val frames = 60
+            var totalSimNanos = 0L
+            var totalBlitNanos = 0L
+
+            for (i in 0 until frames) {
+                time += dt
+                val t0 = System.nanoTime()
+                renderer.begin(dt, time)
+                sim.step(dt, time, renderer)
+                val t1 = System.nanoTime()
+                frame.record(renderer, time)
+                val t2 = System.nanoTime()
+
+                totalSimNanos += (t1 - t0)
+                totalBlitNanos += (t2 - t1)
+            }
+
+            val avgSimMs = (totalSimNanos.toDouble() / frames) / 1_000_000.0
+            val avgBlitMs = (totalBlitNanos.toDouble() / frames) / 1_000_000.0
+            val avgTotalMs = avgSimMs + avgBlitMs
+
+            println("BENCHMARK [$sceneId]: cells=${renderer.cols * renderer.rows} (cols=${renderer.cols}, rows=${renderer.rows}, cw=${renderer.cw}, ch=${renderer.ch}) | sim=${"%.2f".format(avgSimMs)}ms | blit=${"%.2f".format(avgBlitMs)}ms | total=${"%.2f".format(avgTotalMs)}ms")
+        }
+    }
 }

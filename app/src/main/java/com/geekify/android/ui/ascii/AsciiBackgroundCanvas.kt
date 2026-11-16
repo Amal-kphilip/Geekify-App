@@ -78,13 +78,17 @@ private class AsciiEngineInstance(initialAnimalId: String) {
         }
     }
 
-    fun ensureSize(w: Float, h: Float) {
+    var widthDp: Float = 0f
+
+    fun ensureSize(w: Float, h: Float, widthDp: Float = 0f) {
         val detailChanged = abs(tuning.detail - lastDetail) > 0.01f
-        if (abs(w - simWidth) > 1f || abs(h - simHeight) > 1f || detailChanged) {
+        val widthDpChanged = abs(this.widthDp - widthDp) > 1f
+        if (abs(w - simWidth) > 1f || abs(h - simHeight) > 1f || detailChanged || widthDpChanged) {
             simWidth = max(1f, w)
             simHeight = max(1f, h)
+            this.widthDp = widthDp
             lastDetail = tuning.detail
-            renderer.resize(simWidth, simHeight)
+            renderer.resize(simWidth, simHeight, widthDp)
             simulation.resize(simWidth, simHeight)
         }
     }
@@ -149,7 +153,7 @@ fun AsciiBackgroundCanvas(
     }
 
     val pointerQueue = remember { ConcurrentLinkedQueue<AsciiPointerEvent>() }
-    val sizeRef = remember { AtomicReference<Pair<Float, Float>?>(null) }
+    val sizeRef = remember { AtomicReference<Triple<Float, Float, Float>?>(null) }
     val configRef = remember { AtomicReference(config) }
     SideEffect {
         configRef.set(config)
@@ -213,7 +217,7 @@ fun AsciiBackgroundCanvas(
                     // 3. Thread-safe sizing
                     val dims = sizeRef.get()
                     if (dims != null && dims.first > 1f && dims.second > 1f) {
-                        engine.ensureSize(dims.first, dims.second)
+                        engine.ensureSize(dims.first, dims.second, dims.third)
                     }
 
                     if (engine.simWidth > 1f && engine.simHeight > 1f) {
@@ -291,7 +295,10 @@ fun AsciiBackgroundCanvas(
             .then(pointerModifier)
             .onSizeChanged { intSize ->
                 if (intSize.width > 0 && intSize.height > 0) {
-                    sizeRef.set(Pair(intSize.width / scaleFactor, intSize.height / scaleFactor))
+                    val w = intSize.width / scaleFactor
+                    val h = intSize.height / scaleFactor
+                    val wDp = intSize.width / density
+                    sizeRef.set(Triple(w, h, wDp))
                 }
             }
     ) {
@@ -300,8 +307,9 @@ fun AsciiBackgroundCanvas(
 
         val w = size.width / scaleFactor
         val h = size.height / scaleFactor
+        val wDp = size.width / density
         if (w > 1f && h > 1f) {
-            sizeRef.set(Pair(w, h))
+            sizeRef.set(Triple(w, h, wDp))
         }
 
         val frame = publishedFrame.get() ?: return@Canvas
