@@ -154,41 +154,75 @@ jobs:
           VERSIONED_SHA="${VERSIONED_APK}.sha256"
           LATEST_SHA="${LATEST_APK}.sha256"
 
-          # Create or resume draft release with structured release notes from git log
+          # Create or resume draft release with structured release notes
           PREV_TAG="$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -Fxv "$TAG" | head -n 1 || true)"
-          if [[ -n "$PREV_TAG" ]]; then
-            COMMITS="$(git log "${PREV_TAG}..${TAG}" --no-merges --pretty=format:'%s' || true)"
-          else
-            COMMITS="$(git log -n 10 --no-merges --pretty=format:'%s' || true)"
-          fi
-
           NOTES_FILE="$RUNNER_TEMP/release_notes.md"
-          {
-            echo "# Geekify ${TAG} - Release Notes"
-            echo ""
-            FEAT_LINES="$(printf '%s\n' "$COMMITS" | grep -iE '^feat(\([^)]+\))?:' | sed -E 's/^feat(\([^)]+\))?:[[:space:]]*/- /I' || true)"
-            FIX_LINES="$(printf '%s\n' "$COMMITS" | grep -iE '^fix(\([^)]+\))?:' | sed -E 's/^fix(\([^)]+\))?:[[:space:]]*/- /I' || true)"
-            OTHER_LINES="$(printf '%s\n' "$COMMITS" | grep -ivE '^(feat|fix)(\([^)]+\))?:' | sed -E 's/^[a-z]+(\([^)]+\))?:[[:space:]]*/- /I' | grep -v '^$' || true)"
 
-            if [[ -n "$FEAT_LINES" ]]; then
-              echo "### What's New"
-              echo "$FEAT_LINES"
-              echo ""
-            fi
-            if [[ -n "$OTHER_LINES" ]]; then
-              echo "### Improvements"
-              echo "$OTHER_LINES"
-              echo ""
-            fi
-            if [[ -n "$FIX_LINES" ]]; then
-              echo "### Bug Fixes"
-              echo "$FIX_LINES"
-              echo ""
-            fi
+          if [[ -f "release-notes/${TAG}.md" ]]; then
+            echo "Using override release notes from release-notes/${TAG}.md"
+            cp "release-notes/${TAG}.md" "$NOTES_FILE"
+          else
             if [[ -n "$PREV_TAG" ]]; then
-              echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${TAG}"
+              COMMITS="$(git log "${PREV_TAG}..${TAG}" --no-merges --pretty=format:'%s' || true)"
+            else
+              COMMITS="$(git log -n 10 --no-merges --pretty=format:'%s' || true)"
             fi
-          } > "$NOTES_FILE"
+
+            RELEASE_DATE="$(date -u '+%-d %B %Y' 2>/dev/null || date -u '+%d %B %Y' | sed 's/^0//')"
+            FEAT_LINES=""
+            IMPROVE_LINES=""
+            FIX_LINES=""
+
+            while IFS= read -r subject || [[ -n "$subject" ]]; do
+              [[ -z "$subject" ]] && continue
+              if echo "$subject" | grep -iE '^(chore|docs|test|ci|build|revert)(\([^)]+\))?:|^Merge |^[Bb]ump version|^[Rr]elease v' > /dev/null 2>&1; then
+                continue
+              fi
+
+              line="$(echo "$subject" | sed -E 's/^[a-zA-Z]+(\([^)]+\))?:[[:space:]]*//')"
+              line="$(echo "$line" | sed -E 's/[[:space:]]*\((#[0-9]+|[0-9a-f]{7,40})\)[[:space:]]*$//')"
+              line="$(echo "$line" | sed -E 's/^[[:space:]]+//;s/[[:space:]]+$//')"
+              [[ -z "$line" ]] && continue
+              first="$(echo "${line:0:1}" | tr '[:lower:]' '[:upper:]')"
+              cleaned="- ${first}${line:1}"
+
+              if echo "$subject" | grep -iE '^feat(\([^)]+\))?:' > /dev/null 2>&1; then
+                FEAT_LINES="${FEAT_LINES}${cleaned}"$'\n'
+              elif echo "$subject" | grep -iE '^fix(\([^)]+\))?:' > /dev/null 2>&1; then
+                FIX_LINES="${FIX_LINES}${cleaned}"$'\n'
+              else
+                IMPROVE_LINES="${IMPROVE_LINES}${cleaned}"$'\n'
+              fi
+            done <<< "$COMMITS"
+
+            {
+              echo "# Geekify ${TAG} - Release Notes"
+              echo ""
+              echo "**Release Date:** ${RELEASE_DATE}"
+              echo ""
+              if [[ -n "$FEAT_LINES" ]]; then
+                echo "### What's New"
+                printf '%s' "$FEAT_LINES"
+                echo ""
+              fi
+              if [[ -n "$IMPROVE_LINES" ]]; then
+                echo "### Improvements"
+                printf '%s' "$IMPROVE_LINES"
+                echo ""
+              fi
+              if [[ -n "$FIX_LINES" ]]; then
+                echo "### Bug Fixes"
+                printf '%s' "$FIX_LINES"
+                echo ""
+              fi
+              echo "---"
+              echo ""
+              echo "**Geekify Team**"
+              if [[ -n "$PREV_TAG" ]]; then
+                echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${TAG}"
+              fi
+            } > "$NOTES_FILE"
+          fi
 
           if ! gh release view "$TAG" > /dev/null 2>&1; then
             gh release create "$TAG" --draft --title "Geekify ${TAG}" --notes-file "$NOTES_FILE"

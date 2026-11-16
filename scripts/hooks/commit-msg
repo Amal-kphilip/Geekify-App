@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Lightweight commit-msg hook that warns (does not block) if commit subject has no recognized prefix.
+
+MSG_FILE="$1"
+FIRST_LINE="$(head -n 1 "$MSG_FILE" 2>/dev/null || true)"
+
+# Ignore merges, reverts, and fixups
+if echo "$FIRST_LINE" | grep -iE '^(Merge|Revert|fixup!|squash!)' > /dev/null 2>&1; then
+  exit 0
+fi
+
+# Check for conventional prefix
+if ! echo "$FIRST_LINE" | grep -iE '^(feat|fix|perf|refactor|style|improve|chore|docs|test|ci|build)(\([^)]+\))?:' > /dev/null 2>&1; then
+  echo "⚠️  [Geekify Git Hook] Warning: Commit subject does not use a recognized conventional prefix."
+  echo "    Subject: '$FIRST_LINE'"
+  echo "    Recommended prefixes: feat:, fix:, perf:, refactor:, style:, chore:, docs:, test:, ci:"
+  echo "    (Unprefixed commits will default to 'Improvements' in release notes; this warning is non-blocking.)"
+fi
+
+exit 0

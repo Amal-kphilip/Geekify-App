@@ -32,10 +32,10 @@ Thanks for helping make Geekify better. Contributions to the Android app, tests,
    ./gradlew :app:compileDebugKotlin
    ```
 
-5. Commit using a clear, imperative message.
+5. Commit using conventional commit prefixes with one change per commit.
 
    ```bash
-   git commit -m "Add: concise description"
+   git commit -m "feat(scope): concise description"
    ```
 
 6. Push your branch and open a pull request.
@@ -43,6 +43,20 @@ Thanks for helping make Geekify better. Contributions to the Android app, tests,
    ```bash
    git push origin feature/your-feature
    ```
+
+## Commit conventions and release notes
+
+Geekify uses conventional commit prefixes to automatically generate structured changelogs for tagged releases:
+
+- `feat:` or `feat(scope):` for new features (mapped to **What's New**).
+- `fix:` or `fix(scope):` for bug fixes (mapped to **Bug Fixes**).
+- `perf:`, `refactor:`, `style:`, or `improve:` for performance and UX improvements (mapped to **Improvements**). Unprefixed commits also default to Improvements.
+- `chore:`, `docs:`, `test:`, `ci:`, and `build:` are internal and skipped from release notes.
+
+Please keep **one change per commit** with a concise, user-facing summary.
+
+### Release notes override
+If a release requires manually curated release notes instead of automated generation from commits, add `release-notes/vX.Y.Z.md` (e.g. `release-notes/v2.7.8.md`) to the repository. The release workflow will use this file verbatim for the GitHub Release and the in-app update sheet.
 
 ## Pull request checklist
 
