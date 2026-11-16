@@ -1,0 +1,45 @@
+#!/bin/sh
+# Geekify commit-msg hook
+# Warns (without blocking) if commit subject does not follow conventional commit format.
+
+MSG_FILE="$1"
+if [ -z "$MSG_FILE" ] || [ ! -f "$MSG_FILE" ]; then
+  SUBJECT=""
+else
+  SUBJECT="$(head -n 1 "$MSG_FILE" 2>/dev/null || true)"
+fi
+
+# Allow merge commits, revert commits, and fixup/squash commits
+case "$SUBJECT" in
+  Merge*|Revert*|"revert: "*|"revert("*) exit 0 ;;
+  "fixup! "*|"squash! "*) exit 0 ;;
+esac
+
+# Check for conventional prefix with optional (scope), optional !, and ': '
+# Supported types: feat, fix, perf, refactor, style, improve, chore, docs, test, ci, build, revert
+PATTERN='^(feat|fix|perf|refactor|style|improve|chore|docs|test|ci|build|revert)(\([a-zA-Z0-9_.-]+\))?!?: .+'
+
+if echo "$SUBJECT" | grep -q -E "$PATTERN"; then
+  exit 0
+fi
+
+cat <<'EOF'
+⚠️  [Geekify Git Hook] WARNING: Commit subject line does not follow conventional commit format.
+    Subject:
+EOF
+echo "      \"$SUBJECT\""
+cat <<'EOF'
+
+    Expected format: <type>(<optional-scope>)<!>: <description>
+    Valid types: feat, fix, perf, refactor, style, improve, chore, docs, test, ci, build, revert
+    
+    Examples:
+      feat(home): add pinned action header
+      fix(search): clear recent searches on logout
+      perf(ascii): render off-thread glyph atlas
+      chore(deps): update dependency versions
+
+    Note: This is a warning to keep release notes tidy; your commit will proceed.
+EOF
+
+exit 0

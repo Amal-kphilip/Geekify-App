@@ -32,13 +32,21 @@ Thanks for helping make Geekify better. Contributions to the Android app, tests,
    ./gradlew :app:compileDebugKotlin
    ```
 
-5. Commit using conventional commit prefixes with one change per commit.
+5. Configure git hooks (optional but recommended):
+
+   ```bash
+   git config core.hooksPath .githooks
+   # or run:
+   ./scripts/setup-hooks.sh
+   ```
+
+6. Commit using conventional commit prefixes with one change per commit.
 
    ```bash
    git commit -m "feat(scope): concise description"
    ```
 
-6. Push your branch and open a pull request.
+7. Push your branch and open a pull request.
 
    ```bash
    git push origin feature/your-feature
@@ -50,10 +58,10 @@ Geekify uses conventional commit prefixes to automatically generate structured c
 
 - `feat:` or `feat(scope):` for new features (mapped to **What's New**).
 - `fix:` or `fix(scope):` for bug fixes (mapped to **Bug Fixes**).
-- `perf:`, `refactor:`, `style:`, or `improve:` for performance and UX improvements (mapped to **Improvements**). Unprefixed commits also default to Improvements.
+- `perf:`, `refactor:`, `style:`, or `improve:` for performance, architecture and UX improvements (mapped to **Improvements**). Unprefixed commits also default to Improvements.
 - `chore:`, `docs:`, `test:`, `ci:`, and `build:` are internal and skipped from release notes.
 
-Please keep **one change per commit** with a concise, user-facing summary.
+Please keep **one change per commit** with a concise, user-facing summary. The `.githooks/commit-msg` hook will check your commit subject and print a helpful warning if the prefix is missing or unrecognized (it will not block your commit).
 
 ### Release notes override
 If a release requires manually curated release notes instead of automated generation from commits, add `release-notes/vX.Y.Z.md` (e.g. `release-notes/v2.7.8.md`) to the repository. The release workflow will use this file verbatim for the GitHub Release and the in-app update sheet.
