@@ -20,19 +20,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -242,32 +236,8 @@ fun HomeScreen(
     val asciiEnabled = LocalAppSettings.current.ascii.enabled
     val bottomInset = LocalBottomInset.current
     val lazyListState = rememberLazyListState()
-    var pinnedRowHeightPx by remember { mutableIntStateOf(0) }
-    var contentHeaderHeightPx by remember { mutableIntStateOf(0) }
-    val totalHeaderHeightPx = pinnedRowHeightPx + contentHeaderHeightPx
-    val density = LocalDensity.current
 
     Box(modifier = Modifier.fillMaxSize().background(if (asciiEnabled) Color.Transparent else InkBackground)) {
-        val totalHeaderHeightDp = with(density) {
-            if (totalHeaderHeightPx > 0) totalHeaderHeightPx.toDp() else 280.dp
-        }
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(totalHeaderHeightDp)
-                .graphicsLayer {
-                    val scrollOffset = if (lazyListState.firstVisibleItemIndex == 0) {
-                        lazyListState.firstVisibleItemScrollOffset.toFloat()
-                    } else {
-                        val base = if (contentHeaderHeightPx > 0) contentHeaderHeightPx.toFloat() else size.height
-                        base + lazyListState.firstVisibleItemScrollOffset.toFloat()
-                    }
-                    translationY = -scrollOffset.coerceIn(0f, size.height)
-                }
-                .drawBehind { drawHeaderGlow(asciiEnabled) }
-        )
-
         PullToRefreshBox(
             isRefreshing = state.isLoading && (state.shelves.isNotEmpty() || state.mixes.isNotEmpty()),
             onRefresh = { viewModel.loadHome(true) },
@@ -278,7 +248,6 @@ fun HomeScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .onSizeChanged { pinnedRowHeightPx = it.height }
                         .statusBarsPadding()
                         .padding(top = 14.dp, start = 20.dp, end = 20.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -316,7 +285,6 @@ fun HomeScreen(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .onSizeChanged { contentHeaderHeightPx = it.height }
                                 .padding(top = 16.dp)
                         ) {
                             Text(
@@ -557,51 +525,6 @@ fun HomeScreen(
             )
         }
     }
-}
-
-internal class CachedHeaderGlow(val width: Float, val height: Float, val asciiEnabled: Boolean) {
-    val violet = Brush.radialGradient(
-        colors = listOf(Color(0xFF8A4DFF).copy(alpha = 0.55f), Color.Transparent),
-        center = Offset(width * 0.20f, height * 0.10f),
-        radius = width * 0.95f
-    )
-    val blue = Brush.radialGradient(
-        colors = listOf(Color(0xFF4A78FF).copy(alpha = 0.38f), Color.Transparent),
-        center = Offset(width * 0.45f, height * 0.18f),
-        radius = width * 0.50f
-    )
-    val pink = Brush.radialGradient(
-        colors = listOf(Color(0xFFFF8FC4).copy(alpha = 0.80f), Color.Transparent),
-        center = Offset(width * 0.08f, 0f),
-        radius = width * 0.58f
-    )
-    val white = Brush.radialGradient(
-        colors = listOf(Color.White.copy(alpha = 0.95f), Color.White.copy(alpha = 0f)),
-        center = Offset(width * 0.10f, -height * 0.02f),
-        radius = width * 0.30f
-    )
-    val vertical = if (!asciiEnabled) {
-        Brush.verticalGradient(
-            0.45f to Color.Transparent,
-            1f to InkBackground
-        )
-    } else null
-}
-
-internal var cachedGlowState: CachedHeaderGlow? = null
-
-/** Soft white / pink / violet light that blooms from the top-left corner and fades into the background. */
-internal fun DrawScope.drawHeaderGlow(asciiEnabled: Boolean) {
-    val w = size.width
-    val h = size.height
-    val glow = cachedGlowState?.takeIf { it.width == w && it.height == h && it.asciiEnabled == asciiEnabled }
-        ?: CachedHeaderGlow(w, h, asciiEnabled).also { cachedGlowState = it }
-
-    drawRect(glow.violet)
-    drawRect(glow.blue)
-    drawRect(glow.pink)
-    drawRect(glow.white)
-    glow.vertical?.let { drawRect(it) }
 }
 
 @Composable
