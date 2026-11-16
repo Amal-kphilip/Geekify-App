@@ -161,12 +161,12 @@ tasks.matching { task ->
 
 dependencies {
     // Core / lifecycle
-    implementation("androidx.core:core-ktx:1.17.0")
+    implementation("androidx.core:core-ktx:1.19.1")
     implementation("androidx.activity:activity-compose:1.12.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-service:2.10.0")
-    implementation("androidx.navigation:navigation-compose:2.9.6")
+    implementation("androidx.navigation:navigation-compose:2.10.2")
 
     // Compose
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
@@ -191,7 +191,7 @@ dependencies {
     // DI
     implementation("com.google.dagger:hilt-android:2.60.1")
     ksp("com.google.dagger:hilt-compiler:2.60.1")
-    implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
+    implementation("androidx.hilt:hilt-navigation-compose:1.4.0")
 
     // Room
     implementation("androidx.room:room-runtime:2.8.5")
@@ -202,13 +202,13 @@ dependencies {
     implementation("dev.chrisbanes.haze:haze:1.7.0")
 
     // Background checks for update/engagement notifications (about twice a day)
-    implementation("androidx.work:work-runtime-ktx:2.10.0")
+    implementation("androidx.work:work-runtime-ktx:2.12.0")
 
     // Baseline Profile installer for faster startup and reduced jank
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
 
     // DataStore
-    implementation("androidx.datastore:datastore-preferences:1.2.1")
+    implementation("androidx.datastore:datastore-preferences:1.3.0")
 
     // Coil image loading
     implementation("io.coil-kt.coil3:coil-compose:3.3.0")
@@ -217,7 +217,7 @@ dependencies {
     // Geekify InnerTube backend adapter + InnerTubeX stream extraction
     implementation(project(":innertube"))
     implementation("com.jakewharton.timber:timber:5.0.1")
-    implementation("androidx.collection:collection-ktx:1.5.0")
+    implementation("androidx.collection:collection-ktx:1.7.0")
     implementation("io.ktor:ktor-client-core:3.6.0")
     implementation("io.ktor:ktor-client-okhttp:3.6.0")
     implementation("io.ktor:ktor-client-content-negotiation:3.6.0")
