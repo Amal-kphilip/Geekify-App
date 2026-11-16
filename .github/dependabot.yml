@@ -1,0 +1,55 @@
+# Dependabot configuration for Geekify-App
+# Reference: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+    groups:
+      androidx:
+        patterns:
+          - "androidx.*"
+        exclude-patterns:
+          - "androidx.media3*"
+          - "androidx.compose*"
+      compose:
+        patterns:
+          - "androidx.compose.*"
+      kotlin-ksp:
+        patterns:
+          - "org.jetbrains.kotlin.*"
+          - "com.google.devtools.ksp*"
+      firebase:
+        patterns:
+          - "com.google.firebase.*"
+
+    # NOTE ON JITPACK & INNERTUBEX:
+    # Dependencies in Geekify are declared inline in build.gradle.kts files (no version catalog).
+    # The Innertube client library (com.github.MetrolistGroup.innertubex:innertubex) is hosted on
+    # JitPack (jitpack.io). Dependabot cannot reliably resolve artifacts from JitPack because JitPack
+    # builds packages on-demand from git commits/tags and often lacks standard maven-metadata.xml indices.
+    # Furthermore, innertubex changes directly impact YouTube stream extraction and audio playback, so
+    # updates must never be grouped or auto-merged.
+    # Maintainers must manually check https://github.com/MetrolistGroup/innertubex upstream before each release.
+    # Similarly, androidx.media3 and io.ktor are excluded from groups and maintained as individual PRs.
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
