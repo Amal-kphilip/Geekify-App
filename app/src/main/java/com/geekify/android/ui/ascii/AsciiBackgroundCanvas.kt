@@ -1,5 +1,9 @@
 package com.geekify.android.ui.ascii
 
+import android.app.ActivityManager
+import android.content.Context
+import android.os.Build
+import android.os.PowerManager
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -79,18 +83,49 @@ private class AsciiEngineInstance(initialAnimalId: String) {
     }
 
     var widthDp: Float = 0f
+    var lastSizeChangeTimeNanos: Long = 0L
+    var pendingW: Float = 0f
+    var pendingH: Float = 0f
+    var pendingWdp: Float = 0f
+    var lastExtraCw: Float = -1f
 
-    fun ensureSize(w: Float, h: Float, widthDp: Float = 0f) {
+    fun ensureSize(
+        w: Float,
+        h: Float,
+        widthDp: Float = 0f,
+        extraCw: Float = 0f,
+        nowNanos: Long = System.nanoTime()
+    ) {
         val detailChanged = abs(tuning.detail - lastDetail) > 0.01f
         val widthDpChanged = abs(this.widthDp - widthDp) > 1f
-        if (abs(w - simWidth) > 1f || abs(h - simHeight) > 1f || detailChanged || widthDpChanged) {
-            simWidth = max(1f, w)
-            simHeight = max(1f, h)
-            this.widthDp = widthDp
-            lastDetail = tuning.detail
-            renderer.resize(simWidth, simHeight, widthDp)
-            simulation.resize(simWidth, simHeight)
+        val extraCwChanged = abs(this.lastExtraCw - extraCw) > 0.01f
+        val dimsChanged = abs(w - simWidth) > 1f || abs(h - simHeight) > 1f
+
+        if (dimsChanged || widthDpChanged) {
+            if (abs(w - pendingW) > 1f || abs(h - pendingH) > 1f) {
+                pendingW = w
+                pendingH = h
+                pendingWdp = widthDp
+                lastSizeChangeTimeNanos = nowNanos
+            }
+            // Debounce 150ms on size changes unless initial sizing
+            val elapsed = nowNanos - lastSizeChangeTimeNanos
+            if (simWidth <= 1f || elapsed >= 150_000_000L) {
+                applyResize(pendingW, pendingH, pendingWdp, extraCw)
+            }
+        } else if (detailChanged || extraCwChanged) {
+            applyResize(simWidth, simHeight, this.widthDp, extraCw)
         }
+    }
+
+    private fun applyResize(w: Float, h: Float, widthDp: Float, extraCw: Float) {
+        simWidth = max(1f, w)
+        simHeight = max(1f, h)
+        this.widthDp = widthDp
+        lastDetail = tuning.detail
+        lastExtraCw = extraCw
+        renderer.resize(simWidth, simHeight, widthDp, extraCw)
+        simulation.resize(simWidth, simHeight)
     }
 }
 
@@ -152,6 +187,77 @@ fun AsciiBackgroundCanvas(
         }
     }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val powerManager = remember(context) { context.getSystemService(Context.POWER_SERVICE) as? PowerManager }
+    val activityManager = remember(context) { context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager }
+    val isLowRam = remember(activityManager) { activityManager?.isLowRamDevice == true }
+    val qualityController = remember(isLowRam) {
+        AsciiQualityController(isLowRamDevice = isLowRam).apply {
+            maxRequestedDetail = config.detail
+        }
+    }
+
+    val gpuRenderer = remember {
+        if (AsciiGpuSupport.isSupported()) {
+            try {
+                AsciiGpuRenderer()
+            } catch (t: Throwable) {
+                AsciiGpuSupport.disableGpu(t)
+                null
+            }
+        } else null
+    }
+
+    DisposableEffect(context, powerManager) {
+        qualityController.isPowerSaveMode = powerManager?.isPowerSaveMode == true
+        val thermalListener: PowerManager.OnThermalStatusChangedListener? =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && powerManager != null) {
+                val listener = PowerManager.OnThermalStatusChangedListener { status ->
+                    qualityController.thermalStatus = status
+                }
+                try {
+                    powerManager.addThermalStatusListener(listener)
+                } catch (_: Throwable) {}
+                listener
+            } else null
+
+        val powerReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: android.content.Intent?) {
+                qualityController.isPowerSaveMode = powerManager?.isPowerSaveMode == true
+            }
+        }
+        try {
+            val filter = android.content.IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
+            context.registerReceiver(powerReceiver, filter)
+        } catch (_: Throwable) {}
+
+        onDispose {
+            try {
+                context.unregisterReceiver(powerReceiver)
+            } catch (_: Throwable) {}
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && thermalListener != null) {
+                try {
+                    powerManager?.removeThermalStatusListener(thermalListener)
+                } catch (_: Throwable) {}
+            }
+        }
+    }
+
+    val isReduceMotion = remember(context) {
+        try {
+            android.provider.Settings.Global.getFloat(
+                context.contentResolver,
+                android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+                1f
+            ) == 0f
+        } catch (_: Throwable) {
+            false
+        }
+    }
+    LaunchedEffect(isReduceMotion) {
+        qualityController.isReduceMotion = isReduceMotion
+    }
+
     val pointerQueue = remember { ConcurrentLinkedQueue<AsciiPointerEvent>() }
     val sizeRef = remember { AtomicReference<Triple<Float, Float, Float>?>(null) }
     val configRef = remember { AtomicReference(config) }
@@ -162,6 +268,11 @@ fun AsciiBackgroundCanvas(
     val frameRing = remember { AsciiFrameRing(3) }
     val publishedFrame = remember { AtomicReference<AsciiFrame?>(null) }
     var frameTick by remember { mutableLongStateOf(0L) }
+
+    var displayInterp by remember { mutableFloatStateOf(1f) }
+    var displayTick by remember { mutableLongStateOf(0L) }
+    val lastSimNanos = remember { java.util.concurrent.atomic.AtomicLong(0L) }
+    val simIntervalNanosRef = remember { java.util.concurrent.atomic.AtomicLong(33_333_333L) }
 
     DisposableEffect(pointerHub, scaleFactor) {
         if (pointerHub != null) {
@@ -181,8 +292,21 @@ fun AsciiBackgroundCanvas(
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
-    val frameIntervalNanos = remember(isPreview) {
-        if (isPreview) 22_000_000L else 30_000_000L
+
+    if (AsciiGpuSupport.isSupported() && (config.enabled || isPreview)) {
+        LaunchedEffect(lifecycleOwner) {
+            lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (isActive) {
+                    androidx.compose.runtime.withFrameNanos { frameTimeNanos ->
+                        val simStart = lastSimNanos.get()
+                        val interval = simIntervalNanosRef.get().coerceAtLeast(1_000_000L)
+                        val elapsed = frameTimeNanos - simStart
+                        displayInterp = (elapsed.toFloat() / interval.toFloat()).coerceIn(0f, 1f)
+                        displayTick++
+                    }
+                }
+            }
+        }
     }
 
     val engine = remember { AsciiEngineInstance(config.animalId) }
@@ -195,6 +319,7 @@ fun AsciiBackgroundCanvas(
 
                 while (isActive) {
                     val startStepNanos = System.nanoTime()
+                    lastSimNanos.set(startStepNanos)
                     val elapsedNanos = startStepNanos - lastTimeNanos
                     val dt = if (lastTimeNanos == 0L) 0.016f else (elapsedNanos * 1e-9f).coerceIn(0.005f, 0.05f)
                     lastTimeNanos = startStepNanos
@@ -214,10 +339,10 @@ fun AsciiBackgroundCanvas(
                     engine.tuning.syncFrom(currentCfg, spec)
                     engine.ensureAnimal(currentCfg.animalId)
 
-                    // 3. Thread-safe sizing
+                    // 3. Thread-safe sizing with debouncing and adaptive quality extraCw
                     val dims = sizeRef.get()
                     if (dims != null && dims.first > 1f && dims.second > 1f) {
-                        engine.ensureSize(dims.first, dims.second, dims.third)
+                        engine.ensureSize(dims.first, dims.second, dims.third, qualityController.extraCw, startStepNanos)
                     }
 
                     if (engine.simWidth > 1f && engine.simHeight > 1f) {
@@ -226,15 +351,32 @@ fun AsciiBackgroundCanvas(
                         engine.simulation.step(dt, engine.timeSec, engine.renderer)
 
                         val writeFrame = frameRing.nextWriteBuffer()
-                        writeFrame.record(engine.renderer, engine.timeSec)
+                        if (AsciiGpuSupport.isSupported() && gpuRenderer != null) {
+                            writeFrame.copyFrom(engine.renderer, engine.timeSec)
+                            gpuRenderer.uploadFrame(writeFrame)
+                        } else {
+                            writeFrame.record(engine.renderer, engine.timeSec)
+                        }
                         publishedFrame.set(writeFrame)
 
                         frameTick++
                     }
 
-                    // 4. Throttle to target frame rate (~30ms ambient, ~22ms preview)
+                    // 4. Update adaptive quality controller and frame rate throttling
                     val workTimeNanos = System.nanoTime() - startStepNanos
-                    val sleepNanos = frameIntervalNanos - workTimeNanos
+                    val costMs = workTimeNanos * 1e-6f
+                    qualityController.recordFrameCost(costMs)
+
+                    val baseIntervalMs = if (isPreview) 22f else qualityController.intervalMs
+                    val targetIntervalMs = if (AsciiGpuSupport.isSupported() && costMs < 8.0f && !isPreview) {
+                        minOf(baseIntervalMs, 16.6f)
+                    } else {
+                        baseIntervalMs
+                    }
+                    val targetIntervalNanos = (targetIntervalMs * 1_000_000L).toLong()
+                    simIntervalNanosRef.set(targetIntervalNanos)
+
+                    val sleepNanos = targetIntervalNanos - workTimeNanos
                     if (sleepNanos > 1_000_000L) {
                         delay(sleepNanos / 1_000_000L)
                     } else {
@@ -304,6 +446,8 @@ fun AsciiBackgroundCanvas(
     ) {
         @Suppress("UNUSED_EXPRESSION")
         frameTick
+        @Suppress("UNUSED_EXPRESSION")
+        displayTick
 
         val w = size.width / scaleFactor
         val h = size.height / scaleFactor
@@ -317,18 +461,33 @@ fun AsciiBackgroundCanvas(
             val native = composeCanvas.nativeCanvas
             val saveCount = native.save()
             native.scale(scaleFactor, scaleFactor)
-            val bmp = frame.bitmap
-            if (bmp != null && !bmp.isRecycled) {
-                native.drawBitmap(bmp, 0f, 0f, null)
-            } else {
-                val pic = frame.picture
-                if (pic != null) {
-                    native.drawPicture(pic)
-                } else {
-                    frame.renderFallback(native, fallbackFillPaint, fallbackTextPaint, fallbackCharBuf)
+
+            frame.isBusy.set(true)
+            var gpuDrawn = false
+            try {
+                if (AsciiGpuSupport.isSupported() && gpuRenderer != null) {
+                    gpuDrawn = gpuRenderer.draw(native, frame, displayInterp, scaleFactor)
                 }
+                if (!gpuDrawn) {
+                    if (frame.bitmap == null) {
+                        frame.record(engine.renderer, frame.timeSec)
+                    }
+                    val bmp = frame.bitmap
+                    if (bmp != null && !bmp.isRecycled) {
+                        native.drawBitmap(bmp, 0f, 0f, null)
+                    } else {
+                        val pic = frame.picture
+                        if (pic != null) {
+                            native.drawPicture(pic)
+                        } else {
+                            frame.renderFallback(native, fallbackFillPaint, fallbackTextPaint, fallbackCharBuf)
+                        }
+                    }
+                }
+            } finally {
+                frame.isBusy.set(false)
+                native.restoreToCount(saveCount)
             }
-            native.restoreToCount(saveCount)
         }
     }
 }

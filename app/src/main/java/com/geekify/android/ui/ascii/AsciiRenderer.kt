@@ -241,7 +241,7 @@ class AsciiRenderer(val tuning: AsciiTuning) {
     private var prevCols: Int = -1
     private var prevRows: Int = -1
 
-    fun resize(w: Float, h: Float, widthDp: Float = 0f) {
+    fun resize(w: Float, h: Float, widthDp: Float = 0f, extraCw: Float = 0f) {
         width = max(1f, w)
         height = max(1f, h)
 
@@ -253,7 +253,7 @@ class AsciiRenderer(val tuning: AsciiTuning) {
         // On tablets, scale targetCols with screen width to preserve physical cell size (in dp):
         val scaleMultiplier = max(1f, widthDp / REF_PHONE_WIDTH_DP)
         val targetCols = (64f * max(0.4f, tuning.detail) * scaleMultiplier).coerceAtLeast(24f)
-        cw = max(4f, floor(width / targetCols))
+        cw = max(4f, floor(width / targetCols) + extraCw)
         ch = max(6f, (cw * 1.45f).roundToInt().toFloat())
         cols = ceil(width / cw).toInt()
         rows = ceil(height / ch).toInt()

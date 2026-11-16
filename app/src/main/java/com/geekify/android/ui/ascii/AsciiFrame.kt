@@ -4,11 +4,35 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Picture
+import java.nio.IntBuffer
 import java.util.Arrays
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.sin
+
+internal object AsciiParallelPool {
+    val threadCount = (Runtime.getRuntime().availableProcessors() - 2).coerceIn(1, 4)
+    val executor: java.util.concurrent.ExecutorService? = if (threadCount > 1) {
+        Executors.newFixedThreadPool(threadCount) { r ->
+            Thread {
+                try {
+                    android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+                } catch (_: Throwable) {}
+                r.run()
+            }.apply {
+                isDaemon = true
+                name = "AsciiRowWorker"
+            }
+        }
+    } else null
+}
+
+@Suppress("NOTHING_TO_INLINE")
+private inline fun div255Fast(v: Int): Int = ((v + 128) * 257) ushr 16
 
 /**
  * Double/triple-buffered immutable frame snapshot produced by the background simulation thread.
@@ -40,7 +64,9 @@ class AsciiFrame(
     var bitmap: Bitmap? = null,
     var picture: Picture? = null
 ) {
+    val isBusy = AtomicBoolean(false)
     private var pixelBuffer: IntArray = IntArray(0)
+    private var wrappedIntBuffer: IntBuffer? = null
 
     fun copyFrom(renderer: AsciiRenderer, time: Float) {
         width = renderer.width
@@ -78,9 +104,11 @@ class AsciiFrame(
 
     /**
      * Records and composites the renderer output on the simulation thread into [bitmap].
-     * Avoids per-frame allocations by reusing [pixelBuffer] and [bitmap].
+     * Avoids per-frame allocations by reusing [pixelBuffer], [wrappedIntBuffer], and [bitmap].
      */
     fun record(renderer: AsciiRenderer, time: Float) {
+        if (isBusy.get()) return
+
         copyFrom(renderer, time)
         if (renderer.width <= 1f || renderer.height <= 1f || renderer.cols <= 0 || renderer.rows <= 0) {
             return
@@ -95,6 +123,7 @@ class AsciiFrame(
         try {
             if (pixelBuffer.size != totalPixels) {
                 pixelBuffer = IntArray(totalPixels)
+                wrappedIntBuffer = IntBuffer.wrap(pixelBuffer)
             }
             var bmp = bitmap
             if (bmp == null || bmp.isRecycled || bmp.width != w || bmp.height != h) {
@@ -105,7 +134,12 @@ class AsciiFrame(
 
             val atlas = AsciiGlyphAtlas.getOrCreate(renderer.cw, renderer.ch)
             blit(renderer, time, atlas, pixelBuffer, w, h)
-            bmp.setPixels(pixelBuffer, 0, w, 0, 0, w, h)
+
+            if (wrappedIntBuffer == null || wrappedIntBuffer!!.capacity() != totalPixels) {
+                wrappedIntBuffer = IntBuffer.wrap(pixelBuffer)
+            }
+            wrappedIntBuffer!!.position(0)
+            bmp.copyPixelsFromBuffer(wrappedIntBuffer!!)
             blitSuccess = true
         } catch (_: Throwable) {
             blitSuccess = false
@@ -132,6 +166,7 @@ class AsciiFrame(
     /**
      * Composites the background, grid, trail, solid cells, and text glyphs into [buffer]
      * using the pre-rendered [atlas]. Zero object allocations in this hot path.
+     * Uses row-band parallelism on multi-core devices.
      */
     fun blit(
         renderer: AsciiRenderer,
@@ -144,7 +179,6 @@ class AsciiFrame(
         val totalPixels = widthInt * heightInt
         val cols = renderer.cols
         val rows = renderer.rows
-        val n = cols * rows
         val cwInt = renderer.cw.toInt().coerceAtLeast(1)
         val chInt = renderer.ch.toInt().coerceAtLeast(1)
 
@@ -161,9 +195,9 @@ class AsciiFrame(
             val a = (ga * 255f).safeRoundToInt()
             val invA = 255 - a
             val gridColor = (0xFF shl 24) or
-                (((255 * a + bgR * invA + 127) / 255) shl 16) or
-                (((255 * a + bgG * invA + 127) / 255) shl 8) or
-                ((255 * a + bgB * invA + 127) / 255)
+                (div255Fast(255 * a + bgR * invA) shl 16) or
+                (div255Fast(255 * a + bgG * invA) shl 8) or
+                div255Fast(255 * a + bgB * invA)
 
             // Vertical lines
             for (c in 0..cols) {
@@ -187,7 +221,52 @@ class AsciiFrame(
             }
         }
 
-        // 3. Trail particles
+        // 3-5. Parallel row-band processing for trails, solid cells, and glyphs
+        val pool = AsciiParallelPool
+        val exec = pool.executor
+        val threadCount = pool.threadCount
+
+        if (exec != null && rows >= 16 && threadCount > 1) {
+            val bands = threadCount
+            val rowsPerBand = (rows + bands - 1) / bands
+            val latch = CountDownLatch(bands)
+            for (b in 0 until bands) {
+                val rStart = b * rowsPerBand
+                val rEnd = minOf(rows, rStart + rowsPerBand)
+                if (rStart >= rEnd) {
+                    latch.countDown()
+                    continue
+                }
+                exec.execute {
+                    try {
+                        blitRows(renderer, time, atlas, buffer, widthInt, heightInt, rStart, rEnd)
+                    } finally {
+                        latch.countDown()
+                    }
+                }
+            }
+            latch.await()
+        } else {
+            blitRows(renderer, time, atlas, buffer, widthInt, heightInt, 0, rows)
+        }
+    }
+
+    private fun blitRows(
+        renderer: AsciiRenderer,
+        time: Float,
+        atlas: AsciiGlyphAtlas,
+        buffer: IntArray,
+        widthInt: Int,
+        heightInt: Int,
+        rStart: Int,
+        rEnd: Int
+    ) {
+        val cols = renderer.cols
+        val cwInt = renderer.cw.toInt().coerceAtLeast(1)
+        val chInt = renderer.ch.toInt().coerceAtLeast(1)
+        val n = cols * renderer.rows
+
+        // 3. Trail particles for rows rStart until rEnd
         if (renderer.tuning.trail > 0.01f && renderer.energy.size == n) {
             val dotSize = max(2, floor(renderer.cw * 0.22f).toInt())
             val ox = ((renderer.cw - dotSize) * 0.5f).toInt()
@@ -197,105 +276,113 @@ class AsciiFrame(
             val ig = (inkCol ushr 8) and 0xFF
             val ib = inkCol and 0xFF
 
-            for (i in 0 until n) {
-                val e = renderer.energy[i]
-                if (e < 0.12f || renderer.cellFlag[i] == CELL_SOLID) continue
-                val col = i % cols
-                val row = i / cols
-                val twinkle = 0.75f + 0.25f * sin(time * 5f + hash3(col, row, 3) * 40f)
-                val alphaF = clampF(e * twinkle * 0.42f, 0.08f, 0.75f)
-                val alpha = (alphaF * 255f).safeRoundToInt()
-                val invA = 255 - alpha
-                val size = if (e > 0.6f) dotSize + 1 else dotSize
+            for (row in rStart until rEnd) {
+                val rowBase = row * cols
+                for (col in 0 until cols) {
+                    val i = rowBase + col
+                    val e = renderer.energy[i]
+                    if (e < 0.12f || renderer.cellFlag[i] == CELL_SOLID) continue
+                    val twinkle = 0.75f + 0.25f * sin(time * 5f + hash3(col, row, 3) * 40f)
+                    val alphaF = clampF(e * twinkle * 0.42f, 0.08f, 0.75f)
+                    val alpha = (alphaF * 255f).safeRoundToInt()
+                    val invA = 255 - alpha
+                    val size = if (e > 0.6f) dotSize + 1 else dotSize
 
-                val startX = (col * cwInt + ox).coerceIn(0, widthInt)
-                val startY = (row * chInt + oy).coerceIn(0, heightInt)
-                val endX = (startX + size).coerceIn(0, widthInt)
-                val endY = (startY + size).coerceIn(0, heightInt)
+                    val startX = (col * cwInt + ox).coerceIn(0, widthInt)
+                    val startY = (row * chInt + oy).coerceIn(0, heightInt)
+                    val endX = (startX + size).coerceIn(0, widthInt)
+                    val endY = (startY + size).coerceIn(0, heightInt)
 
-                for (py in startY until endY) {
-                    var idx = py * widthInt + startX
-                    for (px in startX until endX) {
-                        val dst = buffer[idx]
-                        val dr = (dst ushr 16) and 0xFF
-                        val dg = (dst ushr 8) and 0xFF
-                        val db = dst and 0xFF
-                        val outR = (ir * alpha + dr * invA + 127) / 255
-                        val outG = (ig * alpha + dg * invA + 127) / 255
-                        val outB = (ib * alpha + db * invA + 127) / 255
-                        buffer[idx] = (0xFF shl 24) or (outR shl 16) or (outG shl 8) or outB
-                        idx++
-                    }
-                }
-            }
-        }
-
-        // 4. Solid cells block fill
-        for (i in 0 until n) {
-            if (renderer.cellFlag[i] == CELL_SOLID) {
-                val col = i % cols
-                val row = i / cols
-                val fillCol = renderer.cellFill[i]
-                val startX = (col * cwInt + 1).coerceAtMost(widthInt)
-                val startY = (row * chInt + 1).coerceAtMost(heightInt)
-                val endX = ((col + 1) * cwInt).coerceAtMost(widthInt)
-                val endY = ((row + 1) * chInt).coerceAtMost(heightInt)
-                val len = endX - startX
-                if (len > 0) {
                     for (py in startY until endY) {
-                        val rowStart = py * widthInt + startX
-                        Arrays.fill(buffer, rowStart, rowStart + len, fillCol)
+                        var idx = py * widthInt + startX
+                        for (px in startX until endX) {
+                            val dst = buffer[idx]
+                            val dr = (dst ushr 16) and 0xFF
+                            val dg = (dst ushr 8) and 0xFF
+                            val db = dst and 0xFF
+                            val outR = div255Fast(ir * alpha + dr * invA)
+                            val outG = div255Fast(ig * alpha + dg * invA)
+                            val outB = div255Fast(ib * alpha + db * invA)
+                            buffer[idx] = (0xFF shl 24) or (outR shl 16) or (outG shl 8) or outB
+                            idx++
+                        }
                     }
                 }
             }
         }
 
-        // 5. Text glyphs via Glyph Atlas
+        // 4. Solid cells block fill for rows rStart until rEnd
+        for (row in rStart until rEnd) {
+            val rowBase = row * cols
+            for (col in 0 until cols) {
+                val i = rowBase + col
+                if (renderer.cellFlag[i] == CELL_SOLID) {
+                    val fillCol = renderer.cellFill[i]
+                    val startX = (col * cwInt + 1).coerceAtMost(widthInt)
+                    val startY = (row * chInt + 1).coerceAtMost(heightInt)
+                    val endX = ((col + 1) * cwInt).coerceAtMost(widthInt)
+                    val endY = ((row + 1) * chInt).coerceAtMost(heightInt)
+                    val len = endX - startX
+                    if (len > 0) {
+                        for (py in startY until endY) {
+                            val rowStart = py * widthInt + startX
+                            Arrays.fill(buffer, rowStart, rowStart + len, fillCol)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Text glyphs for rows rStart until rEnd
         val masks = atlas.masks
         val atlasCw = atlas.cw
         val atlasCh = atlas.ch
         val cellStride = atlasCw * atlasCh
 
-        for (i in 0 until n) {
-            if (renderer.cellFlag[i] == CELL_NONE) continue
-            val glyph = renderer.cellGlyph[i]
-            val code = glyph.code
-            if (code !in 33..126) continue // space (' ') is 32, empty mask
-
-            val col = i % cols
-            val row = i / cols
-            val cellX = col * cwInt
+        for (row in rStart until rEnd) {
+            val rowBase = row * cols
             val cellY = row * chInt
-            if (cellX >= widthInt || cellY >= heightInt) continue
-
-            val color = renderer.cellColor[i]
-            val sr = (color ushr 16) and 0xFF
-            val sg = (color ushr 8) and 0xFF
-            val sb = color and 0xFF
-
-            val maskBase = code * cellStride
+            if (cellY >= heightInt) continue
             val maxH = minOf(atlasCh, heightInt - cellY)
-            val maxW = minOf(atlasCw, widthInt - cellX)
 
-            for (gy in 0 until maxH) {
-                val maskRow = maskBase + gy * atlasCw
-                var dstIdx = (cellY + gy) * widthInt + cellX
-                for (gx in 0 until maxW) {
-                    val a = masks[maskRow + gx].toInt() and 0xFF
-                    if (a == 255) {
-                        buffer[dstIdx] = color
-                    } else if (a > 0) {
-                        val invA = 255 - a
-                        val dst = buffer[dstIdx]
-                        val dr = (dst ushr 16) and 0xFF
-                        val dg = (dst ushr 8) and 0xFF
-                        val db = dst and 0xFF
-                        val outR = (sr * a + dr * invA + 127) / 255
-                        val outG = (sg * a + dg * invA + 127) / 255
-                        val outB = (sb * a + db * invA + 127) / 255
-                        buffer[dstIdx] = (0xFF shl 24) or (outR shl 16) or (outG shl 8) or outB
+            for (col in 0 until cols) {
+                val i = rowBase + col
+                if (renderer.cellFlag[i] == CELL_NONE) continue
+                val glyph = renderer.cellGlyph[i]
+                val code = glyph.code
+                if (code !in 33..126) continue
+
+                val cellX = col * cwInt
+                if (cellX >= widthInt) continue
+                val maxW = minOf(atlasCw, widthInt - cellX)
+
+                val color = renderer.cellColor[i]
+                val sr = (color ushr 16) and 0xFF
+                val sg = (color ushr 8) and 0xFF
+                val sb = color and 0xFF
+
+                val maskBase = code * cellStride
+
+                for (gy in 0 until maxH) {
+                    val maskRow = maskBase + gy * atlasCw
+                    var dstIdx = (cellY + gy) * widthInt + cellX
+                    for (gx in 0 until maxW) {
+                        val a = masks[maskRow + gx].toInt() and 0xFF
+                        if (a == 255) {
+                            buffer[dstIdx] = color
+                        } else if (a > 0) {
+                            val invA = 255 - a
+                            val dst = buffer[dstIdx]
+                            val dr = (dst ushr 16) and 0xFF
+                            val dg = (dst ushr 8) and 0xFF
+                            val db = dst and 0xFF
+                            val outR = div255Fast(sr * a + dr * invA)
+                            val outG = div255Fast(sg * a + dg * invA)
+                            val outB = div255Fast(sb * a + db * invA)
+                            buffer[dstIdx] = (0xFF shl 24) or (outR shl 16) or (outG shl 8) or outB
+                        }
+                        dstIdx++
                     }
-                    dstIdx++
                 }
             }
         }
@@ -307,31 +394,21 @@ class AsciiFrame(
         textPaint: Paint,
         singleCharBuf: CharArray
     ) {
-        if (width <= 1f || height <= 1f || cols <= 0 || rows <= 0) return
+        val totalPixels = (ceil(width) * ceil(height)).toInt()
+        if (totalPixels <= 0) return
 
-        // 1. Solid canvas background
-        fillPaint.color = packRgb(
-            clampF(activeBg[0], 0f, 255f).safeRoundToInt(),
-            clampF(activeBg[1], 0f, 255f).safeRoundToInt(),
-            clampF(activeBg[2], 0f, 255f).safeRoundToInt()
-        )
-        canvas.drawRect(0f, 0f, width, height, fillPaint)
+        // 1. Background
+        canvas.drawRGB(activeBg[0].toInt(), activeBg[1].toInt(), activeBg[2].toInt())
 
-        // 2. Grid
+        // 2. Subtle grid
         if (grid > 0.01f) {
             val ga = clampF(0.055f * grid, 0f, 0.35f)
             fillPaint.color = packArgb((ga * 255f).safeRoundToInt(), 255, 255, 255)
-            var c = 0
-            while (c <= cols) {
-                val px = c * cw
-                canvas.drawRect(px, 0f, px + 1f, height, fillPaint)
-                c++
+            for (c in 0..cols) {
+                canvas.drawLine(c * cw, 0f, c * cw, height, fillPaint)
             }
-            var r = 0
-            while (r <= rows) {
-                val py = r * ch
-                canvas.drawRect(0f, py, width, py + 1f, fillPaint)
-                r++
+            for (r in 0..rows) {
+                canvas.drawLine(0f, r * ch, width, r * ch, fillPaint)
             }
         }
 
