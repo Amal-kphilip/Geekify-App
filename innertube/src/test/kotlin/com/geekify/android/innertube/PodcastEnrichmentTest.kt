@@ -17,11 +17,12 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Collections
 
 class PodcastEnrichmentTest {
     @Test
     fun `new episodes enrich missing artists and preserve linked or unresolved episodes`() = runBlocking {
-        val lookedUp = mutableListOf<String>()
+        val lookedUp = Collections.synchronizedList(mutableListOf<String>())
         val engine = MockEngine { request ->
             val response = when {
                 request.url.encodedPath.endsWith("/browse") -> browseResponse
@@ -62,9 +63,10 @@ class PodcastEnrichmentTest {
                 assertEquals(listOf(Artist("Linked Host", "UClinked")), episodes[1].artists)
                 assertTrue(episodes[2].artists.isEmpty())
                 assertTrue(episodes[3].artists.isEmpty())
-                assertEquals(setOf("missing", "unknown", "failed"), lookedUp.toSet())
-                assertEquals(1, lookedUp.count { it == "missing" })
-                assertEquals(1, lookedUp.count { it == "unknown" })
+                val lookupSnapshot = synchronized(lookedUp) { lookedUp.toList() }
+                assertEquals(setOf("missing", "unknown", "failed"), lookupSnapshot.toSet())
+                assertEquals(1, lookupSnapshot.count { it == "missing" })
+                assertEquals(1, lookupSnapshot.count { it == "unknown" })
             } finally {
                 clientField.set(innerTube, originalClient)
                 transportField.set(innerTube, originalTransport)
