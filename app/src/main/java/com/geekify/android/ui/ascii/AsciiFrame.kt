@@ -56,6 +56,7 @@ class AsciiFrame(
     var trail: Float = 0f,
     var timeSec: Float = 0f,
     var contrast: FloatArray = FloatArray(3),
+    var trailColor: FloatArray = FloatArray(3),
     var cellFlag: ByteArray = ByteArray(0),
     var cellFill: IntArray = IntArray(0),
     var cellColor: IntArray = IntArray(0),
@@ -84,6 +85,9 @@ class AsciiFrame(
         contrast[0] = renderer.pen.contrast[0]
         contrast[1] = renderer.pen.contrast[1]
         contrast[2] = renderer.pen.contrast[2]
+        trailColor[0] = renderer.trailColor[0]
+        trailColor[1] = renderer.trailColor[1]
+        trailColor[2] = renderer.trailColor[2]
 
         val n = cols * rows
         if (cellFlag.size != n) {
@@ -271,7 +275,7 @@ class AsciiFrame(
             val dotSize = max(2, floor(renderer.cw * 0.22f).toInt())
             val ox = ((renderer.cw - dotSize) * 0.5f).toInt()
             val oy = ((renderer.ch - dotSize) * 0.5f).toInt()
-            val inkCol = renderer.fade(renderer.pen.contrast[0], renderer.pen.contrast[1], renderer.pen.contrast[2], 0f)
+            val inkCol = renderer.fade(renderer.trailColor[0], renderer.trailColor[1], renderer.trailColor[2], 0f)
             val ir = (inkCol ushr 16) and 0xFF
             val ig = (inkCol ushr 8) and 0xFF
             val ib = inkCol and 0xFF

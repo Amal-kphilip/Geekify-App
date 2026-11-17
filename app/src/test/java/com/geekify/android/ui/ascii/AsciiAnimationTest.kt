@@ -18,7 +18,7 @@ class AsciiAnimationTest {
         val defaultConfig = AsciiBackgroundConfig()
         assertEquals(MAX_ASCII_DETAIL, defaultConfig.detail, 0.0001f)
         assertEquals(MIN_ASCII_GRID, defaultConfig.grid, 0.0001f)
-        assertTrue(defaultConfig.multiColorButterflies)
+        org.junit.Assert.assertFalse(defaultConfig.multiColorButterflies)
 
         for (spec in AsciiCatalog.ANIMALS) {
             val cfg = AsciiBackgroundConfig(animalId = spec.id)

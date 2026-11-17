@@ -191,6 +191,7 @@ class AsciiRenderer(val tuning: AsciiTuning) {
     val pen = Pen(this)
 
     var activeBg = floatArrayOf(6f, 7f, 12f)
+    var trailColor = floatArrayOf(96f, 156f, 255f)
     var hueMat = FloatArray(9)
     var hueOn: Boolean = false
 

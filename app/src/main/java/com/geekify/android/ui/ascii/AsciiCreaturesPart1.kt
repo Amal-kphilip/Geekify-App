@@ -34,34 +34,13 @@ private val BUTTERFLY_HIND = LobeSpec(-1.45f, 0.15f, 0.44f, 0.48f, 0.42f, 0.04f)
 private const val FORE_ROOT = 0.06f
 private const val HIND_ROOT = -0.02f
 private val BUTTERFLY_BODY = floatArrayOf(30f, 30f, 42f)
+private val BUTTERFLY_DARK = floatArrayOf(22f, 28f, 62f)
+private val BUTTERFLY_SPOT = floatArrayOf(236f, 240f, 255f)
+private val BUTTERFLY_ROOT = floatArrayOf(26f, 44f, 110f)
+private val BUTTERFLY_FOLD = floatArrayOf(30f, 50f, 120f)
 private const val FLAP_HZ = 2.6f
 private const val BUTTERFLY_GLIDE = 0.35f
 private const val BUTTERFLY_FLUTTER = 1.3f
-
-private class ButterflySpeciesPalette(
-    val baseR: Float, val baseG: Float, val baseB: Float,
-    val darkR: Float, val darkG: Float, val darkB: Float,
-    val spotR: Float, val spotG: Float, val spotB: Float
-)
-
-private val BUTTERFLY_SPECIES = arrayOf(
-    // 0: Morpho Blue (Original)
-    ButterflySpeciesPalette(50f, 135f, 255f, 22f, 28f, 62f, 236f, 240f, 255f),
-    // 1: Monarch Orange-Gold
-    ButterflySpeciesPalette(255f, 132f, 32f, 48f, 18f, 12f, 255f, 242f, 210f),
-    // 2: Emerald Swallowtail
-    ButterflySpeciesPalette(42f, 228f, 138f, 14f, 46f, 32f, 210f, 255f, 230f),
-    // 3: Magenta Rose
-    ButterflySpeciesPalette(252f, 68f, 178f, 52f, 14f, 38f, 255f, 220f, 242f),
-    // 4: Golden Birdwing
-    ButterflySpeciesPalette(255f, 212f, 44f, 46f, 32f, 10f, 255f, 248f, 215f),
-    // 5: Amethyst Purple Emperor
-    ButterflySpeciesPalette(170f, 96f, 255f, 32f, 16f, 56f, 235f, 215f, 255f),
-    // 6: Tropical Cyan Ulysses
-    ButterflySpeciesPalette(36f, 224f, 245f, 12f, 42f, 52f, 215f, 255f, 255f),
-    // 7: Sunset Crimson Apollo
-    ButterflySpeciesPalette(255f, 88f, 74f, 52f, 18f, 18f, 255f, 230f, 215f)
-)
 
 private fun lobeReach(l: LobeSpec, phi: Float, tIn: Float = (phi - l.from) / (l.to - l.from)): Float {
     if (tIn <= 0f || tIn >= 1f) return 0f
@@ -106,7 +85,6 @@ class ButterfliesSim(private val tuning: AsciiTuning) : AsciiSimulation {
     private val pose = Pose()
     private val atWorld = FloatArray(2)
 
-    private var curButterflyPal: ButterflySpeciesPalette = BUTTERFLY_SPECIES[0]
     private var curButterflyS: Float = 0f
     private var curButterflyOpen: Float = 1f
     private var curButterflyMinBody: Float = 0f
@@ -114,7 +92,6 @@ class ButterfliesSim(private val tuning: AsciiTuning) : AsciiSimulation {
 
     private val butterflySampler = ShapeSampler { u, v, _, _ ->
         val pen = curButterflyPen ?: return@ShapeSampler false
-        val pal = curButterflyPal
         val s = curButterflyS
         val open = curButterflyOpen
         val minBody = curButterflyMinBody
@@ -138,21 +115,16 @@ class ButterfliesSim(private val tuning: AsciiTuning) : AsciiSimulation {
         val r = globalLobe.r
         if (r > 0.86f) {
             if (part == 0 && r < 0.95f && abs(fracF(t * 5f) - 0.5f) < 0.14f) {
-                pen.ink.set(pal.spotR, pal.spotG, pal.spotB, INK_SPOT)
+                pen.ink.set(BUTTERFLY_SPOT[0], BUTTERFLY_SPOT[1], BUTTERFLY_SPOT[2], INK_SPOT)
             } else {
-                pen.ink.set(pal.darkR, pal.darkG, pal.darkB, INK_DARK)
+                pen.ink.set(BUTTERFLY_DARK[0], BUTTERFLY_DARK[1], BUTTERFLY_DARK[2], INK_DARK)
             }
         } else if (r < 0.08f) {
-            pen.ink.set(pal.darkR + 4f, pal.darkG + 16f, pal.darkB + 48f, INK_DARK)
+            pen.ink.set(BUTTERFLY_ROOT[0], BUTTERFLY_ROOT[1], BUTTERFLY_ROOT[2], INK_DARK)
         } else if (part == 0 && t > 0.9f) {
-            pen.ink.set(pal.darkR + 8f, pal.darkG + 22f, pal.darkB + 58f, INK_DARK)
+            pen.ink.set(BUTTERFLY_FOLD[0], BUTTERFLY_FOLD[1], BUTTERFLY_FOLD[2], INK_DARK)
         } else {
-            pen.ink.set(
-                min(255f, pal.baseR + 70f * r),
-                min(255f, pal.baseG + 60f * r),
-                min(255f, pal.baseB + 40f * r),
-                INK_SHIMMER
-            )
+            pen.ink.set(50f + 70f * r, 135f + 60f * r, 255f, INK_SHIMMER)
         }
         true
     }
@@ -180,11 +152,6 @@ class ButterfliesSim(private val tuning: AsciiTuning) : AsciiSimulation {
         flock.step(dt) { b ->
             b.flutterX = 0f
             b.flutterY = 0f
-            b.paletteIndex = if (tuning.multiColorButterflies) {
-                abs(b.id * 73856093) % BUTTERFLY_SPECIES.size
-            } else {
-                0
-            }
         }
 
         for (i in 0 until flock.creatures.size) {
@@ -232,15 +199,8 @@ class ButterfliesSim(private val tuning: AsciiTuning) : AsciiSimulation {
         pose.depth = b.depth
         pose.id = b.id
 
-        val pal = if (tuning.multiColorButterflies) {
-            BUTTERFLY_SPECIES[b.paletteIndex]
-        } else {
-            BUTTERFLY_SPECIES[0]
-        }
-
         val minBody = pen.cw * 0.4f
         curButterflyPen = pen
-        curButterflyPal = pal
         curButterflyS = s
         curButterflyOpen = open
         curButterflyMinBody = minBody

@@ -71,10 +71,21 @@ private class AsciiEngineInstance(initialAnimalId: String) {
     var lastDetail: Float = -1f
     var timeSec: Float = 0f
 
+    init {
+        val spec = AsciiCatalog.byId(initialAnimalId)
+        renderer.trailColor[0] = spec.trailDarkR.toFloat()
+        renderer.trailColor[1] = spec.trailDarkG.toFloat()
+        renderer.trailColor[2] = spec.trailDarkB.toFloat()
+    }
+
     fun ensureAnimal(animalId: String) {
         if (animalId != currentAnimalId) {
             currentAnimalId = animalId
             simulation = AsciiSimulationFactory.create(animalId, tuning)
+            val spec = AsciiCatalog.byId(animalId)
+            renderer.trailColor[0] = spec.trailDarkR.toFloat()
+            renderer.trailColor[1] = spec.trailDarkG.toFloat()
+            renderer.trailColor[2] = spec.trailDarkB.toFloat()
             if (simWidth > 1f && simHeight > 1f) {
                 simulation.resize(simWidth, simHeight)
             }
@@ -338,6 +349,9 @@ fun AsciiBackgroundCanvas(
                     val spec = AsciiCatalog.byId(currentCfg.animalId)
                     engine.tuning.syncFrom(currentCfg, spec)
                     engine.ensureAnimal(currentCfg.animalId)
+                    engine.renderer.trailColor[0] = spec.trailDarkR.toFloat()
+                    engine.renderer.trailColor[1] = spec.trailDarkG.toFloat()
+                    engine.renderer.trailColor[2] = spec.trailDarkB.toFloat()
 
                     // 3. Thread-safe sizing with debouncing and adaptive quality extraCw
                     val dims = sizeRef.get()
@@ -860,19 +874,7 @@ fun AsciiBackgroundSettingsPage(
                             // TAB 0: ANIMAL / SCENE MOTION
                             0 -> {
                                 Column {
-                                    if (currentSpec.id == "butterflies") {
-                                        IosSettingsSwitchRow(
-                                            icon = GeekifyIcons.Flare,
-                                            tileColor = IosPalette.systemCyan,
-                                            title = "Multiple Coloured Butterflies",
-                                            subtitle = "Show 8 distinct vibrant wing palettes (Morpho Blue, Monarch Gold, Emerald, Rose, Birdwing, Purple, Cyan & Sunset)",
-                                            checked = config.multiColorButterflies,
-                                            onCheckedChange = viewModel::setAsciiMultiColorButterflies
-                                        )
-                                        IosSettingsDivider(insetStart = 16.dp)
-                                    }
-
-                                    // Animal specific controls
+                                    // Animal / Scene specific controls (e.g. Flight, Swimming, Feeding, Leaping, Scuttling, etc.)
                                     currentSpec.sections.forEach { section ->
                                         section.controls.forEachIndexed { idx, ctrl ->
                                             if (ctrl.key == "multiColorButterflies") return@forEachIndexed
@@ -897,38 +899,36 @@ fun AsciiBackgroundSettingsPage(
                                                     }
                                                 )
                                             }
-                                            if (idx < section.controls.lastIndex) {
-                                                IosSettingsDivider(insetStart = 16.dp)
-                                            }
+                                            IosSettingsDivider(insetStart = 16.dp)
                                         }
                                     }
 
-                                    IosSettingsDivider(insetStart = 16.dp)
-
-                                    // Cruise Speed
-                                    val speedVal = config.valueFor("speed", currentSpec).coerceIn(0.1f, 3f)
-                                    IosSettingsSliderRow(
-                                        title = "Speed",
-                                        valueLabel = "${"%.2f".format(Locale.US, speedVal)}×",
-                                        value = speedVal,
-                                        valueRange = 0.1f..3f,
-                                        onValueChange = { viewModel.setAsciiParam(currentSpec.id, "speed", snapStep(it, 0.05f, 0.1f, 3f)) }
-                                    )
-
-                                    IosSettingsDivider(insetStart = 16.dp)
-
-                                    // Density / Population Count
-                                    val densityVal = config.valueFor("density", currentSpec).coerceIn(0.1f, 4f)
-                                    IosSettingsSliderRow(
-                                        title = "Density",
-                                        valueLabel = "${"%.2f".format(Locale.US, densityVal)}×",
-                                        value = densityVal,
-                                        valueRange = 0.1f..4f,
-                                        onValueChange = { viewModel.setAsciiParam(currentSpec.id, "density", snapStep(it, 0.05f, 0.1f, 4f)) }
-                                    )
-
-                                    if (currentSpec.category == "creature") {
+                                    // Shared movement controls (filtered by currentSpec.hide)
+                                    if (!currentSpec.hide.contains("speed")) {
+                                        val speedVal = config.valueFor("speed", currentSpec).coerceIn(0.1f, 3f)
+                                        IosSettingsSliderRow(
+                                            title = "Speed",
+                                            valueLabel = "${"%.2f".format(Locale.US, speedVal)}×",
+                                            value = speedVal,
+                                            valueRange = 0.1f..3f,
+                                            onValueChange = { viewModel.setAsciiParam(currentSpec.id, "speed", snapStep(it, 0.05f, 0.1f, 3f)) }
+                                        )
                                         IosSettingsDivider(insetStart = 16.dp)
+                                    }
+
+                                    if (!currentSpec.hide.contains("density")) {
+                                        val densityVal = config.valueFor("density", currentSpec).coerceIn(0.1f, 4f)
+                                        IosSettingsSliderRow(
+                                            title = "Density",
+                                            valueLabel = "${"%.2f".format(Locale.US, densityVal)}×",
+                                            value = densityVal,
+                                            valueRange = 0.1f..4f,
+                                            onValueChange = { viewModel.setAsciiParam(currentSpec.id, "density", snapStep(it, 0.05f, 0.1f, 4f)) }
+                                        )
+                                        IosSettingsDivider(insetStart = 16.dp)
+                                    }
+
+                                    if (!currentSpec.hide.contains("sway")) {
                                         val swayVal = config.valueFor("sway", currentSpec).coerceIn(0f, 0.6f)
                                         IosSettingsSliderRow(
                                             title = "Sway",
@@ -937,8 +937,10 @@ fun AsciiBackgroundSettingsPage(
                                             valueRange = 0f..0.6f,
                                             onValueChange = { viewModel.setAsciiParam(currentSpec.id, "sway", snapStep(it, 0.01f, 0f, 0.6f)) }
                                         )
-
                                         IosSettingsDivider(insetStart = 16.dp)
+                                    }
+
+                                    if (!currentSpec.hide.contains("spread")) {
                                         val spreadVal = config.valueFor("spread", currentSpec).coerceIn(0f, 0.8f)
                                         IosSettingsSliderRow(
                                             title = "Spread",
@@ -947,8 +949,10 @@ fun AsciiBackgroundSettingsPage(
                                             valueRange = 0f..0.8f,
                                             onValueChange = { viewModel.setAsciiParam(currentSpec.id, "spread", snapStep(it, 0.01f, 0f, 0.8f)) }
                                         )
-
                                         IosSettingsDivider(insetStart = 16.dp)
+                                    }
+
+                                    if (!currentSpec.hide.contains("size")) {
                                         val sizeVal = config.valueFor("size", currentSpec).coerceIn(0.3f, 2.5f)
                                         IosSettingsSliderRow(
                                             title = "Size",
@@ -957,8 +961,34 @@ fun AsciiBackgroundSettingsPage(
                                             valueRange = 0.3f..2.5f,
                                             onValueChange = { viewModel.setAsciiParam(currentSpec.id, "size", snapStep(it, 0.05f, 0.3f, 2.5f)) }
                                         )
-
                                         IosSettingsDivider(insetStart = 16.dp)
+                                    }
+
+                                    if (!currentSpec.hide.contains("farthest")) {
+                                        val farthestVal = config.valueFor("farthest", currentSpec).coerceIn(0.1f, 1f)
+                                        IosSettingsSliderRow(
+                                            title = "Farthest depth",
+                                            valueLabel = "%.2f".format(Locale.US, farthestVal),
+                                            value = farthestVal,
+                                            valueRange = 0.1f..1f,
+                                            onValueChange = { viewModel.setAsciiParam(currentSpec.id, "farthest", snapStep(it, 0.01f, 0.1f, 1f)) }
+                                        )
+                                        IosSettingsDivider(insetStart = 16.dp)
+                                    }
+
+                                    if (!currentSpec.hide.contains("farBias")) {
+                                        val farBiasVal = config.valueFor("farBias", currentSpec).coerceIn(0.3f, 3f)
+                                        IosSettingsSliderRow(
+                                            title = "Far bias",
+                                            valueLabel = "%.2f".format(Locale.US, farBiasVal),
+                                            value = farBiasVal,
+                                            valueRange = 0.3f..3f,
+                                            onValueChange = { viewModel.setAsciiParam(currentSpec.id, "farBias", snapStep(it, 0.05f, 0.3f, 3f)) }
+                                        )
+                                        IosSettingsDivider(insetStart = 16.dp)
+                                    }
+
+                                    if (!currentSpec.hide.contains("wind")) {
                                         val windVal = config.valueFor("wind", currentSpec).coerceIn(0f, 2.5f)
                                         IosSettingsSliderRow(
                                             title = "Wind gusts",
@@ -967,8 +997,10 @@ fun AsciiBackgroundSettingsPage(
                                             valueRange = 0f..2.5f,
                                             onValueChange = { viewModel.setAsciiParam(currentSpec.id, "wind", snapStep(it, 0.05f, 0f, 2.5f)) }
                                         )
-
                                         IosSettingsDivider(insetStart = 16.dp)
+                                    }
+
+                                    if (!currentSpec.hide.contains("grip")) {
                                         val gripVal = config.valueFor("grip", currentSpec).coerceIn(0.2f, 5f)
                                         IosSettingsSliderRow(
                                             title = "Hold course",
@@ -977,8 +1009,10 @@ fun AsciiBackgroundSettingsPage(
                                             valueRange = 0.2f..5f,
                                             onValueChange = { viewModel.setAsciiParam(currentSpec.id, "grip", snapStep(it, 0.05f, 0.2f, 5f)) }
                                         )
-
                                         IosSettingsDivider(insetStart = 16.dp)
+                                    }
+
+                                    if (!currentSpec.hide.contains("separation")) {
                                         val sepVal = config.valueFor("separation", currentSpec).coerceIn(0f, 1000f)
                                         IosSettingsSliderRow(
                                             title = "Separation",
@@ -987,8 +1021,10 @@ fun AsciiBackgroundSettingsPage(
                                             valueRange = 0f..1000f,
                                             onValueChange = { viewModel.setAsciiParam(currentSpec.id, "separation", snapStep(it, 10f, 0f, 1000f)) }
                                         )
-
                                         IosSettingsDivider(insetStart = 16.dp)
+                                    }
+
+                                    if (!currentSpec.hide.contains("corner")) {
                                         val cornerVal = config.boolFor("corner", currentSpec)
                                         IosSettingsSwitchRow(
                                             icon = GeekifyIcons.Tune,
@@ -999,7 +1035,7 @@ fun AsciiBackgroundSettingsPage(
                                             onCheckedChange = { viewModel.setAsciiParam(currentSpec.id, "corner", if (it) 1f else 0f) }
                                         )
 
-                                        if (!cornerVal) {
+                                        if (!cornerVal && !currentSpec.hide.contains("direction")) {
                                             IosSettingsDivider(insetStart = 16.dp)
                                             val dirVal = config.valueFor("direction", currentSpec).coerceIn(0f, 360f)
                                             IosSettingsSliderRow(
@@ -1066,35 +1102,41 @@ fun AsciiBackgroundSettingsPage(
                                         onValueChange = { viewModel.setAsciiParam(currentSpec.id, "dayNight", snapStep(it, 0.05f, 0f, 2f)) }
                                     )
 
-                                    IosSettingsDivider(insetStart = 16.dp)
-                                    val shimmerVal = config.valueFor("shimmer", currentSpec).coerceIn(0f, 1f)
-                                    IosSettingsSliderRow(
-                                        title = "Shimmer",
-                                        valueLabel = "${(shimmerVal * 100f).roundToInt()}%",
-                                        value = shimmerVal,
-                                        valueRange = 0f..1f,
-                                        onValueChange = { viewModel.setAsciiParam(currentSpec.id, "shimmer", snapStep(it, 0.01f, 0f, 1f)) }
-                                    )
+                                    if (!currentSpec.hide.contains("shimmer")) {
+                                        IosSettingsDivider(insetStart = 16.dp)
+                                        val shimmerVal = config.valueFor("shimmer", currentSpec).coerceIn(0f, 1f)
+                                        IosSettingsSliderRow(
+                                            title = "Shimmer",
+                                            valueLabel = "${(shimmerVal * 100f).roundToInt()}%",
+                                            value = shimmerVal,
+                                            valueRange = 0f..1f,
+                                            onValueChange = { viewModel.setAsciiParam(currentSpec.id, "shimmer", snapStep(it, 0.01f, 0f, 1f)) }
+                                        )
+                                    }
 
-                                    IosSettingsDivider(insetStart = 16.dp)
-                                    val sparkleVal = config.valueFor("sparkle", currentSpec).coerceIn(0f, 0.5f)
-                                    IosSettingsSliderRow(
-                                        title = "Sparkle",
-                                        valueLabel = "${(sparkleVal * 100f).roundToInt()}%",
-                                        value = sparkleVal,
-                                        valueRange = 0f..0.5f,
-                                        onValueChange = { viewModel.setAsciiParam(currentSpec.id, "sparkle", snapStep(it, 0.01f, 0f, 0.5f)) }
-                                    )
+                                    if (!currentSpec.hide.contains("sparkle")) {
+                                        IosSettingsDivider(insetStart = 16.dp)
+                                        val sparkleVal = config.valueFor("sparkle", currentSpec).coerceIn(0f, 0.5f)
+                                        IosSettingsSliderRow(
+                                            title = "Sparkle",
+                                            valueLabel = "${(sparkleVal * 100f).roundToInt()}%",
+                                            value = sparkleVal,
+                                            valueRange = 0f..0.5f,
+                                            onValueChange = { viewModel.setAsciiParam(currentSpec.id, "sparkle", snapStep(it, 0.01f, 0f, 0.5f)) }
+                                        )
+                                    }
 
-                                    IosSettingsDivider(insetStart = 16.dp)
-                                    val fogVal = config.valueFor("fog", currentSpec).coerceIn(0f, 1f)
-                                    IosSettingsSliderRow(
-                                        title = "Distance fade (Fog)",
-                                        valueLabel = "${(fogVal * 100f).roundToInt()}%",
-                                        value = fogVal,
-                                        valueRange = 0f..1f,
-                                        onValueChange = { viewModel.setAsciiParam(currentSpec.id, "fog", snapStep(it, 0.01f, 0f, 1f)) }
-                                    )
+                                    if (!currentSpec.hide.contains("fog")) {
+                                        IosSettingsDivider(insetStart = 16.dp)
+                                        val fogVal = config.valueFor("fog", currentSpec).coerceIn(0f, 1f)
+                                        IosSettingsSliderRow(
+                                            title = "Distance fade (Fog)",
+                                            valueLabel = "${(fogVal * 100f).roundToInt()}%",
+                                            value = fogVal,
+                                            valueRange = 0f..1f,
+                                            onValueChange = { viewModel.setAsciiParam(currentSpec.id, "fog", snapStep(it, 0.01f, 0f, 1f)) }
+                                        )
+                                    }
                                 }
                             }
 
@@ -1121,35 +1163,41 @@ fun AsciiBackgroundSettingsPage(
                                         onValueChange = { viewModel.setAsciiGrid(snapStep(it, 0.05f, MIN_ASCII_GRID, 4.0f)) }
                                     )
 
-                                    IosSettingsDivider(insetStart = 16.dp)
-                                    val ripVal = config.valueFor("ripples", currentSpec).coerceIn(0f, 2.5f)
-                                    IosSettingsSliderRow(
-                                        title = "Water ripples",
-                                        valueLabel = "%.2f".format(Locale.US, ripVal),
-                                        value = ripVal,
-                                        valueRange = 0f..2.5f,
-                                        onValueChange = { viewModel.setAsciiParam(currentSpec.id, "ripples", snapStep(it, 0.05f, 0f, 2.5f)) }
-                                    )
+                                    if (!currentSpec.hide.contains("ripples")) {
+                                        IosSettingsDivider(insetStart = 16.dp)
+                                        val ripVal = config.valueFor("ripples", currentSpec).coerceIn(0f, 2.5f)
+                                        IosSettingsSliderRow(
+                                            title = "Water ripples",
+                                            valueLabel = "%.2f".format(Locale.US, ripVal),
+                                            value = ripVal,
+                                            valueRange = 0f..2.5f,
+                                            onValueChange = { viewModel.setAsciiParam(currentSpec.id, "ripples", snapStep(it, 0.05f, 0f, 2.5f)) }
+                                        )
+                                    }
 
-                                    IosSettingsDivider(insetStart = 16.dp)
-                                    val trailVal = config.valueFor("trail", currentSpec).coerceIn(0f, 4f)
-                                    IosSettingsSliderRow(
-                                        title = "Trail Energy",
-                                        valueLabel = "${"%.2f".format(Locale.US, trailVal)}×",
-                                        value = trailVal,
-                                        valueRange = 0f..4f,
-                                        onValueChange = { viewModel.setAsciiParam(currentSpec.id, "trail", snapStep(it, 0.05f, 0f, 4f)) }
-                                    )
+                                    if (!currentSpec.hide.contains("trail")) {
+                                        IosSettingsDivider(insetStart = 16.dp)
+                                        val trailVal = config.valueFor("trail", currentSpec).coerceIn(0f, 4f)
+                                        IosSettingsSliderRow(
+                                            title = "Trail Energy",
+                                            valueLabel = "${"%.2f".format(Locale.US, trailVal)}×",
+                                            value = trailVal,
+                                            valueRange = 0f..4f,
+                                            onValueChange = { viewModel.setAsciiParam(currentSpec.id, "trail", snapStep(it, 0.05f, 0f, 4f)) }
+                                        )
+                                    }
 
-                                    IosSettingsDivider(insetStart = 16.dp)
-                                    val fadeVal = config.valueFor("trailFade", currentSpec).coerceIn(0.05f, 6f)
-                                    IosSettingsSliderRow(
-                                        title = "Trail Fade Rate",
-                                        valueLabel = "${"%.2f".format(Locale.US, fadeVal)}/s",
-                                        value = fadeVal,
-                                        valueRange = 0.05f..6f,
-                                        onValueChange = { viewModel.setAsciiParam(currentSpec.id, "trailFade", snapStep(it, 0.05f, 0.05f, 6f)) }
-                                    )
+                                    if (!currentSpec.hide.contains("trailFade")) {
+                                        IosSettingsDivider(insetStart = 16.dp)
+                                        val fadeVal = config.valueFor("trailFade", currentSpec).coerceIn(0.05f, 6f)
+                                        IosSettingsSliderRow(
+                                            title = "Trail Fade Rate",
+                                            valueLabel = "${"%.2f".format(Locale.US, fadeVal)}/s",
+                                            value = fadeVal,
+                                            valueRange = 0.05f..6f,
+                                            onValueChange = { viewModel.setAsciiParam(currentSpec.id, "trailFade", snapStep(it, 0.05f, 0.05f, 6f)) }
+                                        )
+                                    }
                                 }
                             }
                         }

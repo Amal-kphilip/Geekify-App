@@ -39,6 +39,7 @@ uniform float uGrid;
 uniform float uTrail;
 uniform float uTime;
 uniform float3 uContrast;
+uniform float3 uTrailColor;
 
 half4 main(float2 fragCoord) {
     float col = floor(fragCoord.x / uCellSize.x);
@@ -93,7 +94,7 @@ half4 main(float2 fragCoord) {
                 float hash = fract(sin(col * 12.9898 + row * 78.233 + 3.0) * 43758.5453);
                 float twinkle = 0.75 + 0.25 * sin(uTime * 5.0 + hash * 40.0);
                 half alpha = clamp(half(energy * twinkle * 0.42), 0.08, 0.75);
-                half3 inkCol = uContrast / 255.0;
+                half3 inkCol = uTrailColor / 255.0;
                 color = mix(color, inkCol, alpha);
             }
         }
@@ -338,6 +339,7 @@ half4 main(float2 fragCoord) {
             s.setFloatUniform("uTrail", frame.trail)
             s.setFloatUniform("uTime", frame.timeSec)
             s.setFloatUniform("uContrast", frame.contrast[0], frame.contrast[1], frame.contrast[2])
+            s.setFloatUniform("uTrailColor", frame.trailColor[0], frame.trailColor[1], frame.trailColor[2])
 
             canvas.drawRect(0f, 0f, frame.width, frame.height, paint)
             return true
