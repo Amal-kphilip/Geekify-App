@@ -271,18 +271,24 @@ half4 main(float2 fragCoord) {
                 val safeGlyph = if (flag == CELL_NONE) 0 else glyph
                 val color = if (i < colors.size) colors[i] else 0
 
-                // Bitmap A: Foreground Color (fully opaque)
-                currPixelsA[i] = (0xFF shl 24) or (color and 0x00FFFFFF)
+                // Bitmap A: Foreground Color (RGBA byte order in memory for little-endian Skia / AGSL)
+                val cr = (color ushr 16) and 0xFF
+                val cg = (color ushr 8) and 0xFF
+                val cb = color and 0xFF
+                currPixelsA[i] = (0xFF shl 24) or (cb shl 16) or (cg shl 8) or cr
 
-                // Bitmap B: Fill Color (fully opaque)
+                // Bitmap B: Fill Color (RGBA byte order in memory for little-endian Skia / AGSL)
                 val fill = if (flag == CELL_SOLID && i < fills.size) fills[i] else 0
-                currPixelsB[i] = (0xFF shl 24) or (fill and 0x00FFFFFF)
+                val fr = (fill ushr 16) and 0xFF
+                val fg = (fill ushr 8) and 0xFF
+                val fb = fill and 0xFF
+                currPixelsB[i] = (0xFF shl 24) or (fb shl 16) or (fg shl 8) or fr
 
-                // Bitmap C: Cell Data (safeGlyph in R, energy in G, solid flag in B, opaque A)
+                // Bitmap C: Cell Data (safeGlyph in Byte 0/.r, energy in Byte 1/.g, solid flag in Byte 2/.b, opaque A)
                 val e = if (i < energies.size) energies[i] else 0f
                 val eByte = (e * 255f).toInt().coerceIn(0, 255)
                 val isSolidByte = if (flag == CELL_SOLID) 255 else 0
-                currPixelsC[i] = (0xFF shl 24) or (safeGlyph shl 16) or (eByte shl 8) or isSolidByte
+                currPixelsC[i] = (0xFF shl 24) or (isSolidByte shl 16) or (eByte shl 8) or safeGlyph
             }
 
             bufferCurrA?.position(0)
