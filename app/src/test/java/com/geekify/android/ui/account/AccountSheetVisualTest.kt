@@ -239,4 +239,32 @@ class AccountSheetVisualTest {
         println("TEXT CONTRAST RATIO against brightest background: ${"%.2f".format(textContrast)}:1")
         assertTrue("Text contrast ratio must exceed WCAG AAA (7.0:1), got $textContrast", textContrast >= 7.0)
     }
+
+    @Test
+    fun testPersonAddIconInRow() {
+        val artifactDir = File(System.getProperty("user.home"), ".gemini/antigravity/brain/24edfc6f-11e7-41f5-96f3-c41eca888903")
+        artifactDir.mkdirs()
+
+        composeTestRule.setContent {
+            Box(
+                modifier = Modifier
+                    .width(360.dp)
+                    .background(Color(0xFF14131A))
+                    .padding(16.dp)
+            ) {
+                com.geekify.android.ui.components.IosSettingsRow(
+                    icon = com.geekify.android.ui.theme.GeekifyIcons.PersonAdd,
+                    tileColor = com.geekify.android.ui.components.IosPalette.systemBlue,
+                    title = "Add another account",
+                    subtitle = "Sign in with Google or email and password",
+                    onClick = {}
+                )
+            }
+        }
+
+        val bitmap = composeTestRule.onRoot().captureToImage().asAndroidBitmap()
+        FileOutputStream(File(artifactDir, "fixed_person_add_row.png")).use {
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+        }
+    }
 }
