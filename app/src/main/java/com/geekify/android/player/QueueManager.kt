@@ -453,18 +453,48 @@ class QueueManager(
         )
     }
 
+    private var lastPreviousPressTimeMs: Long = 0L
+
     fun previous(progressSeconds: Long): Boolean {
         var moved = false
         runWhenLoaded {
             val s = _state.value
             if (s.queue.isEmpty()) return@runWhenLoaded
-            if (progressSeconds > 3 && s.current != null) {
+
+            val now = System.currentTimeMillis()
+            val isRapidSecondPress = (now - lastPreviousPressTimeMs) in 1..2500L
+            lastPreviousPressTimeMs = now
+
+            if (!isRapidSecondPress && progressSeconds > 3L && s.current != null) {
+                resetPosition(0L)
                 seekTo(0)
                 return@runWhenLoaded
             }
-            if (s.shuffle && s.queue.size > 1 && shuffleOrder != null && shufflePointer > 0) {
-                shufflePointer--
-                val prev = shuffleOrder!![shufflePointer]
+
+            // Transitioning to previous track: clear rapid press timer
+            lastPreviousPressTimeMs = 0L
+
+            if (s.shuffle && s.queue.size > 1) {
+                val order = shuffleOrder ?: run {
+                    val ind = s.queue.indices.toMutableList()
+                    ind.remove(s.index)
+                    ind.shuffle()
+                    val gen = listOf(s.index) + ind
+                    shuffleOrder = gen
+                    shufflePointer = 0
+                    gen
+                }
+                val prev = if (shufflePointer > 0) {
+                    shufflePointer--
+                    order[shufflePointer]
+                } else if (s.repeat == RepeatMode.ALL) {
+                    shufflePointer = order.lastIndex
+                    order[shufflePointer]
+                } else {
+                    seekTo(0)
+                    _state.value = _state.value.copy(isPlaying = true, error = null)
+                    return@runWhenLoaded
+                }
                 resetPosition(0L)
                 update(
                     s.copy(
@@ -481,17 +511,22 @@ class QueueManager(
                 moved = true
                 return@runWhenLoaded
             }
-            if (s.index <= 0) {
-                // Already on the first song: restart it in place (a same-index "load" would never run
-                // and would leave the buffering spinner stuck).
-                seekTo(0)
-                _state.value = _state.value.copy(isPlaying = true, error = null)
-                return@runWhenLoaded
+
+            val prevIndex = when {
+                s.index > 0 -> s.index - 1
+                s.repeat == RepeatMode.ALL && s.queue.size > 1 -> s.queue.size - 1
+                else -> {
+                    // Already at the first song without repeat all: restart it in place
+                    seekTo(0)
+                    _state.value = _state.value.copy(isPlaying = true, error = null)
+                    return@runWhenLoaded
+                }
             }
+
             resetPosition(0L)
             update(
                 s.copy(
-                    index = s.index - 1,
+                    index = prevIndex,
                     isPlaying = true,
                     isBuffering = true,
                     error = null,

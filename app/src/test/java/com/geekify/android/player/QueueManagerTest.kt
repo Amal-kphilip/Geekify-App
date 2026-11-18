@@ -208,6 +208,64 @@ class QueueManagerTest {
     }
 
     @Test
+    fun `previous restarts song when progress greater than 3s on first press and skips on second rapid press`() = runBlocking {
+        val store = FakePreferencesDataStore()
+        val manager = QueueManager(store, Dispatchers.Unconfined, debounceMs = 0L)
+        manager.awaitLoaded()
+
+        val tracks = listOf(track("t0"), track("t1"), track("t2"))
+        manager.play(tracks[1], tracks) // index 1 ("t1")
+        assertEquals(1, manager.state.value.index)
+
+        // First press at 15s into the track -> restarts track (seeks to 0, stays at index 1)
+        val firstResult = manager.previous(progressSeconds = 15)
+        assertFalse("First press past 3s should rewind rather than change track index", firstResult)
+        assertEquals(1, manager.state.value.index)
+
+        // Immediate second press (rapid press within 2.5s) -> skips to previous track (index 0)
+        val secondResult = manager.previous(progressSeconds = 15)
+        assertTrue("Rapid second press must skip to previous track index", secondResult)
+        assertEquals(0, manager.state.value.index)
+        assertEquals("t0", manager.state.value.current?.videoId)
+    }
+
+    @Test
+    fun `previous immediately skips to previous track when progress is within 3s`() = runBlocking {
+        val store = FakePreferencesDataStore()
+        val manager = QueueManager(store, Dispatchers.Unconfined, debounceMs = 0L)
+        manager.awaitLoaded()
+
+        val tracks = listOf(track("t0"), track("t1"), track("t2"))
+        manager.play(tracks[2], tracks) // index 2 ("t2")
+        assertEquals(2, manager.state.value.index)
+
+        // Single press at 2s into the track -> immediately skips to index 1 ("t1")
+        val result = manager.previous(progressSeconds = 2)
+        assertTrue(result)
+        assertEquals(1, manager.state.value.index)
+        assertEquals("t1", manager.state.value.current?.videoId)
+    }
+
+    @Test
+    fun `previous wraps to last track when at first track with repeat ALL`() = runBlocking {
+        val store = FakePreferencesDataStore()
+        val manager = QueueManager(store, Dispatchers.Unconfined, debounceMs = 0L)
+        manager.awaitLoaded()
+
+        val tracks = listOf(track("t0"), track("t1"), track("t2"))
+        manager.play(tracks[0], tracks) // index 0
+        manager.cycleRepeat() // OFF -> ALL
+        assertEquals(RepeatMode.ALL, manager.state.value.repeat)
+        assertEquals(0, manager.state.value.index)
+
+        // Previous from index 0 with repeat ALL wraps to index 2
+        val result = manager.previous(progressSeconds = 1)
+        assertTrue(result)
+        assertEquals(2, manager.state.value.index)
+        assertEquals("t2", manager.state.value.current?.videoId)
+    }
+
+    @Test
     fun `playShuffled initializes queue with random track and shuffle mode true`() = runBlocking {
         val store = FakePreferencesDataStore()
         val manager = QueueManager(store, Dispatchers.Unconfined, debounceMs = 0L)
