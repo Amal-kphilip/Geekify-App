@@ -24,6 +24,7 @@ object AsciiGpuSupport {
     fun disableGpu(reason: Throwable) {
         isGpuDisabled = true
         disableReason = reason.message ?: reason.javaClass.simpleName
+        android.util.Log.e("AsciiGpuSupport", "GPU disabled: ${reason.message}", reason)
     }
 
     /**

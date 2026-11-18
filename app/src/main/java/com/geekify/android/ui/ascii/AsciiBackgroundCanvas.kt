@@ -346,9 +346,10 @@ fun AsciiBackgroundCanvas(
 
                     // 2. Thread-safe tuning and animal synchronization
                     val currentCfg = configRef.get()
-                    val spec = AsciiCatalog.byId(currentCfg.animalId)
+                    val targetAnimalId = (if (com.geekify.android.BuildConfig.DEBUG) AsciiCalibration.forcedAnimal else null) ?: currentCfg.animalId
+                    val spec = AsciiCatalog.byId(targetAnimalId)
                     engine.tuning.syncFrom(currentCfg, spec)
-                    engine.ensureAnimal(currentCfg.animalId)
+                    engine.ensureAnimal(targetAnimalId)
                     engine.renderer.trailColor[0] = spec.trailDarkR.toFloat()
                     engine.renderer.trailColor[1] = spec.trailDarkG.toFloat()
                     engine.renderer.trailColor[2] = spec.trailDarkB.toFloat()
@@ -362,12 +363,19 @@ fun AsciiBackgroundCanvas(
                     if (engine.simWidth > 1f && engine.simHeight > 1f) {
                         engine.timeSec += dt
                         engine.renderer.begin(dt, engine.timeSec)
-                        engine.simulation.step(dt, engine.timeSec, engine.renderer)
+                        if (com.geekify.android.BuildConfig.DEBUG && AsciiCalibration.isEnabled) {
+                            AsciiCalibration.populateCalibrationGrid(engine.renderer)
+                        } else {
+                            engine.simulation.step(dt, engine.timeSec, engine.renderer)
+                        }
 
                         val writeFrame = frameRing.nextWriteBuffer()
-                        if (AsciiGpuSupport.isSupported() && gpuRenderer != null) {
+                        val forceCpu = com.geekify.android.BuildConfig.DEBUG && AsciiCalibration.activePath == "cpu"
+                        val currentGpu = gpuRenderer
+                        val useGpu = !forceCpu && AsciiGpuSupport.isSupported() && currentGpu != null
+                        if (useGpu && currentGpu != null) {
                             writeFrame.copyFrom(engine.renderer, engine.timeSec)
-                            gpuRenderer.uploadFrame(writeFrame)
+                            currentGpu.uploadFrame(writeFrame)
                         } else {
                             writeFrame.record(engine.renderer, engine.timeSec)
                         }
@@ -479,8 +487,11 @@ fun AsciiBackgroundCanvas(
             frame.isBusy.set(true)
             var gpuDrawn = false
             try {
-                if (AsciiGpuSupport.isSupported() && gpuRenderer != null) {
-                    gpuDrawn = gpuRenderer.draw(native, frame, displayInterp, scaleFactor)
+                val forceCpu = com.geekify.android.BuildConfig.DEBUG && AsciiCalibration.activePath == "cpu"
+                val currentGpu = gpuRenderer
+                val useGpu = !forceCpu && AsciiGpuSupport.isSupported() && currentGpu != null
+                if (useGpu && currentGpu != null) {
+                    gpuDrawn = currentGpu.draw(native, frame, displayInterp, scaleFactor)
                 }
                 if (!gpuDrawn) {
                     if (frame.bitmap == null) {
@@ -497,6 +508,9 @@ fun AsciiBackgroundCanvas(
                             frame.renderFallback(native, fallbackFillPaint, fallbackTextPaint, fallbackCharBuf)
                         }
                     }
+                }
+                if (com.geekify.android.BuildConfig.DEBUG) {
+                    android.util.Log.d("AsciiRenderPath", "Render path: ${if (gpuDrawn) "GPU" else "CPU"} | API=${android.os.Build.VERSION.SDK_INT} | isSupported=${AsciiGpuSupport.isSupported()} | isPreview=$isPreview | calib=${AsciiCalibration.activePath} | disableReason=${AsciiGpuSupport.disableReason}")
                 }
             } finally {
                 frame.isBusy.set(false)

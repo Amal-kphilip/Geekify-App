@@ -8,7 +8,6 @@ import android.graphics.RuntimeShader
 import android.graphics.Shader
 import android.os.Build
 import androidx.annotation.RequiresApi
-import java.nio.IntBuffer
 
 /**
  * GPU hardware-accelerated ASCII renderer using Android 13+ AGSL RuntimeShader.
@@ -52,12 +51,12 @@ half4 main(float2 fragCoord) {
     float localY = fragCoord.y - row * uCellSize.y;
 
     float2 cellCoord = float2(col + 0.5, row + 0.5);
-    half4 currA = sample(uCellCurrA, cellCoord);
-    half4 currB = sample(uCellCurrB, cellCoord);
-    half4 currC = sample(uCellCurrC, cellCoord);
-    half4 prevA = sample(uCellPrevA, cellCoord);
-    half4 prevB = sample(uCellPrevB, cellCoord);
-    half4 prevC = sample(uCellPrevC, cellCoord);
+    half4 currA = uCellCurrA.eval(cellCoord);
+    half4 currB = uCellCurrB.eval(cellCoord);
+    half4 currC = uCellCurrC.eval(cellCoord);
+    half4 prevA = uCellPrevA.eval(cellCoord);
+    half4 prevB = uCellPrevB.eval(cellCoord);
+    half4 prevC = uCellPrevC.eval(cellCoord);
 
     // 1. Solid background
     half3 bg = uActiveBg / 255.0;
@@ -127,7 +126,7 @@ half4 main(float2 fragCoord) {
         if (u >= 0.0 && u < 1.0 && v >= 0.0 && v < 1.0) {
             float atlasX = (fCol + u) * uAtlasCell.x;
             float atlasY = (fRow + v) * uAtlasCell.y;
-            half glyphAlpha = sample(uAtlas, float2(atlasX, atlasY)).a;
+            half glyphAlpha = uAtlas.eval(float2(atlasX, atlasY)).a;
             color = mix(color, textCol, glyphAlpha);
         }
     }
@@ -143,9 +142,9 @@ half4 main(float2 fragCoord) {
     private var cols = 0
     private var rows = 0
 
-    private var currBitmapA: Bitmap? = null
-    private var currBitmapB: Bitmap? = null
-    private var currBitmapC: Bitmap? = null
+    internal var currBitmapA: Bitmap? = null
+    internal var currBitmapB: Bitmap? = null
+    internal var currBitmapC: Bitmap? = null
     private var prevBitmapA: Bitmap? = null
     private var prevBitmapB: Bitmap? = null
     private var prevBitmapC: Bitmap? = null
@@ -163,13 +162,6 @@ half4 main(float2 fragCoord) {
     private var prevPixelsA: IntArray = IntArray(0)
     private var prevPixelsB: IntArray = IntArray(0)
     private var prevPixelsC: IntArray = IntArray(0)
-
-    private var bufferCurrA: IntBuffer? = null
-    private var bufferCurrB: IntBuffer? = null
-    private var bufferCurrC: IntBuffer? = null
-    private var bufferPrevA: IntBuffer? = null
-    private var bufferPrevB: IntBuffer? = null
-    private var bufferPrevC: IntBuffer? = null
 
     init {
         try {
@@ -195,13 +187,6 @@ half4 main(float2 fragCoord) {
         prevPixelsA = IntArray(total)
         prevPixelsB = IntArray(total)
         prevPixelsC = IntArray(total)
-
-        bufferCurrA = IntBuffer.wrap(currPixelsA)
-        bufferCurrB = IntBuffer.wrap(currPixelsB)
-        bufferCurrC = IntBuffer.wrap(currPixelsC)
-        bufferPrevA = IntBuffer.wrap(prevPixelsA)
-        bufferPrevB = IntBuffer.wrap(prevPixelsB)
-        bufferPrevC = IntBuffer.wrap(prevPixelsC)
 
         currBitmapA?.recycle()
         currBitmapB?.recycle()
@@ -241,7 +226,7 @@ half4 main(float2 fragCoord) {
      * Updates frame cell textures on simulation tick.
      */
     fun uploadFrame(frame: AsciiFrame) {
-        if (!AsciiGpuSupport.isSupported() || frame.cols <= 0 || frame.rows <= 0) return
+        if (frame.cols <= 0 || frame.rows <= 0) return
 
         try {
             ensureBitmaps(frame.cols, frame.rows)
@@ -251,12 +236,9 @@ half4 main(float2 fragCoord) {
             System.arraycopy(currPixelsB, 0, prevPixelsB, 0, currPixelsB.size)
             System.arraycopy(currPixelsC, 0, prevPixelsC, 0, currPixelsC.size)
 
-            bufferPrevA?.position(0)
-            bufferPrevB?.position(0)
-            bufferPrevC?.position(0)
-            prevBitmapA?.copyPixelsFromBuffer(bufferPrevA!!)
-            prevBitmapB?.copyPixelsFromBuffer(bufferPrevB!!)
-            prevBitmapC?.copyPixelsFromBuffer(bufferPrevC!!)
+            prevBitmapA?.setPixels(prevPixelsA, 0, frame.cols, 0, 0, frame.cols, frame.rows)
+            prevBitmapB?.setPixels(prevPixelsB, 0, frame.cols, 0, 0, frame.cols, frame.rows)
+            prevBitmapC?.setPixels(prevPixelsC, 0, frame.cols, 0, 0, frame.cols, frame.rows)
 
             // Populate current
             val total = frame.cols * frame.rows
@@ -286,12 +268,9 @@ half4 main(float2 fragCoord) {
                 currPixelsC[i] = (0xFF shl 24) or (safeGlyph shl 16) or (eByte shl 8) or isSolidByte
             }
 
-            bufferCurrA?.position(0)
-            bufferCurrB?.position(0)
-            bufferCurrC?.position(0)
-            currBitmapA?.copyPixelsFromBuffer(bufferCurrA!!)
-            currBitmapB?.copyPixelsFromBuffer(bufferCurrB!!)
-            currBitmapC?.copyPixelsFromBuffer(bufferCurrC!!)
+            currBitmapA?.setPixels(currPixelsA, 0, frame.cols, 0, 0, frame.cols, frame.rows)
+            currBitmapB?.setPixels(currPixelsB, 0, frame.cols, 0, 0, frame.cols, frame.rows)
+            currBitmapC?.setPixels(currPixelsC, 0, frame.cols, 0, 0, frame.cols, frame.rows)
         } catch (t: Throwable) {
             AsciiGpuSupport.disableGpu(t)
         }

@@ -70,6 +70,14 @@ class MainActivity : ComponentActivity() {
         triggerUpdateCheck = intent?.getBooleanExtra(GeekifyNotifier.EXTRA_TRIGGER_UPDATE_CHECK, false) == true
         intent?.removeExtra(GeekifyNotifier.EXTRA_ROUTE)
         intent?.removeExtra(GeekifyNotifier.EXTRA_TRIGGER_UPDATE_CHECK)
+        if (BuildConfig.DEBUG) {
+            intent?.getStringExtra("ascii_calibrate")?.let { mode ->
+                com.geekify.android.ui.ascii.AsciiCalibration.activePath = if (mode == "off") null else mode
+            }
+            intent?.getStringExtra("ascii_animal")?.let { animal ->
+                com.geekify.android.ui.ascii.AsciiCalibration.forcedAnimal = if (animal == "off") null else animal
+            }
+        }
 
         // Android 13+: without this the playback notification (and lock-screen controls) stay hidden.
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -92,6 +100,8 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        processDebugExtras(intent)
+
         setContent {
             GeekifyTheme {
                 MainScreen(
@@ -110,7 +120,44 @@ class MainActivity : ComponentActivity() {
         triggerUpdateCheck = intent.getBooleanExtra(GeekifyNotifier.EXTRA_TRIGGER_UPDATE_CHECK, false)
         intent.removeExtra(GeekifyNotifier.EXTRA_ROUTE)
         intent.removeExtra(GeekifyNotifier.EXTRA_TRIGGER_UPDATE_CHECK)
+        processDebugExtras(intent)
         setIntent(intent)
+    }
+
+    private fun processDebugExtras(intent: Intent?) {
+        if (!BuildConfig.DEBUG || intent == null) return
+        intent.getStringExtra("ascii_calibrate")?.let { mode ->
+            when (mode.lowercase()) {
+                "cpu" -> {
+                    com.geekify.android.ui.ascii.AsciiCalibration.activePath = "cpu"
+                    com.geekify.android.ui.ascii.AsciiCalibration.gridEnabled = true
+                }
+                "gpu" -> {
+                    com.geekify.android.ui.ascii.AsciiCalibration.activePath = "gpu"
+                    com.geekify.android.ui.ascii.AsciiCalibration.gridEnabled = true
+                }
+                "off" -> {
+                    com.geekify.android.ui.ascii.AsciiCalibration.activePath = null
+                    com.geekify.android.ui.ascii.AsciiCalibration.gridEnabled = false
+                }
+            }
+        }
+        intent.getStringExtra("ascii_path")?.let { path ->
+            when (path.lowercase()) {
+                "cpu" -> com.geekify.android.ui.ascii.AsciiCalibration.activePath = "cpu"
+                "gpu" -> com.geekify.android.ui.ascii.AsciiCalibration.activePath = "gpu"
+                "off", "default" -> com.geekify.android.ui.ascii.AsciiCalibration.activePath = null
+            }
+        }
+        intent.getStringExtra("ascii_animal")?.let { animal ->
+            com.geekify.android.ui.ascii.AsciiCalibration.forcedAnimal = if (animal == "off") null else animal
+        }
+        if (intent.hasExtra("glass_enabled")) {
+            val enabled = intent.getBooleanExtra("glass_enabled", true)
+            lifecycleScope.launch {
+                appSettings.setGlassEnabled(enabled)
+            }
+        }
     }
 
     override fun onStart() {

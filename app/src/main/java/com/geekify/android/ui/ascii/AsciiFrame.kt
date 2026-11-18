@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Picture
-import java.nio.IntBuffer
 import java.util.Arrays
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -67,7 +66,6 @@ class AsciiFrame(
 ) {
     val isBusy = AtomicBoolean(false)
     private var pixelBuffer: IntArray = IntArray(0)
-    private var wrappedIntBuffer: IntBuffer? = null
 
     fun copyFrom(renderer: AsciiRenderer, time: Float) {
         width = renderer.width
@@ -127,7 +125,6 @@ class AsciiFrame(
         try {
             if (pixelBuffer.size != totalPixels) {
                 pixelBuffer = IntArray(totalPixels)
-                wrappedIntBuffer = IntBuffer.wrap(pixelBuffer)
             }
             var bmp = bitmap
             if (bmp == null || bmp.isRecycled || bmp.width != w || bmp.height != h) {
@@ -139,11 +136,14 @@ class AsciiFrame(
             val atlas = AsciiGlyphAtlas.getOrCreate(renderer.cw, renderer.ch)
             blit(renderer, time, atlas, pixelBuffer, w, h)
 
-            if (wrappedIntBuffer == null || wrappedIntBuffer!!.capacity() != totalPixels) {
-                wrappedIntBuffer = IntBuffer.wrap(pixelBuffer)
-            }
-            wrappedIntBuffer!!.position(0)
-            bmp.copyPixelsFromBuffer(wrappedIntBuffer!!)
+            // Android byte-order convention:
+            // Android Bitmap.Config.ARGB_8888 uses native kRGBA_8888_SkColorType in memory.
+            // On little-endian architectures (ARM64, x86_64), an IntArray of 0xAARRGGBB Color ints
+            // stores Byte 0 as Blue, Byte 1 as Green, Byte 2 as Red, and Byte 3 as Alpha.
+            // copyPixelsFromBuffer performs a raw memcpy without endianness conversion, causing Red and
+            // Blue channels to be swapped on display.
+            // Bitmap.setPixels performs the proper Color-int to native SkColorType conversion uniformly.
+            bmp.setPixels(pixelBuffer, 0, w, 0, 0, w, h)
             blitSuccess = true
         } catch (_: Throwable) {
             blitSuccess = false
