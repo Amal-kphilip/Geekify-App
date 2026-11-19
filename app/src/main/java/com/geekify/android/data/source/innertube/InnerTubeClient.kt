@@ -12,11 +12,7 @@ import okhttp3.Request
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
-import javax.inject.Inject
-import javax.inject.Singleton
-
-@Singleton
-class InnerTubeClient @Inject constructor(
+class InnerTubeClient constructor(
     private val http: OkHttpClient,
     private val innerTubeBackend: GeekifyInnerTubeBackend
 ) {
@@ -35,7 +31,7 @@ class InnerTubeClient @Inject constructor(
 
     /**
      * Lightweight player-response request used for metadata fallback. Actual audio-stream resolution
-     * is handled by [com.geekify.android.player.StreamResolver] through Metrolist's InnerTubeX
+     * is handled by [com.geekify.android.player.StreamResolver] through the InnerTubeX
      * extractor, which owns signature deciphering, token-aware client fallback and stream headers.
      */
     suspend fun playerStreams(videoId: String): JsonObject {

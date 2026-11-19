@@ -15,8 +15,6 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.concurrent.ConcurrentHashMap
-import javax.inject.Inject
-import javax.inject.Singleton
 
 enum class TimeOfDayPart {
     MORNING,    // 05:00 - 11:59
@@ -41,8 +39,7 @@ data class AggregatedListeningSignals(
  * Real-time listening behavior model that captures granular playback interactions,
  * computes temporal and skip signals, and respects user privacy preferences.
  */
-@Singleton
-class ListeningBehaviorManager @Inject constructor(
+class ListeningBehaviorManager constructor(
     private val statsRepository: ListeningStatsRepository,
     private val appSettings: AppSettingsRepository
 ) {

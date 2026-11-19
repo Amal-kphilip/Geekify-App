@@ -37,7 +37,7 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
- * Compatibility facade that keeps Metrolist's parsed response models while InnerTubeX owns
+ * Compatibility facade that keeps Geekify's parsed response models while InnerTubeX owns
  * YouTube request construction, session handling, retries, and authenticated mutations.
  */
 class InnerTube(

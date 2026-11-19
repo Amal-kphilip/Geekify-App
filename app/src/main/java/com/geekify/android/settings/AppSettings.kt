@@ -10,6 +10,10 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.geekify.android.customization.CustomizationCategory
+import com.geekify.android.customization.CustomizationPersistence
+import com.geekify.android.customization.CustomizationState
+import com.geekify.android.customization.GlassPreset
 import com.geekify.android.ui.ascii.AsciiBackgroundConfig
 import com.geekify.android.ui.ascii.MAX_ASCII_DETAIL
 import com.geekify.android.ui.ascii.MIN_ASCII_GRID
@@ -22,8 +26,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import javax.inject.Inject
-import javax.inject.Singleton
 
 enum class AudioQualityPreference(val label: String, val subtitle: String) {
     AUTO("Automatic", "Adapts to Wi-Fi and mobile data"),
@@ -69,14 +71,15 @@ data class AppSettingsState(
 
     // Privacy
     val pauseListenHistory: Boolean = false,
-    val disableScreenshots: Boolean = false
+    val disableScreenshots: Boolean = false,
+
+    // Centralized Customization & Personalization
+    val customization: CustomizationState = CustomizationState()
 )
 
 val LocalGlassConfig = staticCompositionLocalOf { GlassConfig() }
 val LocalAppSettings = staticCompositionLocalOf { AppSettingsState() }
-
-@Singleton
-class AppSettingsRepository @Inject constructor(
+class AppSettingsRepository constructor(
     private val dataStore: DataStore<Preferences>
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -174,7 +177,8 @@ class AppSettingsRepository @Inject constructor(
                 contentLanguage = prefs[KEY_CONTENT_LANGUAGE] ?: "en",
                 hideExplicit = prefs[KEY_HIDE_EXPLICIT] ?: false,
                 pauseListenHistory = prefs[KEY_PAUSE_LISTEN_HISTORY] ?: false,
-                disableScreenshots = prefs[KEY_DISABLE_SCREENSHOTS] ?: false
+                disableScreenshots = prefs[KEY_DISABLE_SCREENSHOTS] ?: false,
+                customization = CustomizationPersistence.fromPreferences(prefs)
             )
         }
     }
@@ -370,6 +374,46 @@ class AppSettingsRepository @Inject constructor(
             keysToRemove.forEach { currentMap.remove(it) }
             prefs[KEY_ASCII_PARAMS_RAW] = encodeAsciiParams(currentMap)
         }
+    }
+
+    suspend fun editCustomization(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
+        dataStore.edit { prefs -> block(prefs) }
+    }
+
+    suspend fun applyGlassPreset(preset: GlassPreset) {
+        dataStore.edit { prefs ->
+            prefs[CustomizationPersistence.KEY_GLASS_PRESET] = preset.name
+            if (preset != GlassPreset.CUSTOM) {
+                val cfg = preset.config
+                prefs[KEY_GLASS_ENABLED] = cfg.enabled
+                prefs[KEY_GLASS_BLUR_DP] = cfg.blurDp
+                prefs[KEY_GLASS_SATURATION] = cfg.saturation
+                prefs[KEY_GLASS_LENS_AMOUNT_DP] = cfg.lensAmountDp
+                prefs[KEY_GLASS_LENS_HEIGHT_DP] = cfg.lensHeightDp
+                prefs[KEY_GLASS_CHROMATIC] = cfg.chromaticAberration
+                prefs[KEY_GLASS_DEPTH] = cfg.depthEffect
+                prefs[KEY_GLASS_TINT_ALPHA] = cfg.tintAlpha
+            }
+        }
+    }
+
+    suspend fun resetCustomizationCategory(category: CustomizationCategory) {
+        dataStore.edit { prefs ->
+            CustomizationPersistence.resetCategory(prefs, category)
+        }
+        if (category == CustomizationCategory.LIQUID_GLASS) {
+            resetGlassDefaults()
+        } else if (category == CustomizationCategory.ASCII_BACKGROUND) {
+            resetAsciiDefaults(state.value.ascii.animalId)
+        }
+    }
+
+    suspend fun resetAllCustomization() {
+        dataStore.edit { prefs ->
+            CustomizationPersistence.resetAll(prefs)
+        }
+        resetGlassDefaults()
+        resetAsciiDefaults(state.value.ascii.animalId)
     }
 }
 

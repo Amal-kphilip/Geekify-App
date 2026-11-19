@@ -32,7 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -125,11 +125,11 @@ private data class NavTab(
 @Composable
 fun MainScreen(
     navController: NavHostController = rememberNavController(),
-    playerViewModel: PlayerViewModel = hiltViewModel(),
-    accountViewModel: AccountViewModel = hiltViewModel(),
-    libraryViewModel: LibraryViewModel = hiltViewModel(),
-    settingsViewModel: SettingsViewModel = hiltViewModel(),
-    updateViewModel: UpdateViewModel = hiltViewModel(),
+    playerViewModel: PlayerViewModel = koinViewModel(),
+    accountViewModel: AccountViewModel = koinViewModel(),
+    libraryViewModel: LibraryViewModel = koinViewModel(),
+    settingsViewModel: SettingsViewModel = koinViewModel(),
+    updateViewModel: UpdateViewModel = koinViewModel(),
     startRoute: String? = null,
     onStartRouteConsumed: () -> Unit = {},
     triggerUpdateCheck: Boolean = false,
@@ -191,6 +191,8 @@ fun MainScreen(
             Screen.ListenTogether.route -> navController.navigate(Screen.ListenTogether.route) { launchSingleTop = true }
             Screen.AudioSettings.route -> navController.navigate(Screen.AudioSettings.route) { launchSingleTop = true }
             Screen.Settings.route -> navController.navigate(Screen.Settings.route) { launchSingleTop = true }
+            Screen.Recognition.route -> navController.navigate(Screen.Recognition.route) { launchSingleTop = true }
+            Screen.Downloads.route -> navController.navigate(Screen.Downloads.route) { launchSingleTop = true }
             else -> Unit
         }
         if (startRoute != null) onStartRouteConsumed()
@@ -218,6 +220,10 @@ fun MainScreen(
             "album" -> {
                 val id = card.browseId ?: card.id
                 navController.navigate(Screen.Collection.createRoute(id, CollectionKind.ALBUM.name))
+            }
+            "local_playlist" -> {
+                val id = card.playlistId ?: card.id
+                navController.navigate(Screen.Playlist.createRoute(id, android.net.Uri.encode(card.title)))
             }
             "playlist" -> {
                 val id = card.playlistId ?: card.id
@@ -252,20 +258,48 @@ fun MainScreen(
         scrollConnection.setInlineLocked(currentRoute == Screen.Settings.route)
     }
 
+    val orderedVisibleTabs = remember(appSettingsState.customization.navigation.visibleTabs) {
+        appSettingsState.customization.navigation.safeVisibleTabs
+    }
+    val enabledPrimaryRoutes = remember(orderedVisibleTabs) {
+        orderedVisibleTabs.filter { it != com.geekify.android.customization.NavTabId.CREATE }.map { it.route }.toSet()
+    }
+    val fallbackPrimaryRoute = remember(orderedVisibleTabs) {
+        orderedVisibleTabs.firstOrNull { it != com.geekify.android.customization.NavTabId.CREATE }?.route ?: Screen.Home.route
+    }
+
     var appliedDefaultTab by remember { mutableStateOf(false) }
-    LaunchedEffect(appSettingsState.defaultTab) {
+    LaunchedEffect(appSettingsState.defaultTab, enabledPrimaryRoutes) {
         if (!appliedDefaultTab) {
             appliedDefaultTab = true
             if (startRoute == null) {
-                when (appSettingsState.defaultTab) {
-                    "search" -> navController.navigate(Screen.Search.route) { launchSingleTop = true }
-                    "library" -> navController.navigate(Screen.Library.route) { launchSingleTop = true }
+                val target = appSettingsState.defaultTab.takeIf { it in enabledPrimaryRoutes } ?: fallbackPrimaryRoute
+                if (target != Screen.Home.route) {
+                    navController.navigate(target) { launchSingleTop = true }
                 }
             }
         }
     }
 
-    val navigateToTab: (String) -> Unit = { route ->
+    // If the currently active primary tab destination is disabled in Personalization Studio,
+    // immediately redirect to the first enabled primary destination.
+    LaunchedEffect(currentRoute, enabledPrimaryRoutes, fallbackPrimaryRoute) {
+        val primaryTabRoutes = setOf(Screen.Home.route, Screen.Library.route, Screen.Search.route)
+        if (currentRoute in primaryTabRoutes && currentRoute !in enabledPrimaryRoutes) {
+            navController.navigate(fallbackPrimaryRoute) {
+                launchSingleTop = true
+                restoreState = false
+            }
+        }
+    }
+
+    val navigateToTab: (String) -> Unit = { requestedTabRoute ->
+        val primaryTabRoutes = setOf(Screen.Home.route, Screen.Library.route, Screen.Search.route)
+        val route = if (requestedTabRoute in primaryTabRoutes && requestedTabRoute !in enabledPrimaryRoutes) {
+            fallbackPrimaryRoute
+        } else {
+            requestedTabRoute
+        }
         scrollConnection.expand()
         when (route) {
             Screen.Home.route -> {
@@ -337,6 +371,7 @@ fun MainScreen(
         label = "floatingBarsHeight"
     )
 
+    val activeGlobalFont = AppFont
     CompositionLocalProvider(
         LocalNowPlayingId provides playerState.current?.videoId,
         LocalIsPlaying provides playerState.isPlaying,
@@ -345,7 +380,9 @@ fun MainScreen(
         LocalGlassOverlayHost provides overlayHost,
         LocalGlassBackdrop provides contentBackdrop,
         LocalAppSettings provides appSettingsState,
-        LocalGlassConfig provides appSettingsState.glass
+        LocalGlassConfig provides appSettingsState.glass,
+        com.geekify.android.customization.LocalCustomizationState provides appSettingsState.customization,
+        LocalTextStyle provides LocalTextStyle.current.copy(fontFamily = activeGlobalFont)
     ) {
     Box(modifier = Modifier.fillMaxSize().background(InkBackground)) {
       // ---- SCENE: everything that sits underneath popups / dialogs / panels ----
@@ -376,7 +413,7 @@ fun MainScreen(
                     popExitTransition = { fadeOut(tween(160)) }
                 ) {
                     composable(Screen.Home.route) {
-                        val homeVm: HomeViewModel = hiltViewModel()
+                        val homeVm: HomeViewModel = koinViewModel()
                         HomeScreen(
                             viewModel = homeVm,
                             photoUrl = avatarUrl,
@@ -394,7 +431,7 @@ fun MainScreen(
                     }
 
                     composable(Screen.Search.route) {
-                        val searchVm: SearchViewModel = hiltViewModel()
+                        val searchVm: SearchViewModel = koinViewModel()
                         SearchScreen(
                             viewModel = searchVm,
                             photoUrl = avatarUrl,
@@ -402,12 +439,13 @@ fun MainScreen(
                             onAvatarClick = { showAccountSheet = true },
                             onTrackClick = onTrackClick,
                             onTrackActions = onTrackActions,
-                            onCardClick = onCardClick
+                            onCardClick = onCardClick,
+                            onRecognitionClick = { navController.navigate(Screen.Recognition.route) }
                         )
                     }
 
                     composable(Screen.Library.route) {
-                        val libraryVm: LibraryViewModel = hiltViewModel()
+                        val libraryVm: LibraryViewModel = koinViewModel()
                         LibraryScreen(
                             viewModel = libraryVm,
                             photoUrl = avatarUrl,
@@ -417,12 +455,14 @@ fun MainScreen(
                             onPlaylistClick = { id, name -> navController.navigate(Screen.Playlist.createRoute(id, name)) },
                             onCollectionClick = { id, kind -> navController.navigate(Screen.Collection.createRoute(id, kind)) },
                             onBack = { navigateToTab(Screen.Home.route) },
-                            onPlayTracks = { list -> list.firstOrNull()?.let { first -> playerViewModel.play(first, list) } }
+                            onPlayTracks = { list -> list.firstOrNull()?.let { first -> playerViewModel.play(first, list) } },
+                            onDownloadsClick = { navController.navigate(Screen.Downloads.route) },
+                            onRecognitionClick = { navController.navigate(Screen.Recognition.route) }
                         )
                     }
 
                     composable(Screen.Liked.route) {
-                        val libraryVm: LibraryViewModel = hiltViewModel()
+                        val libraryVm: LibraryViewModel = koinViewModel()
                         LikedScreen(
                             viewModel = libraryVm,
                             onBack = { navController.popBackStack() },
@@ -440,7 +480,7 @@ fun MainScreen(
                     ) { entry ->
                         val id = entry.arguments?.getString("id") ?: ""
                         val name = entry.arguments?.getString("name") ?: "Playlist"
-                        val libraryVm: LibraryViewModel = hiltViewModel()
+                        val libraryVm: LibraryViewModel = koinViewModel()
                         PlaylistScreen(
                             playlistId = id,
                             playlistName = name,
@@ -456,7 +496,7 @@ fun MainScreen(
                         arguments = listOf(navArgument("id") { type = NavType.StringType })
                     ) { entry ->
                         val id = entry.arguments?.getString("id") ?: ""
-                        val detailsVm: DetailsViewModel = hiltViewModel()
+                        val detailsVm: DetailsViewModel = koinViewModel()
                         ArtistScreen(
                             artistId = id,
                             viewModel = detailsVm,
@@ -477,7 +517,7 @@ fun MainScreen(
                         val id = entry.arguments?.getString("id") ?: ""
                         val kindStr = entry.arguments?.getString("kind") ?: CollectionKind.PLAYLIST.name
                         val kind = runCatching { CollectionKind.valueOf(kindStr) }.getOrDefault(CollectionKind.PLAYLIST)
-                        val detailsVm: DetailsViewModel = hiltViewModel()
+                        val detailsVm: DetailsViewModel = koinViewModel()
                         CollectionScreen(
                             id = id,
                             kind = kind,
@@ -492,7 +532,7 @@ fun MainScreen(
                     }
 
                     composable(Screen.Health.route) {
-                        val healthVm: HealthViewModel = hiltViewModel()
+                        val healthVm: HealthViewModel = koinViewModel()
                         HealthScreen(
                             viewModel = healthVm,
                             onBack = { navController.popBackStack() }
@@ -500,7 +540,7 @@ fun MainScreen(
                     }
 
                     composable(Screen.Recents.route) {
-                        val recentsVm: RecentsViewModel = hiltViewModel()
+                        val recentsVm: RecentsViewModel = koinViewModel()
                         RecentsScreen(recentsVm, onBack = { navController.popBackStack() }, onPlay = onTrackClick)
                     }
 
@@ -508,9 +548,29 @@ fun MainScreen(
                         ListeningStatsScreen(onBack = { navController.popBackStack() })
                     }
 
+                    composable(Screen.Recognition.route) {
+                        com.geekify.android.ui.recognition.RecognitionScreen(
+                            onBack = { navController.popBackStack() },
+                            onPlayTrack = { track -> playerViewModel.play(track) }
+                        )
+                    }
+
+                    composable(Screen.Downloads.route) {
+                        com.geekify.android.ui.downloads.DownloadsScreen(
+                            onBack = { navController.popBackStack() },
+                            onPlayTrack = { track -> playerViewModel.play(track) },
+                            onPlayAllOffline = { tracks ->
+                                tracks.firstOrNull()?.let { first -> playerViewModel.play(first, tracks) }
+                            }
+                        )
+                    }
+
                     composable(Screen.Settings.route) {
                         SettingsScreen(
                             onBack = { navController.popBackStack() },
+                            onPersonalizationClick = { category ->
+                                navController.navigate(Screen.Personalization.createRoute(category?.name))
+                            },
                             onAudioClick = { navController.navigate(Screen.AudioSettings.route) },
                             onAppIconClick = { navController.navigate(Screen.AppIconSettings.route) },
                             onProfileClick = { showAccountSheet = true },
@@ -518,10 +578,33 @@ fun MainScreen(
                             onListeningStatsClick = { navController.navigate(Screen.ListeningStats.route) },
                             onRecentsClick = { navController.navigate(Screen.Recents.route) },
                             onHealthClick = { navController.navigate(Screen.Health.route) },
+                            onDownloadsClick = { navController.navigate(Screen.Downloads.route) },
                             onCheckUpdatesClick = {
                                 updateViewModel.checkForUpdates(userInitiated = true)
                             },
                             currentUser = accountState.user
+                        )
+                    }
+
+                    composable(
+                        route = Screen.Personalization.route,
+                        arguments = listOf(
+                            navArgument("category") {
+                                type = NavType.StringType
+                                nullable = true
+                                defaultValue = null
+                            }
+                        )
+                    ) { entry ->
+                        val catArg = entry.arguments?.getString("category")
+                        val initialCat = catArg?.let {
+                            runCatching { com.geekify.android.customization.CustomizationCategory.valueOf(it) }.getOrNull()
+                        }
+                        com.geekify.android.customization.CustomizationSettingsScreen(
+                            onBack = { navController.popBackStack() },
+                            onOpenAppIconPicker = { navController.navigate(Screen.AppIconSettings.route) },
+                            onOpenEqualizer = { navController.navigate(Screen.AudioSettings.route) },
+                            initialCategory = initialCat
                         )
                     }
 
@@ -612,7 +695,7 @@ fun MainScreen(
       CompositionLocalProvider(LocalGlassBackdrop provides sceneBackdrop) {
         // Create playlist (from the "Create" tab)
         if (showCreatePlaylist) {
-            val createVm: LibraryViewModel = hiltViewModel()
+            val createVm: LibraryViewModel = koinViewModel()
             CreatePlaylistDialog(
                 onDismiss = { showCreatePlaylist = false },
                 onCreate = {
@@ -624,6 +707,7 @@ fun MainScreen(
 
         actionTrack?.let { track ->
             val scope = rememberCoroutineScope()
+            val downloadManager: com.geekify.android.downloads.SongDownloadManager = org.koin.compose.koinInject()
             TrackActionsDialog(
                 track = track,
                 liked = likedTracks.any { it.videoId == track.videoId },
@@ -631,6 +715,8 @@ fun MainScreen(
                 onDismiss = { actionTrack = null },
                 onToggleLike = { libraryViewModel.toggleLike(track) },
                 onAddToQueue = { playerViewModel.addToQueue(track) },
+                onPlayNext = { playerViewModel.playNext(track) },
+                onDownload = { downloadManager.enqueue(track) },
                 onAddToPlaylist = { playlistId -> libraryViewModel.addToPlaylist(playlistId, track) },
                 onCreatePlaylist = { name -> libraryViewModel.createPlaylistWithTrack(name, track) },
                 onMoreLikeThis = {
@@ -667,6 +753,8 @@ fun MainScreen(
                 onAddAccountClick = { navController.navigate(Screen.AddAccount.route) },
                 onListenTogetherClick = { navController.navigate(Screen.ListenTogether.route) },
                 onListeningStatsClick = { navController.navigate(Screen.ListeningStats.route) },
+                onDownloadsClick = { navController.navigate(Screen.Downloads.route) },
+                onRecognitionClick = { navController.navigate(Screen.Recognition.route) },
                 onHealthClick = { navController.navigate(Screen.Health.route) }
             )
         }

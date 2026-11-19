@@ -2,12 +2,12 @@ package com.geekify.android.notifications
 
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
-import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 import timber.log.Timber
-import javax.inject.Inject
 
 /**
  * Immediate update-notification path, modeled on Morphe Manager.
@@ -16,10 +16,9 @@ import javax.inject.Inject
  * checked against the same numeric version-code scheme as ReleaseParser; the notification tap
  * performs a fresh GitHub release check before showing Geekify's existing update dialog.
  */
-@AndroidEntryPoint
-class GeekifyUpdateMessagingService : FirebaseMessagingService() {
+class GeekifyUpdateMessagingService : FirebaseMessagingService(), KoinComponent {
 
-    @Inject lateinit var coordinator: NotificationCoordinator
+    private val coordinator: NotificationCoordinator by inject()
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)

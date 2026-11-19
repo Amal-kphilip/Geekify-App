@@ -7,17 +7,13 @@ import androidx.media3.datasource.cache.SimpleCache
 import com.geekify.android.data.local.LibraryRepository
 import com.geekify.android.data.model.Track
 import com.geekify.android.domain.listening.ListeningBehaviorManager
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
-import javax.inject.Inject
-import javax.inject.Singleton
 
 @OptIn(UnstableApi::class)
-@Singleton
-class OfflineIntelligenceManager @Inject constructor(
-    @ApplicationContext private val context: Context,
+class OfflineIntelligenceManager constructor(
+    private val context: Context,
     private val audioCache: SimpleCache,
     private val libraryRepository: LibraryRepository,
     private val listeningBehaviorManager: ListeningBehaviorManager

@@ -4,22 +4,18 @@ import com.geekify.android.data.model.ArtistPage
 import com.geekify.android.data.model.CollectionPage
 import com.geekify.android.data.model.Track
 import com.geekify.android.data.source.MusicResult
-import com.geekify.android.di.IoDispatcher
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Local-first catalog: everything the app loads from the network (search results, albums, artists) is
  * written here, so metadata keeps working offline. Reads are Flows, so any screen collecting them updates
  * by itself whenever the cache changes. Writes return [MusicResult] instead of throwing.
  */
-@Singleton
-class CatalogRepository @Inject constructor(
+class CatalogRepository constructor(
     private val dao: CatalogDao,
-    @IoDispatcher private val io: CoroutineDispatcher
+    private val io: CoroutineDispatcher
 ) {
     fun observeTrack(videoId: String): Flow<Track?> = dao.observeTrack(videoId).map { it?.toTrack() }
     fun observeAlbums(): Flow<List<AlbumEntity>> = dao.observeAlbums()

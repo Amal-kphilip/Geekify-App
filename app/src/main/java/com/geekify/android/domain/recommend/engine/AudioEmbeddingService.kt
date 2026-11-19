@@ -3,8 +3,6 @@ package com.geekify.android.domain.recommend.engine
 import com.geekify.android.data.model.Track
 import com.geekify.android.domain.listening.ListeningLanguageClassifier
 import java.util.Locale
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -48,8 +46,7 @@ data class AudioEmbeddingResult(
  *   and sonic cadence into the same 32-D latent space so cross-language tracks with similar sonic
  *   profiles have high cosine similarity, and transparently marks `source = METADATA_STRUCTURAL_PROJECTION`.
  */
-@Singleton
-class AudioEmbeddingService @Inject constructor(
+class AudioEmbeddingService constructor(
     private val classificationService: MusicClassificationService
 ) {
     companion object {
@@ -264,8 +261,7 @@ enum class LyricsRepresentationSource {
  * hashing over track metadata (or optional authorized lyric snippets). It does NOT perform
  * deep natural-language lyric comprehension or full-song lyric analysis.
  */
-@Singleton
-class LyricsSemanticService @Inject constructor() {
+class LyricsSemanticService constructor() {
     companion object {
         const val SEMANTIC_DIM = 32
     }

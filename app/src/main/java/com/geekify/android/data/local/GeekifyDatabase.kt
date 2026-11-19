@@ -697,9 +697,10 @@ interface RecommendationEngineDao {
         TrackEntity::class, AlbumEntity::class, ArtistEntity::class, CachedShelfEntity::class, ListeningSessionEntity::class,
         RecentSearchEntity::class, RecommendationImpressionEntity::class, RecommendationOutcomeEntity::class,
         TrackFeatureEntity::class, UserPreferenceProfileEntity::class, ExperimentAssignmentEntity::class, CollaborativeInteractionEntity::class,
-        UserRecommendationFeedbackEntity::class
+        UserRecommendationFeedbackEntity::class,
+        CachedAudioEntity::class, DownloadEntity::class, RecognitionHistoryEntity::class, LyricsEntity::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -715,6 +716,10 @@ abstract class GeekifyDatabase : RoomDatabase() {
     abstract fun recommendationLogDao(): RecommendationLogDao
     abstract fun recommendationEngineDao(): RecommendationEngineDao
     abstract fun recommendationFeedbackDao(): RecommendationFeedbackDao
+    abstract fun cachedAudioDao(): CachedAudioDao
+    abstract fun downloadDao(): DownloadDao
+    abstract fun recognitionHistoryDao(): RecognitionHistoryDao
+    abstract fun lyricsDao(): LyricsDao
 }
 
 /** v2 -> v3: adds the offline catalog (tracks, albums, artists) and the cached home shelves. Nothing is dropped. */
@@ -927,5 +932,50 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
         db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_user_recommendation_feedback_targetType_targetId` ON `user_recommendation_feedback` (`targetType`, `targetId`)")
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_user_recommendation_feedback_action` ON `user_recommendation_feedback` (`action`)")
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_user_recommendation_feedback_createdAtMs` ON `user_recommendation_feedback` (`createdAtMs`)")
+    }
+}
+
+/** v10 -> v11: adds separated cached_audio, persistent downloads, recognition_history, and lyrics tables. */
+val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `cached_audio` (" +
+                "`videoId` TEXT NOT NULL, `kind` TEXT NOT NULL, `filePath` TEXT NOT NULL, " +
+                "`mimeType` TEXT NOT NULL, `contentLength` INTEGER NOT NULL, `durationMs` INTEGER NOT NULL, " +
+                "`title` TEXT NOT NULL, `artist` TEXT NOT NULL, `thumbnailUrl` TEXT, " +
+                "`createdAt` INTEGER NOT NULL, `lastAccessedAt` INTEGER NOT NULL, PRIMARY KEY(`videoId`))"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_cached_audio_kind_lastAccessedAt` ON `cached_audio` (`kind`, `lastAccessedAt`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_cached_audio_kind` ON `cached_audio` (`kind`)")
+
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `downloads` (" +
+                "`videoId` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, " +
+                "`thumbnailUrl` TEXT, `albumId` TEXT, `playlistId` TEXT, `status` TEXT NOT NULL, " +
+                "`progress` REAL NOT NULL, `bytesDownloaded` INTEGER NOT NULL, `totalBytes` INTEGER NOT NULL, " +
+                "`filePath` TEXT, `mimeType` TEXT, `errorMessage` TEXT, " +
+                "`createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`videoId`))"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_downloads_status_createdAt` ON `downloads` (`status`, `createdAt`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_downloads_playlistId` ON `downloads` (`playlistId`)")
+
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `recognition_history` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `trackId` TEXT NOT NULL, " +
+                "`title` TEXT NOT NULL, `artist` TEXT NOT NULL, `album` TEXT, `coverArtUrl` TEXT, " +
+                "`genre` TEXT, `releaseDate` TEXT, `label` TEXT, `shazamUrl` TEXT, " +
+                "`spotifyUrl` TEXT, `appleMusicUrl` TEXT, `isrc` TEXT, `youtubeVideoId` TEXT, " +
+                "`recognizedAt` INTEGER NOT NULL)"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_recognition_history_recognizedAt` ON `recognition_history` (`recognizedAt`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_recognition_history_trackId` ON `recognition_history` (`trackId`)")
+
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `lyrics` (" +
+                "`videoId` TEXT NOT NULL, `rawLyrics` TEXT NOT NULL, `provider` TEXT NOT NULL, " +
+                "`offsetMs` INTEGER NOT NULL, `translatedLyrics` TEXT, `translationLanguage` TEXT, " +
+                "`romanizedLyrics` TEXT, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`videoId`))"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_lyrics_updatedAt` ON `lyrics` (`updatedAt`)")
     }
 }

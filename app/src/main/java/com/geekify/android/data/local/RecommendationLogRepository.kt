@@ -1,11 +1,7 @@
 package com.geekify.android.data.local
 
 import java.util.concurrent.ConcurrentHashMap
-import javax.inject.Inject
-import javax.inject.Singleton
-
-@Singleton
-class RecommendationLogRepository @Inject constructor(
+class RecommendationLogRepository constructor(
     private val dao: RecommendationLogDao
 ) {
     private val recentOutcomeDedupe = ConcurrentHashMap<String, Long>()

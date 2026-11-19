@@ -20,7 +20,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import com.geekify.android.ui.theme.GeekifyIcons
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +35,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.geekify.android.customization.LocalCustomizationState
+import com.geekify.android.customization.NavBarStyle
+import com.geekify.android.customization.NavTabId
 import com.geekify.android.ui.components.bouncyClickable
 import com.geekify.android.ui.glass.GlassStyle
 import com.geekify.android.ui.glass.consumeTaps
@@ -45,6 +47,7 @@ import com.geekify.android.ui.glass.trackPress
 import com.geekify.android.ui.player.NowPlayingBar
 import com.geekify.android.ui.player.PlayerTransitionState
 import com.geekify.android.ui.player.PlayerViewModel
+import com.geekify.android.ui.theme.GeekifyIcons
 import com.geekify.android.ui.theme.Lime
 import kotlin.math.abs
 
@@ -158,15 +161,12 @@ class FloatingTabBarScrollConnection(
 }
 
 /**
- * Adaptive Liquid Glass Bottom Navigation Bar:
+ * Adaptive Liquid Glass Bottom Navigation Bar dynamically built from the user's ordered,
+ * enabled destinations ([NavTabId]).
  *
- * - EXPANDED (at top of page / initial):
- *   - Mini player capsule on top (height 64dp, if song active)
- *   - Row below (height 64dp): Main Tab Capsule (Home, Library, Create) + standalone circular Search button (64dp)
- *
- * - INLINE (when scrolling down):
- *   - Single row (height 56dp): [Active Tab Circle] (56dp) + [Compact Mini Player] (56dp) + [Search Circle] (56dp)
- *   - If no song active: [Active Tab Circle] + [Search Circle] centered
+ * - Renders ONLY the enabled destinations in their configured order.
+ * - Leaves zero empty slots, invisible composables, or unexplained gaps when destinations are hidden.
+ * - Distributes all remaining destinations evenly across the capsule width.
  */
 @Composable
 fun AdaptiveBottomBar(
@@ -186,15 +186,42 @@ fun AdaptiveBottomBar(
 ) {
     val playerState by playerViewModel.state.collectAsState()
     val hasPlayer = playerState.current != null && !miniPlayerDismissed
+    val navCust = LocalCustomizationState.current.navigation
+
+    // Single authoritative ordered collection of enabled destinations
+    val orderedTabs: List<NavTabId> = remember(navCust.visibleTabs) {
+        navCust.safeVisibleTabs
+    }
+
+    val barHeight = if (navCust.style == NavBarStyle.SLIM_PILL) 54.dp else 64.dp
     val isInline = scrollConnection.isInline
     val density = LocalDensity.current
     val navSlidePx = with(density) { 24.dp.toPx() }
-    val activeTabAction = when {
-        currentRoute == Screen.Search.route -> onSearch
-        currentRoute == Screen.Library.route || libraryDetailActive -> onLibrary
-        else -> onHome
+
+    val activeTabId: NavTabId = remember(currentRoute, libraryDetailActive, orderedTabs) {
+        val matched = when {
+            currentRoute == Screen.Search.route -> NavTabId.SEARCH
+            currentRoute == Screen.Library.route || libraryDetailActive -> NavTabId.LIBRARY
+            currentRoute == Screen.Home.route -> NavTabId.HOME
+            else -> null
+        }
+        if (matched != null && matched in orderedTabs) {
+            matched
+        } else {
+            orderedTabs.firstOrNull { it != NavTabId.CREATE } ?: NavTabId.HOME
+        }
     }
-    val showSeparateSearchAction = currentRoute != Screen.Search.route
+
+    val activeTabAction: () -> Unit = when (activeTabId) {
+        NavTabId.SEARCH -> onSearch
+        NavTabId.LIBRARY -> onLibrary
+        NavTabId.CREATE -> onCreate
+        NavTabId.HOME -> onHome
+    }
+
+    val showSeparateInlineSearchAction = activeTabId != NavTabId.SEARCH &&
+        NavTabId.SEARCH in orderedTabs &&
+        orderedTabs.size > 1
 
     Box(
         modifier = modifier.fillMaxWidth(),
@@ -207,53 +234,26 @@ fun AdaptiveBottomBar(
                 .consumeTaps()
         ) {
             AnimatedContent(
-            targetState = isInline to hasPlayer,
-            transitionSpec = {
-                (fadeIn(spring(stiffness = Spring.StiffnessMediumLow)) +
-                 scaleIn(initialScale = 0.94f, animationSpec = spring(stiffness = Spring.StiffnessMediumLow)))
-                    .togetherWith(
-                        fadeOut(spring(stiffness = Spring.StiffnessMediumLow)) +
-                        scaleOut(targetScale = 0.94f, animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
-                    )
-            },
-            label = "adaptiveNavBarAnim"
-        ) { (inline, playing) ->
-            if (inline && playing) {
-                // INLINE MODE WITH MUSIC: single row [Tab Circle] + [Compact Mini Player] + [Search Circle]
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier.graphicsLayer {
-                            val p = transitionState?.progress ?: 1f
-                            val navAlpha = ((p - 0.35f) / 0.65f).coerceIn(0f, 1f)
-                            alpha = navAlpha
-                            translationY = (1f - navAlpha) * navSlidePx
-                        }
-                    ) {
-                        ActiveTabCircleButton(
-                            currentRoute = currentRoute,
-                            libraryDetailActive = libraryDetailActive,
-                            size = 56.dp,
-                            onClick = {
-                                scrollConnection.expand()
-                                activeTabAction()
-                            }
+                targetState = isInline to hasPlayer,
+                transitionSpec = {
+                    (fadeIn(spring(stiffness = Spring.StiffnessMediumLow)) +
+                        scaleIn(initialScale = 0.94f, animationSpec = spring(stiffness = Spring.StiffnessMediumLow)))
+                        .togetherWith(
+                            fadeOut(spring(stiffness = Spring.StiffnessMediumLow)) +
+                                scaleOut(targetScale = 0.94f, animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
                         )
-                    }
-                    NowPlayingBar(
-                        viewModel = playerViewModel,
-                        isInline = true,
-                        transitionState = transitionState,
-                        onClick = onOpenExpandedPlayer,
-                        onDismiss = onDismissMiniPlayer,
-                        modifier = Modifier.weight(1f)
-                    )
-                    if (showSeparateSearchAction) {
+                },
+                label = "adaptiveNavBarAnim"
+            ) { (inline, playing) ->
+                if (inline && playing) {
+                    // INLINE MODE WITH MUSIC: single row [Tab Circle] + [Compact Mini Player] + optional [Search Circle]
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Box(
                             modifier = Modifier.graphicsLayer {
                                 val p = transitionState?.progress ?: 1f
@@ -262,6 +262,59 @@ fun AdaptiveBottomBar(
                                 translationY = (1f - navAlpha) * navSlidePx
                             }
                         ) {
+                            ActiveTabCircleButton(
+                                activeTab = activeTabId,
+                                size = 56.dp,
+                                onClick = {
+                                    scrollConnection.expand()
+                                    activeTabAction()
+                                }
+                            )
+                        }
+                        NowPlayingBar(
+                            viewModel = playerViewModel,
+                            isInline = true,
+                            transitionState = transitionState,
+                            onClick = onOpenExpandedPlayer,
+                            onDismiss = onDismissMiniPlayer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (showSeparateInlineSearchAction) {
+                            Box(
+                                modifier = Modifier.graphicsLayer {
+                                    val p = transitionState?.progress ?: 1f
+                                    val navAlpha = ((p - 0.35f) / 0.65f).coerceIn(0f, 1f)
+                                    alpha = navAlpha
+                                    translationY = (1f - navAlpha) * navSlidePx
+                                }
+                            ) {
+                                SearchCircleButton(
+                                    isSelected = false,
+                                    size = 56.dp,
+                                    onClick = onSearch
+                                )
+                            }
+                        }
+                    }
+                } else if (inline && !playing) {
+                    // INLINE MODE WITHOUT MUSIC: centered Active Tab Circle + optional Search Circle
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ActiveTabCircleButton(
+                            activeTab = activeTabId,
+                            size = 56.dp,
+                            onClick = {
+                                scrollConnection.expand()
+                                activeTabAction()
+                            }
+                        )
+                        if (showSeparateInlineSearchAction) {
+                            Spacer(Modifier.width(14.dp))
                             SearchCircleButton(
                                 isSelected = false,
                                 size = 56.dp,
@@ -269,99 +322,82 @@ fun AdaptiveBottomBar(
                             )
                         }
                     }
-                }
-            } else if (inline && !playing) {
-                // INLINE MODE WITHOUT MUSIC: centered Active Tab Circle + Search Circle
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    ActiveTabCircleButton(
-                        currentRoute = currentRoute,
-                        libraryDetailActive = libraryDetailActive,
-                        size = 56.dp,
-                        onClick = {
-                            scrollConnection.expand()
-                            activeTabAction()
-                        }
-                    )
-                    if (showSeparateSearchAction) {
-                        Spacer(Modifier.width(14.dp))
-                        SearchCircleButton(
-                            isSelected = false,
-                            size = 56.dp,
-                            onClick = onSearch
-                        )
-                    }
-                }
-            } else {
-                // EXPANDED MODE: full controls
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    if (playing) {
-                        NowPlayingBar(
-                            viewModel = playerViewModel,
-                            isInline = false,
-                            transitionState = transitionState,
-                            onClick = onOpenExpandedPlayer,
-                            onDismiss = onDismissMiniPlayer
-                        )
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(64.dp)
-                            .graphicsLayer {
-                                val p = transitionState?.progress ?: 1f
-                                val navAlpha = ((p - 0.35f) / 0.65f).coerceIn(0f, 1f)
-                                alpha = navAlpha
-                                translationY = (1f - navAlpha) * navSlidePx
-                            },
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                } else {
+                    // EXPANDED MODE: Mini-player above + Unified Dynamic Navigation Capsule below
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        MainTabCapsule(
+                        if (playing) {
+                            NowPlayingBar(
+                                viewModel = playerViewModel,
+                                isInline = false,
+                                transitionState = transitionState,
+                                onClick = onOpenExpandedPlayer,
+                                onDismiss = onDismissMiniPlayer
+                            )
+                        }
+                        Box(
                             modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(),
-                            currentRoute = currentRoute,
-                            libraryDetailActive = libraryDetailActive,
-                            onHome = onHome,
-                            onLibrary = onLibrary,
-                            onCreate = onCreate
-                        )
-                        SearchCircleButton(
-                            isSelected = currentRoute == Screen.Search.route,
-                            size = 64.dp,
-                            onClick = onSearch
-                        )
+                                .fillMaxWidth()
+                                .height(barHeight)
+                                .graphicsLayer {
+                                    val p = transitionState?.progress ?: 1f
+                                    val navAlpha = ((p - 0.35f) / 0.65f).coerceIn(0f, 1f)
+                                    alpha = navAlpha
+                                    translationY = (1f - navAlpha) * navSlidePx
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            MainTabCapsule(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .fillMaxHeight(),
+                                orderedTabs = orderedTabs,
+                                currentRoute = currentRoute,
+                                libraryDetailActive = libraryDetailActive,
+                                onHome = onHome,
+                                onLibrary = onLibrary,
+                                onCreate = onCreate,
+                                onSearch = onSearch,
+                                showLabels = navCust.showLabels,
+                                barHeight = barHeight
+                            )
+                        }
                     }
                 }
             }
         }
-        }
     }
 }
 
-/** Main Tab Capsule containing Home, Library, Create with sliding glass indicator puck. */
+/**
+ * Dynamic Navigation Capsule rendering ONLY the enabled destinations in [orderedTabs]
+ * in their configured sequence, distributing them evenly across the bar width with zero gaps.
+ */
 @Composable
 private fun MainTabCapsule(
+    orderedTabs: List<NavTabId>,
     currentRoute: String?,
     libraryDetailActive: Boolean,
     onHome: () -> Unit,
     onLibrary: () -> Unit,
     onCreate: () -> Unit,
-    modifier: Modifier = Modifier
+    onSearch: () -> Unit,
+    modifier: Modifier = Modifier,
+    showLabels: Boolean = false,
+    barHeight: Dp = 64.dp
 ) {
-    val selectedIndex = when {
-        currentRoute == Screen.Home.route -> 0
-        currentRoute == Screen.Library.route || libraryDetailActive -> 1
-        else -> -1
+    val activeTabs = orderedTabs.ifEmpty { listOf(NavTabId.HOME) }
+
+    val selectedIndex = activeTabs.indexOfFirst { tab ->
+        when (tab) {
+            NavTabId.HOME -> currentRoute == Screen.Home.route
+            NavTabId.LIBRARY -> currentRoute == Screen.Library.route || libraryDetailActive
+            NavTabId.SEARCH -> currentRoute == Screen.Search.route
+            NavTabId.CREATE -> false
+        }
     }
     val reduced = rememberReducedMotion()
     val pressed = remember { mutableStateOf(false) }
@@ -369,21 +405,22 @@ private fun MainTabCapsule(
 
     BoxWithConstraints(
         modifier = modifier
-            .height(64.dp)
+            .height(barHeight)
             .liquidGlass(CircleShape, GlassStyle.Navigation, pressProgress = { pressAnim })
             .trackPress(pressed)
             .consumeTaps()
     ) {
-        val tabCount = 3
-        val tabWidth = (maxWidth - 8.dp) / tabCount
-        val targetX = if (selectedIndex >= 0) tabWidth * selectedIndex else 0.dp
+        val tabCount = activeTabs.size.coerceAtLeast(1)
+        val innerWidth = (maxWidth - 8.dp).coerceAtLeast(0.dp)
+        val tabWidth = innerWidth / tabCount
+        val targetX = if (selectedIndex in 0 until tabCount) tabWidth * selectedIndex else 0.dp
         val indicatorX by animateDpAsState(
             targetValue = targetX,
-            animationSpec = if (reduced) snap() else spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMedium),
+            animationSpec = if (reduced) snap() else spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMedium),
             label = "tabIndicatorX"
         )
         val indicatorAlpha by animateFloatAsState(
-            targetValue = if (selectedIndex >= 0) 1f else 0f,
+            targetValue = if (selectedIndex in 0 until tabCount) 1f else 0f,
             label = "tabIndicatorAlpha"
         )
 
@@ -392,7 +429,7 @@ private fun MainTabCapsule(
                 .fillMaxSize()
                 .padding(4.dp)
         ) {
-            // Sliding glass indicator puck
+            // Sliding glass indicator puck sized dynamically to 1 / tabCount of the bar
             Box(
                 modifier = Modifier
                     .offset(x = indicatorX)
@@ -406,39 +443,58 @@ private fun MainTabCapsule(
 
             Row(
                 modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TabItem(
-                    selected = selectedIndex == 0,
-                    selectedIcon = GeekifyIcons.Home,
-                    icon = GeekifyIcons.Home,
-                    label = "Home",
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    onClick = onHome
-                )
-                TabItem(
-                    selected = selectedIndex == 1,
-                    selectedIcon = GeekifyIcons.Library,
-                    icon = GeekifyIcons.Library,
-                    label = "Library",
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    onClick = onLibrary
-                )
-                TabItem(
-                    selected = false,
-                    selectedIcon = GeekifyIcons.Add,
-                    icon = GeekifyIcons.Add,
-                    label = "Create",
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    onClick = onCreate
-                )
+                activeTabs.forEachIndexed { idx, tab ->
+                    key(tab.name) {
+                        when (tab) {
+                            NavTabId.HOME -> TabItem(
+                                selected = selectedIndex == idx,
+                                selectedIcon = GeekifyIcons.Home,
+                                icon = GeekifyIcons.Home,
+                                label = tab.label,
+                                showLabel = showLabels,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
+                                onClick = onHome
+                            )
+                            NavTabId.LIBRARY -> TabItem(
+                                selected = selectedIndex == idx,
+                                selectedIcon = GeekifyIcons.Library,
+                                icon = GeekifyIcons.Library,
+                                label = tab.label,
+                                showLabel = showLabels,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
+                                onClick = onLibrary
+                            )
+                            NavTabId.CREATE -> TabItem(
+                                selected = false,
+                                selectedIcon = GeekifyIcons.Add,
+                                icon = GeekifyIcons.Add,
+                                label = tab.label,
+                                showLabel = showLabels,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
+                                onClick = onCreate
+                            )
+                            NavTabId.SEARCH -> TabItem(
+                                selected = selectedIndex == idx,
+                                selectedIcon = GeekifyIcons.Search,
+                                icon = GeekifyIcons.Search,
+                                label = tab.label,
+                                showLabel = showLabels,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
+                                onClick = onSearch
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -451,6 +507,7 @@ private fun TabItem(
     icon: ImageVector,
     label: String,
     modifier: Modifier = Modifier,
+    showLabel: Boolean = true,
     onClick: () -> Unit
 ) {
     val fg by animateColorAsState(
@@ -473,18 +530,20 @@ private fun TabItem(
             tint = fg,
             modifier = Modifier.size(22.dp)
         )
-        Spacer(Modifier.height(3.dp))
-        Text(
-            text = label,
-            color = fg,
-            fontSize = 11.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            maxLines = 1
-        )
+        if (showLabel) {
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = label,
+                color = fg,
+                fontSize = 11.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1
+            )
+        }
     }
 }
 
-/** Standalone circular glass Search button. */
+/** Standalone circular glass Search button used in inline collapsed mode. */
 @Composable
 private fun SearchCircleButton(
     isSelected: Boolean,
@@ -524,18 +583,18 @@ private fun SearchCircleButton(
 /** Active Tab Circle shown on the left in inline mode; tapping activates the displayed tab. */
 @Composable
 private fun ActiveTabCircleButton(
-    currentRoute: String?,
-    libraryDetailActive: Boolean,
+    activeTab: NavTabId,
     size: Dp = 56.dp,
     onClick: () -> Unit
 ) {
     val pressed = remember { mutableStateOf(false) }
     val pressAnim by animateFloatAsState(if (pressed.value) 1f else 0f, label = "activePress")
 
-    val (icon, desc) = when {
-        currentRoute == Screen.Library.route || libraryDetailActive -> GeekifyIcons.Library to "Library"
-        currentRoute == Screen.Search.route -> GeekifyIcons.Search to "Search"
-        else -> GeekifyIcons.Home to "Home"
+    val (icon, desc) = when (activeTab) {
+        NavTabId.LIBRARY -> GeekifyIcons.Library to "Library"
+        NavTabId.SEARCH -> GeekifyIcons.Search to "Search"
+        NavTabId.CREATE -> GeekifyIcons.Add to "Create"
+        NavTabId.HOME -> GeekifyIcons.Home to "Home"
     }
 
     Box(

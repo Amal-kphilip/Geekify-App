@@ -6,19 +6,11 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.geekify.android.data.local.RecommendationEngineDao
 import com.geekify.android.data.local.RecommendationLogRepository
-import dagger.hilt.EntryPoint
-import dagger.hilt.InstallIn
-import dagger.hilt.android.EntryPointAccessors
-import dagger.hilt.components.SingletonComponent
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 import timber.log.Timber
-
-@EntryPoint
-@InstallIn(SingletonComponent::class)
-interface RecommendationPruneEntryPoint {
-    fun recommendationLogRepository(): RecommendationLogRepository
-    fun recommendationEngineDao(): com.geekify.android.data.local.RecommendationEngineDao
-}
 
 /**
  * Background worker to enforce the 30-day retention policy on recommendation impressions,
@@ -27,13 +19,13 @@ interface RecommendationPruneEntryPoint {
 class RecommendationPruneWorker(
     context: Context,
     params: WorkerParameters
-) : CoroutineWorker(context, params) {
+) : CoroutineWorker(context, params), KoinComponent {
+
+    private val repo: RecommendationLogRepository by inject()
+    private val engineDao: RecommendationEngineDao by inject()
 
     override suspend fun doWork(): Result {
         return try {
-            val entry = EntryPointAccessors.fromApplication(applicationContext, RecommendationPruneEntryPoint::class.java)
-            val repo = entry.recommendationLogRepository()
-            val engineDao = entry.recommendationEngineDao()
             val thirtyDaysAgo = System.currentTimeMillis() - THIRTY_DAYS_MS
             val pruned = repo.pruneOlderThan(thirtyDaysAgo)
             val prunedFeatures = runCatching { engineDao.pruneTrackFeaturesBefore(thirtyDaysAgo) }.getOrDefault(0)

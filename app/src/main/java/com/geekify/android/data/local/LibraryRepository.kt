@@ -14,8 +14,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.util.UUID
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /** An album or playlist from YouTube Music that the person added to Your Library (a link, not a copy of the tracks). */
 @Serializable
@@ -27,13 +25,11 @@ data class SavedCollection(
     val thumbnailUrl: String? = null,
     val savedAt: Long = System.currentTimeMillis()
 )
-
-@Singleton
-class LibraryRepository @Inject constructor(
+class LibraryRepository constructor(
     private val dao: PlaylistDao,
     private val likedDao: LikedDao,
     private val dataStore: DataStore<Preferences>,
-    private val recommendationLog: dagger.Lazy<RecommendationLogRepository>
+    private val recommendationLog: Lazy<RecommendationLogRepository>
 ) {
     private val savedKey = stringPreferencesKey("saved_collections")
     private val savedJson = Json { ignoreUnknownKeys = true }
@@ -58,7 +54,7 @@ class LibraryRepository @Inject constructor(
         }
         if (nowSaved) {
             runCatching {
-                recommendationLog.get().recordOutcome(
+                recommendationLog.value.recordOutcome(
                     collection.id,
                     RecommendationOutcomeEvent.SAVED_ALBUM_OR_ARTIST
                 )
@@ -92,7 +88,7 @@ class LibraryRepository @Inject constructor(
         if (likedDao.isLiked(track.videoId)) {
             likedDao.delete(track.toLiked())
             runCatching {
-                recommendationLog.get().recordOutcome(
+                recommendationLog.value.recordOutcome(
                     track.videoId,
                     RecommendationOutcomeEvent.UNLIKED
                 )
@@ -100,7 +96,7 @@ class LibraryRepository @Inject constructor(
         } else {
             likedDao.insert(track.toLiked())
             runCatching {
-                recommendationLog.get().recordOutcome(
+                recommendationLog.value.recordOutcome(
                     track.videoId,
                     RecommendationOutcomeEvent.LIKED
                 )
@@ -128,7 +124,7 @@ class LibraryRepository @Inject constructor(
         val nextPosition = nextPlaylistPosition(existing.map { it.position })
         dao.insertTrack(track.toPlaylistTrack(id, nextPosition))
         runCatching {
-            recommendationLog.get().recordOutcome(
+            recommendationLog.value.recordOutcome(
                 track.videoId,
                 RecommendationOutcomeEvent.ADDED_TO_PLAYLIST
             )

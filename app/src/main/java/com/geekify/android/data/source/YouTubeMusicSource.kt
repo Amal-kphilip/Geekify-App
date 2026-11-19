@@ -2,8 +2,6 @@ package com.geekify.android.data.source
 
 import com.geekify.android.data.cache.TtlLruCache
 import com.geekify.android.data.local.CatalogRepository
-import com.geekify.android.di.DefaultDispatcher
-import com.geekify.android.di.IoDispatcher
 import com.geekify.android.settings.AppSettingsRepository
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -27,19 +25,15 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import java.text.Normalizer
 import java.util.concurrent.ConcurrentHashMap
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlin.random.Random
 import java.util.Locale
-
-@Singleton
-class YouTubeMusicSource @Inject constructor(
+class YouTubeMusicSource constructor(
     private val innerTube: InnerTubeClient,
     private val cache: TtlLruCache,
     private val catalog: CatalogRepository,
     private val appSettings: AppSettingsRepository,
-    @DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher = Dispatchers.Default,
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
+    private val defaultDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : MusicSource {
     /** Write-through to the offline catalog never blocks (or fails) the request that triggered it. */
     private val cacheScope = CoroutineScope(SupervisorJob() + ioDispatcher)

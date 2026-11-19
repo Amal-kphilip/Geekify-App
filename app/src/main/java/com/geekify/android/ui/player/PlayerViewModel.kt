@@ -9,13 +9,9 @@ import com.geekify.android.data.model.Track
 import com.geekify.android.player.PlaybackPosition
 import com.geekify.android.player.PlayerController
 import com.geekify.android.player.QueueState
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-@HiltViewModel
-class PlayerViewModel @Inject constructor(
+class PlayerViewModel constructor(
     private val controller: PlayerController,
     private val library: LibraryRepository,
     private val sync: SyncRepository,
@@ -60,6 +56,7 @@ class PlayerViewModel @Inject constructor(
     fun setTonearmSyncEnabled(enabled: Boolean) = controller.queueManager.setTonearmSyncEnabled(enabled)
     fun completeTonearmTransition(trackVideoId: String) = controller.queueManager.completeTonearmTransition(trackVideoId)
     fun addToQueue(track: Track) = controller.addToQueue(track)
+    fun playNext(track: Track) = controller.queueManager.playNext(track)
     fun removeFromQueue(index: Int) = controller.removeFromQueue(index)
     fun reorder(from: Int, to: Int) = controller.reorder(from, to)
     fun clearQueue() = controller.clearQueue()

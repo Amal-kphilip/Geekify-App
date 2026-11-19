@@ -5,18 +5,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
 import com.geekify.android.core.UiState
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import javax.inject.Inject
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @OptIn(UnstableApi::class)
-@HiltViewModel
-class AudioSettingsViewModel @Inject constructor(
+class AudioSettingsViewModel constructor(
     private val controller: AudioEffectsController
 ) : ViewModel() {
 

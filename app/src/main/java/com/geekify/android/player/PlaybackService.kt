@@ -23,6 +23,8 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.SimpleCache
@@ -32,7 +34,18 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.MediaSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import com.geekify.android.innertube.YouTube
+import com.geekify.android.player.extraction.InnerTubePlaybackExtractor
+import com.geekify.android.player.extraction.PlaybackFailureCategory
+import com.geekify.android.player.extraction.PlaybackFailureClassifier
+import com.geekify.android.player.sabr.SabrBufferedSource
+import com.geekify.android.player.sabr.SeekableSabrDataSource
+import com.geekify.android.player.sabr.sabrAudioPlaybackChunks
+import com.geekify.android.player.sabr.sabrStreamingTokenSupplier
 import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
@@ -56,10 +69,8 @@ import com.geekify.android.player.artwork.ArtworkUrls
 import com.geekify.android.player.artwork.CoilBitmapLoader
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
-import dagger.hilt.android.AndroidEntryPoint
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
-import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -77,10 +88,11 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 
 @OptIn(UnstableApi::class)
-@AndroidEntryPoint
-class PlaybackService : MediaLibraryService() {
+class PlaybackService : MediaLibraryService(), KoinComponent {
 
     companion object {
         @Volatile private var activeInstance: PlaybackService? = null
@@ -114,25 +126,48 @@ class PlaybackService : MediaLibraryService() {
         private const val ACTION_MEDIA_SHUFFLE = "com.geekify.android.media.SHUFFLE"
     }
 
-    @Inject lateinit var queueManager: QueueManager
-    @Inject lateinit var streamResolver: InnerTubeXPlayer
-    @Inject lateinit var audioEffects: AudioEffectsController
-    @Inject lateinit var innerTube: InnerTubeClient
-    @Inject lateinit var musicSource: MusicSource
-    @Inject lateinit var historyRepository: com.geekify.android.data.local.HistoryRepository
-    @Inject lateinit var listeningStatsRepository: ListeningStatsRepository
-    @Inject lateinit var recommendationLogRepository: com.geekify.android.data.local.RecommendationLogRepository
-    @Inject lateinit var libraryRepository: com.geekify.android.data.local.LibraryRepository
-    @Inject lateinit var http: OkHttpClient
-    @Inject lateinit var audioCache: SimpleCache
-    @Inject lateinit var syncRepository: dagger.Lazy<com.geekify.android.data.sync.SyncRepository>
-    @Inject lateinit var appSettings: com.geekify.android.settings.AppSettingsRepository
-    @Inject lateinit var listeningBehaviorManager: ListeningBehaviorManager
-    @Inject lateinit var crossfadeController: CrossfadeAudioTransitionController
-    @Inject lateinit var diagnosticsTracker: PlaybackDiagnosticsTracker
+    private val queueManager: QueueManager by inject()
+    private val streamResolver: InnerTubeXPlayer by inject()
+    private val audioEffects: AudioEffectsController by inject()
+    private val innerTube: InnerTubeClient by inject()
+    private val musicSource: MusicSource by inject()
+    private val historyRepository: com.geekify.android.data.local.HistoryRepository by inject()
+    private val listeningStatsRepository: ListeningStatsRepository by inject()
+    private val recommendationLogRepository: com.geekify.android.data.local.RecommendationLogRepository by inject()
+    private val libraryRepository: com.geekify.android.data.local.LibraryRepository by inject()
+    private val http: OkHttpClient by inject()
+    private val audioCache: SimpleCache by inject()
+    private val syncRepository: com.geekify.android.data.sync.SyncRepository by inject()
+    private val appSettings: com.geekify.android.settings.AppSettingsRepository by inject()
+    private val listeningBehaviorManager: ListeningBehaviorManager by inject()
+    private val crossfadeController: CrossfadeAudioTransitionController by inject()
+    private val diagnosticsTracker: PlaybackDiagnosticsTracker by inject()
+    private val playbackExtractor: InnerTubePlaybackExtractor by inject()
+    private val networkMonitor: com.geekify.android.player.extraction.PlaybackNetworkMonitor by inject()
+    private val audioCacheManager: com.geekify.android.downloads.AudioCacheManager by inject()
+    private val scrobbleManager: com.geekify.android.scrobble.ScrobbleManager by inject()
+    private val discordRpcManager: com.geekify.android.discord.DiscordRpcManager by inject()
 
     private lateinit var player: ExoPlayer
     private lateinit var mediaSession: MediaLibraryService.MediaLibrarySession
+    private lateinit var cacheDataSourceFactory: DataSource.Factory
+    private lateinit var resolvingUpstreamFactory: DataSource.Factory
+    private lateinit var localDataSourceFactory: DataSource.Factory
+    private lateinit var playerListener: Player.Listener
+
+    // Secondary ExoPlayer for next-track preloading & genuine two-player overlapping crossfade
+    private var primaryUsesSlotA = true
+    private var nextPlayer: ExoPlayer? = null
+    private var preloadedTrackId: String? = null
+    private var preloadedStream: StreamResolver.ResolvedStream? = null
+    private var preloadNextTrackJob: Job? = null
+    private var activeSabrSource: SabrBufferedSource? = null
+    private var preloadedSabrSource: SabrBufferedSource? = null
+    private val primaryPositionMs = AtomicLong(0L)
+    private val secondaryPositionMs = AtomicLong(0L)
+    private var activeLocalTrackId: String? = null
+    private var scrobbledVideoId: String? = null
+    private var trackStartedEpochSec: Long = 0L
     private var mediaNotificationController: MediaSession.ControllerInfo? = null
     private var likedVideoIds: Set<String> = emptySet()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -189,6 +224,7 @@ class PlaybackService : MediaLibraryService() {
         super.onCreate()
         activeInstance = this
 
+        com.geekify.android.player.sabr.cleanupStaleSabrTempFiles(cacheDir)
         createPlaybackNotificationChannel()
         registerConnectivityMonitor()
 
@@ -204,60 +240,17 @@ class PlaybackService : MediaLibraryService() {
                 .apply { setSmallIcon(R.drawable.ic_stat_geekify) }
         )
 
-        // Keep the upstream factory neutral: InnerTubeX supplies the User-Agent and other required
-        // headers for the exact client that produced each signed stream URL.
         val upstreamFactory = OkHttpDataSource.Factory(http)
-        // Apply the selected InnerTubeX stream's client headers and range constraints only when
-        // Media3 actually opens the upstream URL. Keep the stable per-track/itag disk-cache key,
-        // so expired URLs can be refreshed without discarding already cached audio bytes.
-        val resolvingUpstreamFactory = ResolvingDataSource.Factory(upstreamFactory) { dataSpec ->
+        resolvingUpstreamFactory = ResolvingDataSource.Factory(upstreamFactory) { dataSpec ->
             streamResolver.resolveDataSpec(dataSpec)
         }
-        val dataSourceFactory = CacheDataSource.Factory()
+        cacheDataSourceFactory = CacheDataSource.Factory()
             .setCache(audioCache)
             .setUpstreamDataSourceFactory(resolvingUpstreamFactory)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        localDataSourceFactory = DefaultDataSource.Factory(this)
 
-        // The audio sink runs our equalizer and normaliser before ExoPlayer's own tempo / silence processors.
-        val renderersFactory = object : DefaultRenderersFactory(this) {
-            override fun buildAudioSink(
-                context: Context,
-                enableFloatOutput: Boolean,
-                enableAudioTrackPlaybackParams: Boolean
-            ): AudioSink? = DefaultAudioSink.Builder(context)
-                .setEnableFloatOutput(false)
-                .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-                .setAudioProcessors(audioEffects.processors)
-                .build()
-        }
-
-        player = ExoPlayer.Builder(this, renderersFactory)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
-            .setLoadControl(
-                DefaultLoadControl.Builder()
-                    .setBufferDurationsMs(
-                        /* minBufferMs = */ 15_000,
-                        /* maxBufferMs = */ 50_000,
-                        /* bufferForPlaybackMs = */ 1_000,
-                        /* bufferForPlaybackAfterRebufferMs = */ 3_000
-                    )
-                    .build()
-            )
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                    .setUsage(C.USAGE_MEDIA)
-                    .build(),
-                true
-            )
-            .setWakeMode(C.WAKE_MODE_NETWORK)
-            .setHandleAudioBecomingNoisy(true)
-            .build()
-            .also { exo ->
-                exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
-                    .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
-                    .build()
-            }
+        player = buildExoPlayer(handlesAudioFocus = true, usePrimaryDspSlot = primaryUsesSlotA)
 
         val pendingIntent = PendingIntent.getActivity(
             this, 0,
@@ -275,11 +268,30 @@ class PlaybackService : MediaLibraryService() {
         // session was never added: no media notification was ever posted. Adding it here makes Media3 show it.
         addSession(mediaSession)
 
-        // Keep media-notification actions synchronized with the authoritative local queue and liked-song state.
+        // Keep media-notification actions, home-screen widgets & Discord RPC synchronized with queue state.
         queueManager.state
-            .map { it.current?.videoId to it.shuffle }
+            .map { Triple(it.current, it.isPlaying, it.shuffle) }
             .distinctUntilChanged()
-            .onEach { (_, shuffle) -> updateMediaNotificationButtons(shuffle = shuffle) }
+            .onEach { (current, isPlaying, shuffle) ->
+                updateMediaNotificationButtons(shuffle = shuffle)
+                com.geekify.android.widget.GeekifyMusicWidgetProvider.updateAll(
+                    context = this,
+                    title = current?.title ?: "Geekify",
+                    artist = current?.artist ?: "Tap to start listening",
+                    isPlaying = isPlaying,
+                    thumbnailUrl = current?.thumbnails?.lastOrNull()?.url
+                )
+                scope.launch(Dispatchers.IO) {
+                    runCatching {
+                        discordRpcManager.updatePresence(
+                            track = current,
+                            isPlaying = isPlaying,
+                            positionMs = primaryPositionMs.get(),
+                            durationMs = (current?.durationSeconds ?: 0) * 1000L
+                        )
+                    }
+                }
+            }
             .launchIn(scope)
         libraryRepository.likedVideoIds
             .distinctUntilChanged()
@@ -295,14 +307,11 @@ class PlaybackService : MediaLibraryService() {
         // without seeking or flushing the audio sink.
         observeRuntimeAppSettings()
         audioEffects.settings.onEach { s ->
-            val current = player.playbackParameters
-            if (current.speed != s.speed || current.pitch != s.pitch) {
-                player.playbackParameters = PlaybackParameters(s.speed, s.pitch)
-            }
-            if (player.skipSilenceEnabled != s.skipSilence) player.skipSilenceEnabled = s.skipSilence
+            applyAudioSettingsToPlayer(player, s)
+            nextPlayer?.let { applyAudioSettingsToPlayer(it, s) }
         }.launchIn(scope)
 
-        player.addListener(object : Player.Listener {
+        playerListener = object : Player.Listener {
             // The queue's `isPlaying` is the user's *intent* to play, so it follows playWhenReady.
             // It must not follow ExoPlayer's momentary isPlaying: when a song ends, STATE_ENDED
             // (which calls queueManager.next() and sets isPlaying = true) is delivered BEFORE
@@ -383,10 +392,15 @@ class PlaybackService : MediaLibraryService() {
                         queueManager.setBuffering(false)
                         // Duration becomes known here; publish it even if playback stays paused.
                         publishPlayerPosition()
+                        scheduleNextTrackPreload()
                     }
                     Player.STATE_ENDED -> {
                         bufferingWatchdogJob?.cancel()
                         bufferingWatchdogJob = null
+                        if (crossfadeController.isTwoPlayerCrossfadeActive) {
+                            // Two-player crossfade owns the promotion to `nextPlayer`; avoid double-skipping.
+                            return
+                        }
                         finishListeningSession(completed = true)
                         // Forget the finished play so a replay (repeat, or play again) is recorded again.
                         lastPlayingVideoId = null
@@ -402,7 +416,8 @@ class PlaybackService : MediaLibraryService() {
                 queueManager.setBuffering(false)
                 handlePlaybackError(error)
             }
-        })
+        }
+        player.addListener(playerListener)
 
         // Periodically update progress in QueueManager for UI seekers. The loop suspends entirely while
         // the player is not playing (no polling while paused) and publishes only to the dedicated
@@ -412,11 +427,48 @@ class PlaybackService : MediaLibraryService() {
             while (isActive) {
                 if (!playerActivelyPlaying.value) playerActivelyPlaying.first { it }
                 if (player.isPlaying) {
-                    val pos = player.currentPosition
+                    val pos = player.currentPosition.coerceAtLeast(0L)
                     val dur = player.duration.coerceAtLeast(0L)
+                    primaryPositionMs.set(pos)
+                    nextPlayer?.let { secondaryPositionMs.set(it.currentPosition.coerceAtLeast(0L)) }
                     queueManager.setProgress(pos, dur)
-                    queueManager.state.value.current?.videoId?.let { currentId ->
-                        crossfadeController.maybeTriggerTrackEndFadeOut(player, currentId, pos, dur)
+                    queueManager.state.value.current?.let { currentTrack ->
+                        val currentId = currentTrack.videoId
+                        if (scrobbledVideoId != currentId &&
+                            (listenedMs >= 30_000L || (dur > 0L && listenedMs >= dur / 2))
+                        ) {
+                            scrobbledVideoId = currentId
+                            val startedSec = trackStartedEpochSec.takeIf { it > 0L }
+                                ?: (System.currentTimeMillis() / 1000L)
+                            scope.launch(Dispatchers.IO) {
+                                runCatching { scrobbleManager.submitScrobble(currentTrack, startedSec) }
+                            }
+                        }
+                        val upcoming = queueManager.peekNextTrack()
+                        val preparedIncoming = nextPlayer
+                        if (upcoming != null &&
+                            preparedIncoming != null &&
+                            preloadedTrackId == upcoming.videoId &&
+                            preparedIncoming.playbackState == Player.STATE_READY &&
+                            crossfadeController.shouldStartCrossfade(currentId, pos, dur)
+                        ) {
+                            val fadeMs = (crossfadeController.crossfadeDurationSeconds * 1000L)
+                                .coerceAtMost((dur - pos).coerceAtLeast(500L))
+                            crossfadeController.startTwoPlayerCrossfade(
+                                trackId = currentId,
+                                outgoing = player,
+                                incoming = preparedIncoming,
+                                durationMs = fadeMs,
+                                onComplete = { promotePreloadedNextPlayer(upcoming) },
+                                onCancelled = {
+                                    if (nextPlayer === preparedIncoming) {
+                                        releasePreloadedNextPlayer()
+                                    }
+                                }
+                            )
+                        } else {
+                            crossfadeController.maybeTriggerTrackEndFadeOut(player, currentId, pos, dur)
+                        }
                     }
 
                     // A link that has played for a while is good: allow fresh-link retries again for later failures.
@@ -479,6 +531,11 @@ class PlaybackService : MediaLibraryService() {
         // Listen for seek events from UI
         queueManager.seekEvents.onEach { posMs ->
             if (!accountTransitionInProgress && queueManager.state.value.current != null) {
+                if (crossfadeController.isTwoPlayerCrossfadeActive) {
+                    crossfadeController.cancelTwoPlayerCrossfade()
+                    releasePreloadedNextPlayer()
+                    player.volume = queueManager.state.value.volume.coerceIn(0f, 1f)
+                }
                 player.seekTo(posMs)
             }
         }.launchIn(scope)
@@ -510,6 +567,8 @@ class PlaybackService : MediaLibraryService() {
                 player.pause()
             }
             if (player.currentMediaItem?.mediaId != track.videoId) {
+                // Cancel any active crossfade before loading a manually selected or skipped track.
+                cancelActiveCrossfadeAndPreload(restoreVolume = true)
                 // During a visible vinyl transition, the new item is prepared but held until the stylus lands.
                 loadAndPlay(track, autoPlay = shouldPlay)
             } else {
@@ -517,8 +576,20 @@ class PlaybackService : MediaLibraryService() {
                     // Repeat-one / replay after the end of the queue: an ended player must be rewound first.
                     if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
                     player.play()
-                } else if (!shouldPlay && player.playWhenReady) {
+                } else if (!shouldPlay && (player.playWhenReady || crossfadeController.isTwoPlayerCrossfadeActive)) {
+                    cancelActiveCrossfadeAndPreload(restoreVolume = true)
                     player.pause()
+                }
+                // Keep preloaded nextPlayer in sync if queue order/shuffle/repeat changed.
+                val expectedUpcomingId = queueManager.peekNextTrack()?.videoId
+                if (!crossfadeController.isTwoPlayerCrossfadeActive &&
+                    preloadedTrackId != null &&
+                    preloadedTrackId != expectedUpcomingId
+                ) {
+                    releasePreloadedNextPlayer()
+                    if (player.playbackState == Player.STATE_READY) {
+                        scheduleNextTrackPreload()
+                    }
                 }
                 if (state.isPlaying) {
                     startPrefetch(track.videoId)
@@ -542,47 +613,18 @@ class PlaybackService : MediaLibraryService() {
         )
     }
 
-    private fun isCurrentlyConnected(): Boolean {
-        val cm = connectivityManager
-            ?: getSystemService(ConnectivityManager::class.java).also { connectivityManager = it }
-            ?: return true
-        val active = cm.activeNetwork ?: return false
-        val caps = cm.getNetworkCapabilities(active) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-    }
+    private fun isCurrentlyConnected(): Boolean = networkMonitor.current.connected
 
     private fun registerConnectivityMonitor() {
-        val cm = getSystemService(ConnectivityManager::class.java) ?: return
-        connectivityManager = cm
         retryCoordinator.onConnectivityChanged(isCurrentlyConnected(), null) {}
-
-        val callback = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                notifyConnectivityChanged(true)
-            }
-
-            override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-                val hasInternet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                notifyConnectivityChanged(hasInternet)
-            }
-
-            override fun onLost(network: Network) {
-                notifyConnectivityChanged(isCurrentlyConnected())
-            }
-        }
-        networkCallback = callback
-        runCatching {
-            val request = NetworkRequest.Builder()
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .build()
-            cm.registerNetworkCallback(request, callback)
-        }
+        networkMonitor.state
+            .onEach { net -> notifyConnectivityChanged(net.connected) }
+            .launchIn(scope)
     }
 
     private fun unregisterConnectivityMonitor() {
-        val cb = networkCallback ?: return
+        // Connectivity is observed via the shared PlaybackNetworkMonitor flow bound to `scope`.
         networkCallback = null
-        runCatching { connectivityManager?.unregisterNetworkCallback(cb) }
     }
 
     private fun notifyConnectivityChanged(online: Boolean) {
@@ -833,7 +875,7 @@ class PlaybackService : MediaLibraryService() {
                         likeCommand -> queueManager.state.value.current?.let { track ->
                             withContext(Dispatchers.IO) {
                                 libraryRepository.toggleLike(track)
-                                syncRepository.get().pushNow()
+                                syncRepository.pushNow()
                             }
                         }
                         shuffleCommand -> queueManager.toggleShuffle()
@@ -1031,8 +1073,17 @@ class PlaybackService : MediaLibraryService() {
                     queueManager.state.value.current?.videoId != track.videoId
                 ) return@launch
                 audioEffects.setTrackLoudness(stream.loudnessDb)
-                val item = buildMediaItem(track, stream.url, stream.mimeType, stream.itag)
-                player.setMediaItem(item, startMs)
+                activeLocalTrackId?.let { audioCacheManager.markPlaybackInactive(it) }
+                activeLocalTrackId = if (stream.isLocalFile) {
+                    audioCacheManager.markPlaybackActive(track.videoId)
+                    track.videoId
+                } else null
+                primaryPositionMs.set(startMs)
+                activeSabrSource?.close()
+                activeSabrSource = null
+                val (mediaSource, sabrSource) = buildMediaSource(track, stream) { primaryPositionMs.get() }
+                activeSabrSource = sabrSource
+                player.setMediaSource(mediaSource, startMs)
                 // The user may have pressed play/pause while the stream was being resolved.
                 val latestState = queueManager.state.value
                 player.playWhenReady = latestState.isPlaying && !latestState.tonearmTransitionPending
@@ -1179,8 +1230,17 @@ class PlaybackService : MediaLibraryService() {
                     queueManager.state.value.current?.videoId != track.videoId
                 ) return@launch
                 audioEffects.setTrackLoudness(stream.loudnessDb)
-                val item = buildMediaItem(track, stream.url, stream.mimeType, stream.itag)
-                player.setMediaItem(item, resumeAt)
+                activeLocalTrackId?.let { audioCacheManager.markPlaybackInactive(it) }
+                activeLocalTrackId = if (stream.isLocalFile) {
+                    audioCacheManager.markPlaybackActive(track.videoId)
+                    track.videoId
+                } else null
+                primaryPositionMs.set(resumeAt)
+                activeSabrSource?.close()
+                activeSabrSource = null
+                val (mediaSource, sabrSource) = buildMediaSource(track, stream) { primaryPositionMs.get() }
+                activeSabrSource = sabrSource
+                player.setMediaSource(mediaSource, resumeAt)
                 val latestState = queueManager.state.value
                 player.playWhenReady = latestState.isPlaying && !latestState.tonearmTransitionPending
                 player.prepare()
@@ -1216,26 +1276,25 @@ class PlaybackService : MediaLibraryService() {
             return
         }
 
-        val httpCode = generateSequence<Throwable>(error) { it.cause }
-            .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
-            .firstOrNull()?.responseCode
-        // 403 / 404 / 410 (and 5xx) mean this particular link is no good; network hiccups are worth a fresh try too.
-        // 429 is left alone: hammering YouTube again right away only makes the rate limit last longer.
-        val urlProblem = when (error.errorCode) {
-            PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ->
-                httpCode == null || httpCode == 403 || httpCode == 404 || httpCode == 410 || httpCode >= 500
-            PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE,
-            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
-            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> true
-            else -> false
+        val category = PlaybackFailureClassifier.fromThrowable(error)
+        diagnosticsTracker.recordError(category.name, error.message)
+        val reportedFailure = PlaybackFailureClassifier.requiresFreshExtraction(category)
+        if (reportedFailure) {
+            streamResolver.reportFailure(track.videoId, category)
         }
-        if (urlProblem) {
-            // Rejected or expired URL: get a fresh one and try again from the same position.
+        val shouldRetry = PlaybackFailureClassifier.isRetryable(category) &&
+            category != PlaybackFailureCategory.RATE_LIMIT
+        if (shouldRetry) {
             retryCurrentStream(
                 track = track,
                 resumeAt = resumeAt,
                 wasPlaying = wasPlaying,
-                markFailed = httpCode == 403
+                // Already reported above with accurate clientName & category; avoid duplicate invalidation.
+                markFailed = !reportedFailure && (
+                    category == PlaybackFailureCategory.CDN_FORBIDDEN ||
+                        category == PlaybackFailureCategory.SABR_ATTESTATION ||
+                        category == PlaybackFailureCategory.TOKEN
+                    )
             )
         } else {
             retryCoordinator.resetRetryBudget()
@@ -1259,7 +1318,7 @@ class PlaybackService : MediaLibraryService() {
                 if (!appSettings.state.value.pauseListenHistory) {
                     write()
                     if (!accountTransitionInProgress && generation == playbackGeneration.get()) {
-                        syncRepository.get().schedulePush()
+                        syncRepository.schedulePush()
                     }
                 }
             } catch (error: kotlinx.coroutines.CancellationException) {
@@ -1279,6 +1338,11 @@ class PlaybackService : MediaLibraryService() {
             lastPlayingVideoId = current.videoId
             listenedMs = 0L
             playCounted = false
+            scrobbledVideoId = null
+            trackStartedEpochSec = System.currentTimeMillis() / 1000L
+            scope.launch(Dispatchers.IO) {
+                runCatching { scrobbleManager.submitNowPlaying(current) }
+            }
             val generation = playbackGeneration.get()
             enqueueHistoryWrite { historyRepository.add(current) }
             startPrefetch(current.videoId)
@@ -1289,11 +1353,10 @@ class PlaybackService : MediaLibraryService() {
     private fun startPrefetch(currentId: String) {
         if (accountTransitionInProgress) return
         val generation = playbackGeneration.get()
-        val s = queueManager.state.value
-        val nextIds = buildList {
-            s.queue.getOrNull(s.index + 1)?.videoId?.let { add(it) }
-            s.queue.getOrNull(s.index + 2)?.videoId?.let { add(it) }
-        }.filter { it != currentId }.distinct()
+        val nextIds = queueManager.peekUpcomingTracks(2)
+            .map { it.videoId }
+            .filter { it != currentId }
+            .distinct()
         if (nextIds == lastPrefetchedVideoIds) return
         lastPrefetchedVideoIds = nextIds
         prefetchJob?.cancel()
@@ -1470,7 +1533,7 @@ class PlaybackService : MediaLibraryService() {
             previous?.join()
             try {
                 listeningStatsRepository.save(record)
-                if (pushToCloud) syncRepository.get().pushSession(record)
+                if (pushToCloud) syncRepository.pushSession(record)
             } catch (error: kotlinx.coroutines.CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -1557,6 +1620,7 @@ class PlaybackService : MediaLibraryService() {
             playbackGeneration.incrementAndGet()
             // Mute before pausing/stopping so even a delayed renderer callback cannot leak audio
             // from the previous identity during the sync handoff.
+            cancelActiveCrossfadeAndPreload(restoreVolume = false)
             player.volume = 0f
             prefetchJob?.cancel()
             autoplayJob?.cancel()
@@ -1607,6 +1671,11 @@ class PlaybackService : MediaLibraryService() {
             loadingId = null
             loadingGeneration = -1L
             retryCoordinator.cancelAll()
+            cancelActiveCrossfadeAndPreload(restoreVolume = false)
+            activeSabrSource?.close()
+            activeSabrSource = null
+            activeLocalTrackId?.let { audioCacheManager.markPlaybackInactive(it) }
+            activeLocalTrackId = null
 
             player.volume = 0f
             player.playWhenReady = false
@@ -1674,12 +1743,230 @@ class PlaybackService : MediaLibraryService() {
         if (!appSettings.state.value.stopPlaybackOnTaskRemoved && player.isPlaying) {
             return
         }
+        cancelActiveCrossfadeAndPreload(restoreVolume = false)
         player.pause()
         queueManager.setPlaying(false)
         pauseAllPlayersAndStopSelf()
     }
 
+    private fun musicAudioAttributes(): AudioAttributes = AudioAttributes.Builder()
+        .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+        .setUsage(C.USAGE_MEDIA)
+        .build()
+
+    private fun applyAudioSettingsToPlayer(exo: ExoPlayer, s: com.geekify.android.audio.AudioSettings) {
+        val current = exo.playbackParameters
+        if (current.speed != s.speed || current.pitch != s.pitch) {
+            exo.playbackParameters = PlaybackParameters(s.speed, s.pitch)
+        }
+        if (exo.skipSilenceEnabled != s.skipSilence) exo.skipSilenceEnabled = s.skipSilence
+    }
+
+    private fun cancelActiveCrossfadeAndPreload(restoreVolume: Boolean) {
+        if (crossfadeController.isTwoPlayerCrossfadeActive) {
+            crossfadeController.cancelTwoPlayerCrossfade()
+        }
+        releasePreloadedNextPlayer()
+        if (restoreVolume && ::player.isInitialized) {
+            player.volume = queueManager.state.value.volume.coerceIn(0f, 1f)
+        }
+    }
+
+    private fun buildExoPlayer(handlesAudioFocus: Boolean, usePrimaryDspSlot: Boolean): ExoPlayer {
+        val processors = audioEffects.createProcessorChain(usePrimarySlot = usePrimaryDspSlot)
+        val renderersFactory = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean
+            ): AudioSink? = DefaultAudioSink.Builder(context)
+                .setEnableFloatOutput(false)
+                .setAudioProcessors(processors)
+                .build()
+        }
+        return ExoPlayer.Builder(this, renderersFactory)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
+            .setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(
+                        /* minBufferMs = */ 15_000,
+                        /* maxBufferMs = */ 50_000,
+                        /* bufferForPlaybackMs = */ 1_000,
+                        /* bufferForPlaybackAfterRebufferMs = */ 3_000
+                    )
+                    .build()
+            )
+            .setAudioAttributes(musicAudioAttributes(), handlesAudioFocus)
+            .setWakeMode(C.WAKE_MODE_NETWORK)
+            .setHandleAudioBecomingNoisy(handlesAudioFocus)
+            .build()
+            .also { exo ->
+                exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+                    .build()
+                applyAudioSettingsToPlayer(exo, audioEffects.settings.value)
+            }
+    }
+
+    private fun buildMediaSource(
+        track: Track,
+        stream: StreamResolver.ResolvedStream,
+        positionProvider: () -> Long
+    ): Pair<MediaSource, SabrBufferedSource?> {
+        val sabrBootstrap = stream.sabrBootstrap
+        if (sabrBootstrap != null) {
+            val syntheticUrl = "geekify://sabr/${track.videoId}"
+            val item = buildMediaItem(track, syntheticUrl, stream.mimeType, stream.itag)
+            val transport = YouTube.extractionTransport()
+            val tokenSupplier = sabrStreamingTokenSupplier(
+                bootstrap = sabrBootstrap,
+                profileId = stream.clientName,
+                innerTube = transport.innerTube,
+                provider = playbackExtractor.tokenProvider
+            )
+            val sharedBufferedSource = SabrBufferedSource(
+                cacheDir = cacheDir,
+                chunkFlowFactory = { startMs ->
+                    sabrAudioPlaybackChunks(
+                        httpClient = transport.httpClient,
+                        bootstrap = sabrBootstrap,
+                        playbackPositionMs = positionProvider,
+                        initialPlayerTimeMs = startMs,
+                        tokenSupplier = tokenSupplier,
+                        onAttestationPending = {
+                            streamResolver.reportFailure(
+                                track.videoId,
+                                PlaybackFailureCategory.SABR_ATTESTATION
+                            )
+                        }
+                    )
+                },
+                contentLength = stream.contentLength
+            )
+            val dataSourceFactory = DataSource.Factory {
+                SeekableSabrDataSource(
+                    sourceFactory = { sharedBufferedSource },
+                    ownsSource = false,
+                    mimeType = stream.mimeType
+                )
+            }
+            val mediaSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+                .setContinueLoadingCheckIntervalBytes(65_536)
+                .createMediaSource(item)
+            return mediaSource to sharedBufferedSource
+        }
+        val item = buildMediaItem(track, stream.url, stream.mimeType, stream.itag)
+        val mediaSource = when {
+            stream.isLocalFile -> ProgressiveMediaSource.Factory(localDataSourceFactory).createMediaSource(item)
+            stream.isHls -> HlsMediaSource.Factory(resolvingUpstreamFactory).createMediaSource(item)
+            else -> ProgressiveMediaSource.Factory(cacheDataSourceFactory).createMediaSource(item)
+        }
+        return mediaSource to null
+    }
+
+    private fun scheduleNextTrackPreload() {
+        val upcoming = queueManager.peekNextTrack()
+        if (upcoming == null || upcoming.videoId == queueManager.state.value.current?.videoId) {
+            releasePreloadedNextPlayer()
+            return
+        }
+        if (preloadedTrackId == upcoming.videoId && nextPlayer != null) return
+        preloadNextTrackJob?.cancel()
+        releasePreloadedNextPlayer()
+
+        preloadNextTrackJob = scope.launch {
+            try {
+                val stream = withContext(Dispatchers.IO) {
+                    streamResolver.resolve(upcoming.videoId)
+                }
+                if (!isActive || accountTransitionInProgress) return@launch
+                if (queueManager.peekNextTrack()?.videoId != upcoming.videoId) return@launch
+
+                val secondarySlot = !primaryUsesSlotA
+                val secondary = buildExoPlayer(handlesAudioFocus = false, usePrimaryDspSlot = secondarySlot)
+                secondary.volume = 0f
+                audioEffects.setSecondaryTrackLoudness(stream.loudnessDb)
+                secondaryPositionMs.set(0L)
+                val (mediaSource, sabrSource) = buildMediaSource(upcoming, stream) { secondaryPositionMs.get() }
+                secondary.setMediaSource(mediaSource, 0L)
+                secondary.playWhenReady = false
+                secondary.prepare()
+
+                nextPlayer = secondary
+                preloadedTrackId = upcoming.videoId
+                preloadedStream = stream
+                preloadedSabrSource = sabrSource
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (_: Exception) {
+                // Preloading is opportunistic; normal track load will resolve on demand.
+            }
+        }
+    }
+
+    private fun promotePreloadedNextPlayer(upcoming: Track) {
+        val incoming = nextPlayer ?: return
+        val incomingStream = preloadedStream
+        val incomingSabr = preloadedSabrSource
+        val outgoing = player
+
+        nextPlayer = null
+        preloadedTrackId = null
+        preloadedStream = null
+        preloadedSabrSource = null
+
+        outgoing.removeListener(playerListener)
+        runCatching { outgoing.stop(); outgoing.release() }
+        activeSabrSource?.close()
+        activeSabrSource = incomingSabr
+
+        primaryUsesSlotA = !primaryUsesSlotA
+        player = incoming
+        // Restore audio focus & becoming-noisy ownership now that the incoming player is primary!
+        player.setAudioAttributes(musicAudioAttributes(), /* handleAudioFocus = */ true)
+        player.setHandleAudioBecomingNoisy(true)
+        applyAudioSettingsToPlayer(player, audioEffects.settings.value)
+        player.addListener(playerListener)
+        player.volume = queueManager.state.value.volume.coerceIn(0f, 1f)
+        incomingStream?.loudnessDb?.let { audioEffects.setTrackLoudness(it) }
+        activeLocalTrackId?.let { audioCacheManager.markPlaybackInactive(it) }
+        activeLocalTrackId = if (incomingStream?.isLocalFile == true) {
+            audioCacheManager.markPlaybackActive(upcoming.videoId)
+            upcoming.videoId
+        } else null
+        primaryPositionMs.set(player.currentPosition.coerceAtLeast(0L))
+        mediaSession.player = QueuePlayer(player)
+        crossfadeController.resetEndFadeGuard()
+
+        finishListeningSession(completed = true)
+        lastPlayingVideoId = null
+        queueManager.next(suppressTonearm = true)
+        playerActivelyPlaying.value = player.isPlaying
+        listeningBehaviorManager.recordPlaybackStart(upcoming)
+        recordTrackStarted(upcoming)
+        scheduleNextTrackPreload()
+    }
+
+    private fun releasePreloadedNextPlayer() {
+        preloadNextTrackJob?.cancel()
+        preloadNextTrackJob = null
+        nextPlayer?.let { secondary ->
+            runCatching { secondary.stop(); secondary.release() }
+        }
+        nextPlayer = null
+        preloadedTrackId = null
+        preloadedStream = null
+        preloadedSabrSource?.close()
+        preloadedSabrSource = null
+    }
+
     override fun onDestroy() {
+        crossfadeController.cancelTwoPlayerCrossfade()
+        releasePreloadedNextPlayer()
+        activeSabrSource?.close()
+        activeSabrSource = null
+        activeLocalTrackId?.let { audioCacheManager.markPlaybackInactive(it) }
+        activeLocalTrackId = null
         if (activeInstance === this) activeInstance = null
         unregisterConnectivityMonitor()
         retryCoordinator.cancelAll()

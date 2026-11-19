@@ -10,6 +10,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -143,6 +144,15 @@ fun ExpandedPlayerScreen(
 
     val thumbUrl = track.thumbnails.bestArtworkUrl()
     val artColor by rememberArtColor(thumbUrl, fallback = InkElevated)
+    val playerCust = com.geekify.android.customization.LocalCustomizationState.current.player
+    val gestureCust = com.geekify.android.customization.LocalCustomizationState.current.gestures
+    val lyricsCust = com.geekify.android.customization.LocalCustomizationState.current.lyrics
+    var showLyricsOverlay by remember { mutableStateOf(false) }
+    val downloadManager: com.geekify.android.downloads.SongDownloadManager = org.koin.compose.koinInject()
+    val allDownloads by downloadManager.downloads.collectAsState(initial = emptyList())
+    val currentDownload = remember(allDownloads, track.videoId) {
+        allDownloads.firstOrNull { it.videoId == track.videoId }
+    }
 
     val density = LocalDensity.current
     val config = LocalConfiguration.current
@@ -155,17 +165,22 @@ fun ExpandedPlayerScreen(
         label = "artBaseScale"
     )
 
-    // Tonearm-gated playback is only valid while Now Playing is expanded in the foreground.
-    // Release any pending transition as soon as the player starts collapsing or enters ON_STOP.
+    // Tonearm-gated playback is only valid while Now Playing is expanded in the foreground AND using Vinyl layout.
+    // Release any pending transition as soon as the player starts collapsing, switches layout, or enters ON_STOP.
     val isForegroundExpanded by remember {
         derivedStateOf { transitionState.progress < 0.25f && !transitionState.isDragging }
     }
+    val isVinylLayout = playerCust.layoutStyle == com.geekify.android.customization.PlayerLayoutStyle.VINYL_TONEARM
+    val useVinyl = !showLyricsOverlay && isVinylLayout
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(viewModel, lifecycleOwner, isForegroundExpanded) {
+    DisposableEffect(viewModel, lifecycleOwner, isForegroundExpanded, useVinyl) {
         fun updateTonearmSync(started: Boolean) {
-            val enabled = started && isForegroundExpanded
+            val enabled = started && isForegroundExpanded && useVinyl
             viewModel.setTonearmSyncEnabled(enabled)
-            viewModel.setReactiveArtworkMeterEnabled(enabled && state.isPlaying)
+            viewModel.setReactiveArtworkMeterEnabled(started && isForegroundExpanded && state.isPlaying)
+            if (!enabled) {
+                viewModel.completeTonearmTransition(track.videoId)
+            }
         }
 
         val lifecycleObserver = LifecycleEventObserver { _, event ->
@@ -190,9 +205,23 @@ fun ExpandedPlayerScreen(
     LaunchedEffect(state.isPlaying, isForegroundExpanded) {
         viewModel.setReactiveArtworkMeterEnabled(state.isPlaying && isForegroundExpanded)
     }
+    LaunchedEffect(useVinyl, track.videoId, state.tonearmTransitionPending) {
+        if (!useVinyl) {
+            viewModel.setTonearmSyncEnabled(false)
+            viewModel.completeTonearmTransition(track.videoId)
+        }
+    }
 
-    // Size the cover from both dimensions so short screens never push the controls off screen.
-    val artSize = minOf(config.screenWidthDp * 0.76f, config.screenHeightDp * 0.37f).dp
+    // Size the cover from both dimensions and apply layout + user artwork scale.
+    val layoutScaleFactor = when {
+        showLyricsOverlay -> 1.02f
+        playerCust.layoutStyle == com.geekify.android.customization.PlayerLayoutStyle.MINIMAL -> 0.72f
+        playerCust.layoutStyle == com.geekify.android.customization.PlayerLayoutStyle.ARTWORK_FOCUSED -> 1.12f
+        playerCust.layoutStyle == com.geekify.android.customization.PlayerLayoutStyle.FULLSCREEN_ARTWORK -> 0.82f
+        playerCust.layoutStyle == com.geekify.android.customization.PlayerLayoutStyle.EXPRESSIVE -> 0.94f
+        else -> 1.0f
+    } * playerCust.artworkScale.coerceIn(0.75f, 1.20f)
+    val artSize = (minOf(config.screenWidthDp * 0.76f, config.screenHeightDp * 0.37f) * layoutScaleFactor).dp
 
     // Neighbouring songs for the fading three-line block under the title.
     val upcoming: List<Track> = state.queue.drop(state.index + 1)
@@ -254,7 +283,8 @@ fun ExpandedPlayerScreen(
                     )
                 }
             }
-            .pointerInput(screenHeightPx) {
+            .pointerInput(screenHeightPx, gestureCust.swipeDownToCollapsePlayer) {
+                if (!gestureCust.swipeDownToCollapsePlayer) return@pointerInput
                 val velocityTracker = VelocityTracker()
                 var totalDownDrag = 0f
                 detectVerticalDragGestures(
@@ -291,8 +321,11 @@ fun ExpandedPlayerScreen(
             )
             .glassBackdropSource(sleepTimerBackdrop, enabled = showSleepTimer)
     ) {
-        // Morphing container backdrop: solid InkBackground + blurred cover wash when expanded,
-        // dissolving smoothly into NowPlayingBar's frosted glass capsule in the final 30% of collapse.
+        // Morphing container backdrop: configurable background style + fullscreen artwork option
+        val baseBgColor = when (playerCust.backgroundStyle) {
+            com.geekify.android.customization.PlayerBackgroundStyle.AMOLED_PITCH -> Color.Black
+            else -> InkBackground
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -300,13 +333,49 @@ fun ExpandedPlayerScreen(
                     val p = transitionState.progress
                     alpha = (1f - ((p - 0.68f) / 0.32f).coerceIn(0f, 1f))
                 }
-                .background(InkBackground)
+                .background(baseBgColor)
         ) {
-            PlayerBackdrop(thumbUrl = thumbUrl, tint = artColor)
+            when {
+                playerCust.layoutStyle == com.geekify.android.customization.PlayerLayoutStyle.FULLSCREEN_ARTWORK && thumbUrl != null -> {
+                    AsyncImage(
+                        model = thumbUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    0.0f to Color.Black.copy(alpha = 0.35f),
+                                    0.45f to Color.Black.copy(alpha = 0.65f),
+                                    1.0f to baseBgColor.copy(alpha = 0.96f)
+                                )
+                            )
+                    )
+                }
+                playerCust.backgroundStyle == com.geekify.android.customization.PlayerBackgroundStyle.BLURRED_ARTWORK -> {
+                    PlayerBackdrop(thumbUrl = thumbUrl, tint = artColor)
+                }
+                playerCust.backgroundStyle == com.geekify.android.customization.PlayerBackgroundStyle.DYNAMIC_GRADIENT -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(artColor.copy(alpha = 0.62f), baseBgColor)
+                                )
+                            )
+                    )
+                }
+                else -> Unit
+            }
         }
 
+        val activePlayerFont = AppFont
         CompositionLocalProvider(
-            LocalTextStyle provides LocalTextStyle.current.copy(fontFamily = MontserratFamily)
+            LocalTextStyle provides LocalTextStyle.current.copy(fontFamily = activePlayerFont)
         ) {
             Column(
                 modifier = Modifier
@@ -342,23 +411,112 @@ fun ExpandedPlayerScreen(
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.Center
                     )
-                    CircleIconButton(
-                        icon = GeekifyIcons.Timer,
-                        contentDescription = if (hasActiveSleepTimer) "Sleep timer active" else "Sleep timer",
-                        onClick = { if (expandedControlsInteractive()) showSleepTimer = true },
-                        size = 50.dp,
-                        container = Color.White.copy(alpha = 0.2f),
-                        tint = if (hasActiveSleepTimer) Lime else TextPrimary
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    CircleIconButton(
-                        icon = if (isLiked) GeekifyIcons.Favorite else GeekifyIcons.FavoriteBorder,
-                        contentDescription = if (isLiked) "Remove from Liked Songs" else "Add to Liked Songs",
-                        onClick = { if (expandedControlsInteractive()) viewModel.toggleLikeCurrent() },
-                        size = 50.dp,
-                        container = Color.White.copy(alpha = 0.2f),
-                        tint = if (isLiked) Lime else TextPrimary
-                    )
+                    if (playerCust.showLyricsButton) {
+                        CircleIconButton(
+                            icon = GeekifyIcons.Lyrics,
+                            contentDescription = "Lyrics",
+                            onClick = { if (expandedControlsInteractive()) showLyricsOverlay = !showLyricsOverlay },
+                            size = 46.dp,
+                            container = Color.White.copy(alpha = 0.2f),
+                            tint = if (showLyricsOverlay) Lime else TextPrimary
+                        )
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    // Download Song action on Now Playing
+                    if (playerCust.showDownloadButton) {
+                    Box(
+                        modifier = Modifier
+                            .size(50.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.2f))
+                            .bouncyClickable(pressedScale = 0.92f) {
+                                if (!expandedControlsInteractive()) return@bouncyClickable
+                                when (currentDownload?.status) {
+                                    com.geekify.android.data.local.DownloadEntity.STATUS_COMPLETED -> Unit
+                                    com.geekify.android.data.local.DownloadEntity.STATUS_RUNNING,
+                                    com.geekify.android.data.local.DownloadEntity.STATUS_QUEUED -> {
+                                        downloadManager.pause(track.videoId)
+                                    }
+                                    com.geekify.android.data.local.DownloadEntity.STATUS_PAUSED,
+                                    com.geekify.android.data.local.DownloadEntity.STATUS_FAILED -> {
+                                        downloadManager.retry(track.videoId)
+                                    }
+                                    else -> {
+                                        downloadManager.enqueue(track)
+                                    }
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        when (currentDownload?.status) {
+                            com.geekify.android.data.local.DownloadEntity.STATUS_RUNNING,
+                            com.geekify.android.data.local.DownloadEntity.STATUS_QUEUED -> {
+                                val pct = currentDownload?.progress?.coerceIn(0f, 1f) ?: 0f
+                                if (pct > 0.02f) {
+                                    CircularProgressIndicator(
+                                        progress = { pct },
+                                        color = Lime,
+                                        modifier = Modifier.size(26.dp),
+                                        strokeWidth = 2.5.dp
+                                    )
+                                } else {
+                                    CircularProgressIndicator(
+                                        color = Lime,
+                                        modifier = Modifier.size(24.dp),
+                                        strokeWidth = 2.5.dp
+                                    )
+                                }
+                            }
+                            com.geekify.android.data.local.DownloadEntity.STATUS_COMPLETED -> {
+                                Icon(
+                                    imageVector = GeekifyIcons.CloudDone,
+                                    contentDescription = "Downloaded offline",
+                                    tint = Lime,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            com.geekify.android.data.local.DownloadEntity.STATUS_FAILED,
+                            com.geekify.android.data.local.DownloadEntity.STATUS_PAUSED -> {
+                                Icon(
+                                    imageVector = GeekifyIcons.Download,
+                                    contentDescription = "Retry download",
+                                    tint = Color(0xFFFCD34D),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            else -> {
+                                Icon(
+                                    imageVector = GeekifyIcons.Download,
+                                    contentDescription = "Download song",
+                                    tint = TextPrimary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    }
+                    if (playerCust.showSleepTimerButton) {
+                        CircleIconButton(
+                            icon = GeekifyIcons.Timer,
+                            contentDescription = if (hasActiveSleepTimer) "Sleep timer active" else "Sleep timer",
+                            onClick = { if (expandedControlsInteractive()) showSleepTimer = true },
+                            size = 46.dp,
+                            container = Color.White.copy(alpha = 0.2f),
+                            tint = if (hasActiveSleepTimer) Lime else TextPrimary
+                        )
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    if (playerCust.showLikeButton) {
+                        CircleIconButton(
+                            icon = if (isLiked) GeekifyIcons.Favorite else GeekifyIcons.FavoriteBorder,
+                            contentDescription = if (isLiked) "Remove from Liked Songs" else "Add to Liked Songs",
+                            onClick = { if (expandedControlsInteractive()) viewModel.toggleLikeCurrent() },
+                            size = 46.dp,
+                            container = Color.White.copy(alpha = 0.2f),
+                            tint = if (isLiked) Lime else TextPrimary
+                        )
+                    }
                 }
 
                 Spacer(Modifier.weight(0.7f))
@@ -394,18 +552,114 @@ fun ExpandedPlayerScreen(
                                 scaleY = tf.scaleY
                             }
                     ) {
-                        VinylTonearmCover(
-                            trackId = track.videoId,
-                            coverUrl = thumbUrl,
-                            direction = lastSkipDirection,
-                            isPlaying = state.isPlaying,
-                            beatIntensity = viewModel.beatIntensity,
-                            baseScale = artBaseScale,
-                            collapseProgress = { transitionState.progress },
-                            onTonearmLanded = viewModel::completeTonearmTransition,
-                            modifier = Modifier.fillMaxSize(),
-                            discSize = artSize
-                        )
+                        key(playerCust.layoutStyle, showLyricsOverlay) {
+                            if (showLyricsOverlay) {
+                                SynchronizedLyricsView(
+                                    track = track,
+                                    positionFlow = viewModel.position,
+                                    config = lyricsCust,
+                                    onSeekTo = { if (expandedControlsInteractive()) viewModel.seek(it) },
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else if (useVinyl) {
+                                VinylTonearmCover(
+                                    trackId = track.videoId,
+                                    coverUrl = thumbUrl,
+                                    direction = lastSkipDirection,
+                                    isPlaying = state.isPlaying,
+                                    beatIntensity = viewModel.beatIntensity,
+                                    baseScale = artBaseScale,
+                                    collapseProgress = { transitionState.progress },
+                                    onTonearmLanded = viewModel::completeTonearmTransition,
+                                    modifier = Modifier.fillMaxSize(),
+                                    discSize = artSize
+                                )
+                            } else if (playerCust.layoutStyle == com.geekify.android.customization.PlayerLayoutStyle.FULLSCREEN_ARTWORK) {
+                                // Fullscreen Artwork mode uses the full-bleed backdrop image; keep an invisible
+                                // horizontal swipe-to-skip gesture zone here without duplicating a smaller cover.
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .pointerInput(gestureCust.swipeArtworkToSkip, gestureCust.gestureSensitivity) {
+                                            if (!gestureCust.swipeArtworkToSkip) return@pointerInput
+                                            var dragX = 0f
+                                            val thresholdPx = (64.dp / gestureCust.gestureSensitivity.coerceIn(0.6f, 1.5f)).toPx()
+                                            detectHorizontalDragGestures(
+                                                onDragStart = { dragX = 0f },
+                                                onHorizontalDrag = { change, amount ->
+                                                    change.consume()
+                                                    dragX += amount
+                                                },
+                                                onDragEnd = {
+                                                    if (dragX <= -thresholdPx) viewModel.next()
+                                                    else if (dragX >= thresholdPx) viewModel.previous()
+                                                    dragX = 0f
+                                                }
+                                            )
+                                        }
+                                )
+                            } else {
+                                // Standard / Minimal / Artwork-Focused / Expressive cover with horizontal swipe-to-skip
+                                val effectiveShape = if (
+                                    playerCust.layoutStyle != com.geekify.android.customization.PlayerLayoutStyle.VINYL_TONEARM &&
+                                    playerCust.artworkShape == com.geekify.android.customization.PlayerArtworkShape.VINYL_DISC
+                                ) {
+                                    com.geekify.android.customization.PlayerArtworkShape.ROUNDED
+                                } else {
+                                    playerCust.artworkShape
+                                }
+                                val coverShape = when (effectiveShape) {
+                                    com.geekify.android.customization.PlayerArtworkShape.CIRCLE,
+                                    com.geekify.android.customization.PlayerArtworkShape.VINYL_DISC -> CircleShape
+                                    com.geekify.android.customization.PlayerArtworkShape.SQUARE -> RoundedCornerShape(6.dp)
+                                    com.geekify.android.customization.PlayerArtworkShape.ROUNDED -> RoundedCornerShape(28.dp)
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer {
+                                            scaleX = artBaseScale
+                                            scaleY = artBaseScale
+                                        }
+                                        .clip(coverShape)
+                                        .background(InkElevated)
+                                        .pointerInput(gestureCust.swipeArtworkToSkip, gestureCust.gestureSensitivity) {
+                                            if (!gestureCust.swipeArtworkToSkip) return@pointerInput
+                                            var dragX = 0f
+                                            val thresholdPx = (64.dp / gestureCust.gestureSensitivity.coerceIn(0.6f, 1.5f)).toPx()
+                                            detectHorizontalDragGestures(
+                                                onDragStart = { dragX = 0f },
+                                                onHorizontalDrag = { change, amount ->
+                                                    change.consume()
+                                                    dragX += amount
+                                                },
+                                                onDragEnd = {
+                                                    if (dragX <= -thresholdPx) viewModel.next()
+                                                    else if (dragX >= thresholdPx) viewModel.previous()
+                                                    dragX = 0f
+                                                }
+                                            )
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (thumbUrl != null) {
+                                        AsyncImage(
+                                            model = thumbUrl,
+                                            contentDescription = track.title,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Icon(
+                                            GeekifyIcons.MusicNote,
+                                            contentDescription = null,
+                                            tint = TextSecondary,
+                                            modifier = Modifier.size(64.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -437,6 +691,22 @@ fun ExpandedPlayerScreen(
                             alpha = (1f - (p / 0.52f)).coerceIn(0f, 1f)
                         }
                 ) {
+                    val isExpressive = playerCust.layoutStyle == com.geekify.android.customization.PlayerLayoutStyle.EXPRESSIVE
+                    val titleAlign = if (isExpressive) {
+                        TextAlign.Start
+                    } else {
+                        TextAlign.Center
+                    }
+                    if (isExpressive) {
+                        Text(
+                            text = "NOW PLAYING",
+                            color = Lime,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.4.sp,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                    }
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -451,13 +721,13 @@ fun ExpandedPlayerScreen(
                                 text = displayedTrack.title,
                                 modifier = Modifier.fillMaxWidth(),
                                 style = androidx.compose.ui.text.TextStyle(
-                                    fontFamily = MontserratFamily,
-                                    fontSize = 27.sp,
-                                    lineHeight = 32.sp,
-                                    fontWeight = FontWeight.Medium
+                                    fontFamily = activePlayerFont,
+                                    fontSize = if (isExpressive) 30.sp else 27.sp,
+                                    lineHeight = if (isExpressive) 35.sp else 32.sp,
+                                    fontWeight = if (isExpressive) FontWeight.Bold else FontWeight.Medium
                                 ),
                                 color = TextPrimary,
-                                textAlign = TextAlign.Center,
+                                textAlign = titleAlign,
                                 speedDpPerSecond = if (isMarqueeActive) 42f else 0f
                             )
                         }
@@ -476,13 +746,56 @@ fun ExpandedPlayerScreen(
                             text = track.artist,
                             modifier = Modifier.fillMaxWidth(),
                             style = androidx.compose.ui.text.TextStyle(
-                                fontFamily = MontserratFamily,
-                                fontSize = 15.sp,
+                                fontFamily = activePlayerFont,
+                                fontSize = if (isExpressive) 16.sp else 15.sp,
                                 fontWeight = FontWeight.Normal
                             ),
                             color = TextSecondary,
-                            textAlign = TextAlign.Center,
+                            textAlign = titleAlign,
                             speedDpPerSecond = if (isMarqueeActive) 42f else 0f
+                        )
+                    }
+                }
+
+                currentDownload?.let { dl ->
+                    val statusLabel = when (dl.status) {
+                        com.geekify.android.data.local.DownloadEntity.STATUS_RUNNING ->
+                            "Downloading ${(dl.progress * 100).toInt()}%..."
+                        com.geekify.android.data.local.DownloadEntity.STATUS_QUEUED ->
+                            "Queued for offline download..."
+                        com.geekify.android.data.local.DownloadEntity.STATUS_PAUSED ->
+                            "Download paused • Tap to resume"
+                        com.geekify.android.data.local.DownloadEntity.STATUS_FAILED ->
+                            "Download failed • Tap to retry"
+                        com.geekify.android.data.local.DownloadEntity.STATUS_COMPLETED ->
+                            "Available Offline"
+                        else -> null
+                    }
+                    if (statusLabel != null) {
+                        val badgeColor = when (dl.status) {
+                            com.geekify.android.data.local.DownloadEntity.STATUS_COMPLETED -> Lime
+                            com.geekify.android.data.local.DownloadEntity.STATUS_FAILED -> Color(0xFFF87171)
+                            com.geekify.android.data.local.DownloadEntity.STATUS_PAUSED -> Color(0xFFFCD34D)
+                            else -> TextSecondary
+                        }
+                        Text(
+                            text = statusLabel,
+                            color = badgeColor,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 6.dp)
+                                .clickable(
+                                    enabled = dl.status == com.geekify.android.data.local.DownloadEntity.STATUS_FAILED ||
+                                        dl.status == com.geekify.android.data.local.DownloadEntity.STATUS_PAUSED
+                                ) {
+                                    downloadManager.retry(track.videoId)
+                                }
+                                .graphicsLayer {
+                                    alpha = (1f - transitionState.progress * 2.5f).coerceIn(0f, 1f)
+                                }
                         )
                     }
                 }
@@ -505,22 +818,27 @@ fun ExpandedPlayerScreen(
                 Spacer(Modifier.height(18.dp))
 
                 // ---- Fading three-line block: previous (dim) / up next (bright) / the one after (dim) ----
-                Box(
-                    modifier = Modifier.graphicsLayer {
-                        val p = transitionState.progress
-                        alpha = (1f - p * 2.4f).coerceIn(0f, 1f)
-                        translationY = p * 48.dp.toPx()
-                        val s = lerp(1f, 0.90f, p)
-                        scaleX = s
-                        scaleY = s
+                val showUpNextBlock = playerCust.showUpNextPreview &&
+                    playerCust.layoutStyle != com.geekify.android.customization.PlayerLayoutStyle.MINIMAL &&
+                    playerCust.layoutStyle != com.geekify.android.customization.PlayerLayoutStyle.ARTWORK_FOCUSED
+                if (showUpNextBlock) {
+                    Box(
+                        modifier = Modifier.graphicsLayer {
+                            val p = transitionState.progress
+                            alpha = (1f - p * 2.4f).coerceIn(0f, 1f)
+                            translationY = p * 48.dp.toPx()
+                            val s = lerp(1f, 0.90f, p)
+                            scaleX = s
+                            scaleY = s
+                        }
+                    ) {
+                        UpNextLines(
+                            previous = previousTrack?.title,
+                            next = upcoming.getOrNull(0)?.title,
+                            afterNext = upcoming.getOrNull(1)?.title,
+                            onClick = { if (expandedControlsInteractive()) onQueueClick() }
+                        )
                     }
-                ) {
-                    UpNextLines(
-                        previous = previousTrack?.title,
-                        next = upcoming.getOrNull(0)?.title,
-                        afterNext = upcoming.getOrNull(1)?.title,
-                        onClick = { if (expandedControlsInteractive()) onQueueClick() }
-                    )
                 }
 
                 Spacer(Modifier.weight(0.5f))
@@ -542,6 +860,7 @@ fun ExpandedPlayerScreen(
                         position = viewModel.position,
                         isPlaying = state.isPlaying && isSeekWaveActive,
                         repeat = state.repeat,
+                        showRepeatButton = playerCust.showRepeatButton,
                         onSeek = { if (expandedControlsInteractive()) viewModel.seek(it) },
                         onCycleRepeat = { if (expandedControlsInteractive()) viewModel.cycleRepeat() }
                     )
@@ -557,22 +876,26 @@ fun ExpandedPlayerScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(
-                        onClick = { if (expandedControlsInteractive()) viewModel.toggleShuffle() },
-                        modifier = Modifier.graphicsLayer {
-                            val p = transitionState.progress
-                            alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
-                            val s = lerp(1f, 0.75f, p)
-                            scaleX = s
-                            scaleY = s
+                    if (playerCust.showShuffleButton) {
+                        IconButton(
+                            onClick = { if (expandedControlsInteractive()) viewModel.toggleShuffle() },
+                            modifier = Modifier.graphicsLayer {
+                                val p = transitionState.progress
+                                alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
+                                val s = lerp(1f, 0.75f, p)
+                                scaleX = s
+                                scaleY = s
+                            }
+                        ) {
+                            Icon(
+                                GeekifyIcons.Shuffle,
+                                contentDescription = "Shuffle",
+                                tint = if (state.shuffle) Lime else TextPrimary,
+                                modifier = Modifier.size(26.dp)
+                            )
                         }
-                    ) {
-                        Icon(
-                            GeekifyIcons.Shuffle,
-                            contentDescription = "Shuffle",
-                            tint = if (state.shuffle) Lime else TextPrimary,
-                            modifier = Modifier.size(26.dp)
-                        )
+                    } else {
+                        Spacer(Modifier.size(48.dp))
                     }
 
                     Box(
@@ -622,7 +945,7 @@ fun ExpandedPlayerScreen(
                                     scaleX = tf.scaleX
                                     scaleY = tf.scaleY
                                 }
-                                .clip(CircleShape)
+                                .clip(if (playerCust.roundedPlayButton) CircleShape else RoundedCornerShape(22.dp))
                                 .background(Lime)
                                 .bouncyClickable(pressedScale = 0.92f) {
                                     if (expandedControlsInteractive()) viewModel.togglePlay()
@@ -708,17 +1031,21 @@ fun ExpandedPlayerScreen(
                         }
                     }
 
-                    IconButton(
-                        onClick = { if (expandedControlsInteractive()) onQueueClick() },
-                        modifier = Modifier.graphicsLayer {
-                            val p = transitionState.progress
-                            alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
-                            val s = lerp(1f, 0.75f, p)
-                            scaleX = s
-                            scaleY = s
+                    if (playerCust.showQueueButton) {
+                        IconButton(
+                            onClick = { if (expandedControlsInteractive()) onQueueClick() },
+                            modifier = Modifier.graphicsLayer {
+                                val p = transitionState.progress
+                                alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
+                                val s = lerp(1f, 0.75f, p)
+                                scaleX = s
+                                scaleY = s
+                            }
+                        ) {
+                            Icon(GeekifyIcons.QueueMusic, contentDescription = "Queue", tint = TextPrimary, modifier = Modifier.size(26.dp))
                         }
-                    ) {
-                        Icon(GeekifyIcons.QueueMusic, contentDescription = "Queue", tint = TextPrimary, modifier = Modifier.size(26.dp))
+                    } else {
+                        Spacer(Modifier.size(48.dp))
                     }
                 }
 
@@ -987,6 +1314,7 @@ private fun SeekSection(
     position: StateFlow<PlaybackPosition>,
     isPlaying: Boolean,
     repeat: RepeatMode,
+    showRepeatButton: Boolean = true,
     onSeek: (Long) -> Unit,
     onCycleRepeat: () -> Unit
 ) {
@@ -1019,13 +1347,15 @@ private fun SeekSection(
     ) {
         Text(formatMs(currentPositionMs), color = TextSecondary, fontSize = 13.sp, modifier = Modifier.width(56.dp))
         Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-            IconButton(onClick = onCycleRepeat, modifier = Modifier.size(34.dp)) {
-                Icon(
-                    imageVector = if (repeat == RepeatMode.ONE) GeekifyIcons.RepeatOne else GeekifyIcons.Repeat,
-                    contentDescription = "Repeat",
-                    tint = if (repeat != RepeatMode.OFF) Lime else TextSecondary,
-                    modifier = Modifier.size(20.dp)
-                )
+            if (showRepeatButton) {
+                IconButton(onClick = onCycleRepeat, modifier = Modifier.size(34.dp)) {
+                    Icon(
+                        imageVector = if (repeat == RepeatMode.ONE) GeekifyIcons.RepeatOne else GeekifyIcons.Repeat,
+                        contentDescription = "Repeat",
+                        tint = if (repeat != RepeatMode.OFF) Lime else TextSecondary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
         Text(

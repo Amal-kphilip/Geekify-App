@@ -5,13 +5,11 @@ import androidx.lifecycle.viewModelScope
 import com.geekify.android.data.source.MusicResult
 import com.geekify.android.data.source.MusicSource
 import com.geekify.android.player.StreamResolver
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 data class HealthUiState(
     val isRunning: Boolean = false,
@@ -21,9 +19,7 @@ data class HealthUiState(
     val mimeType: String? = null,
     val error: String? = null
 )
-
-@HiltViewModel
-class HealthViewModel @Inject constructor(
+class HealthViewModel constructor(
     private val musicSource: MusicSource,
     private val streamResolver: StreamResolver
 ) : ViewModel() {

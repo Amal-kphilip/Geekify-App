@@ -3,8 +3,6 @@ package com.geekify.android.settings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import javax.inject.Inject
-import javax.inject.Singleton
 
 data class GeekifyFeatureFlags(
     val mlRecommendationsEnabled: Boolean = true,
@@ -13,9 +11,7 @@ data class GeekifyFeatureFlags(
     val androidAutoBrowseEnabled: Boolean = true,
     val playbackDiagnosticsEnabled: Boolean = true
 )
-
-@Singleton
-class FeatureFlagManager @Inject constructor() {
+class FeatureFlagManager constructor() {
     private val _flags = MutableStateFlow(GeekifyFeatureFlags())
     val flags: StateFlow<GeekifyFeatureFlags> = _flags.asStateFlow()
 

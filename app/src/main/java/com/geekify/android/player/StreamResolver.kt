@@ -5,6 +5,8 @@ import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import com.geekify.android.player.extraction.InnerTubePlaybackExtractor
+import com.geekify.android.player.extraction.PlaybackFailureCategory
+import com.metrolist.innertubex.sabr.SabrBootstrap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -16,25 +18,26 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import java.util.LinkedHashMap
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Resolves a video to a stream using the InnerTubeX extractor while preserving
  * Geekify's existing Media3 service, queue, and stable on-disk cache-key scheme.
  */
-@Singleton
 class StreamResolver internal constructor(
     private val extractor: InnerTubePlaybackExtractor?,
     private val clock: () -> Long,
-    private val customFetcher: (suspend (String) -> ResolvedStream)?
+    private val customFetcher: (suspend (String) -> ResolvedStream)?,
+    private val localFileResolver: (suspend (String) -> ResolvedStream?)? = null
 ) : InnerTubeXPlayer {
 
-    @Inject
-    constructor(extractor: InnerTubePlaybackExtractor) : this(
+    constructor(
+        extractor: InnerTubePlaybackExtractor,
+        localFileResolver: (suspend (String) -> ResolvedStream?)? = null
+    ) : this(
         extractor = extractor,
         clock = System::currentTimeMillis,
-        customFetcher = null
+        customFetcher = null,
+        localFileResolver = localFileResolver
     )
     data class ResolvedStream(
         val url: String,
@@ -46,8 +49,14 @@ class StreamResolver internal constructor(
         val clientName: String = "",
         val requireBoundedRange: Boolean = false,
         val rangeChunkSizeBytes: Long = 0L,
-        val useRangeChunks: Boolean = false
-    )
+        val useRangeChunks: Boolean = false,
+        val sabrBootstrap: SabrBootstrap? = null,
+        val isHls: Boolean = false,
+        val isLocalFile: Boolean = false,
+        val contentLength: Long = -1L
+    ) {
+        val isSabr: Boolean get() = sabrBootstrap != null
+    }
 
     private companion object {
         const val MAX_CACHE_ENTRIES = 500
@@ -176,7 +185,7 @@ class StreamResolver internal constructor(
             }
         }
         toPrefetch.forEach { id ->
-            val job = scope.launch {
+            val job = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
                 try {
                     runCatching {
                         resolveInternal(videoId = id, forceRefresh = false, initiatedByPrefetch = true)
@@ -191,8 +200,9 @@ class StreamResolver internal constructor(
                 }
             }
             synchronized(lock) {
-                prefetchJobs[id] = job
+                prefetchJobs.put(id, job)?.cancel()
             }
+            job.start()
         }
     }
 
@@ -223,6 +233,10 @@ class StreamResolver internal constructor(
     }
 
     override fun markFailed(videoId: String) {
+        reportFailure(videoId, PlaybackFailureCategory.CDN_FORBIDDEN)
+    }
+
+    override fun reportFailure(videoId: String, category: PlaybackFailureCategory) {
         val failed = synchronized(lock) {
             val stream = cache.remove(videoId)
             stream?.let { byUrl.remove(it.url) }
@@ -232,11 +246,27 @@ class StreamResolver internal constructor(
             generations[videoId] = (generations[videoId] ?: 0L) + 1L
             stream
         }
-        failed?.clientName?.takeIf(String::isNotBlank)?.let { clientName ->
-            extractor?.markStreamClientFailed(videoId, clientName)
-            // A 403 frequently means the remote player config/cipher changed. Refresh it off the
-            // playback thread; the next bounded retry uses another client and/or fresh config.
-            scope.launch { runCatching { extractor?.refreshAfterStreamRejection() } }
+        val clientName = failed?.clientName.orEmpty()
+        if (clientName.isNotBlank()) {
+            extractor?.reportPlaybackFailure(videoId, clientName, category)
+        }
+        if (category == PlaybackFailureCategory.CDN_FORBIDDEN ||
+            category == PlaybackFailureCategory.TOKEN ||
+            category == PlaybackFailureCategory.SABR_ATTESTATION
+        ) {
+            val shouldInvalidatePoToken = category == PlaybackFailureCategory.TOKEN ||
+                category == PlaybackFailureCategory.SABR_ATTESTATION ||
+                (category == PlaybackFailureCategory.CDN_FORBIDDEN && clientName.isNotBlank() && !clientName.endsWith("__nopo"))
+            scope.launch {
+                runCatching {
+                    if (shouldInvalidatePoToken) {
+                        extractor?.invalidatePoTokenAttestation()
+                    }
+                    if (clientName.isNotBlank() || shouldInvalidatePoToken) {
+                        extractor?.refreshAfterStreamRejection()
+                    }
+                }
+            }
         }
     }
 
@@ -278,6 +308,8 @@ class StreamResolver internal constructor(
 
     private suspend fun doResolve(videoId: String): ResolvedStream {
         try {
+            // Fast-path: permanently downloaded or cached offline audio file
+            localFileResolver?.invoke(videoId)?.let { return it }
             customFetcher?.let { return it(videoId) }
             val ext = requireNotNull(extractor) { "InnerTubePlaybackExtractor is required when customFetcher is null" }
             val stream = ext.resolve(videoId)
@@ -291,7 +323,11 @@ class StreamResolver internal constructor(
                 clientName = stream.clientName,
                 requireBoundedRange = stream.requireBoundedRange,
                 rangeChunkSizeBytes = stream.rangeChunkSizeBytes,
-                useRangeChunks = stream.useRangeChunks
+                useRangeChunks = stream.useRangeChunks,
+                sabrBootstrap = stream.sabrBootstrap,
+                isHls = stream.isHls,
+                isLocalFile = false,
+                contentLength = stream.contentLength
             )
         } catch (error: CancellationException) {
             throw error

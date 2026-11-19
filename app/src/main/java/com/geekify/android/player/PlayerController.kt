@@ -3,7 +3,6 @@ package com.geekify.android.player
 import android.content.Context
 import android.os.SystemClock
 import com.geekify.android.data.model.Track
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -14,12 +13,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-import javax.inject.Singleton
-
-@Singleton
-class PlayerController @Inject constructor(
-    @ApplicationContext private val context: Context,
+class PlayerController constructor(
+    private val context: Context,
     val queueManager: QueueManager
 ) {
     val state: StateFlow<QueueState> = queueManager.state

@@ -15,16 +15,13 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import java.io.IOException
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Geekify-facing adapter to the InnerTubeX request backend. It keeps Geekify's existing
  * JSON parsers/domain models, while using the upstream client's request construction, session
  * handling, HTTP status checks and transient-request behavior for discovery endpoints.
  */
-@Singleton
-class GeekifyInnerTubeBackend @Inject constructor(
+class GeekifyInnerTubeBackend constructor(
     private val appSettings: AppSettingsRepository
 ) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -44,7 +41,7 @@ class GeekifyInnerTubeBackend @Inject constructor(
         innerTube.search(
             client = YouTubeClient.WEB_REMIX,
             query = query,
-            params = type?.let { SEARCH_PARAMS.getValue(it) }
+            params = type?.let { SEARCH_PARAMS[it.lowercase()] }
         )
     }
 

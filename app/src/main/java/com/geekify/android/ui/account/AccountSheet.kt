@@ -60,7 +60,9 @@ fun AccountSheet(
     onEditProfileClick: () -> Unit,
     onAddAccountClick: () -> Unit,
     onListenTogetherClick: () -> Unit,
-    onListeningStatsClick: () -> Unit
+    onListeningStatsClick: () -> Unit,
+    onDownloadsClick: () -> Unit = {},
+    onRecognitionClick: () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
     var showSignOutConfirmation by remember { mutableStateOf(false) }
@@ -101,6 +103,8 @@ fun AccountSheet(
                     },
                     onListenTogetherClick = { onListenTogetherClick(); onDismiss() },
                     onListeningStatsClick = { onListeningStatsClick(); onDismiss() },
+                    onDownloadsClick = { onDownloadsClick(); onDismiss() },
+                    onRecognitionClick = { onRecognitionClick(); onDismiss() },
                     onRecentsClick = { onRecentsClick(); onDismiss() },
                     onSettingsClick = { onSettingsClick(); onDismiss() },
                     onSignOut = { showSignOutConfirmation = true }
@@ -153,6 +157,8 @@ private fun ProfileHub(
     onProfileClick: () -> Unit,
     onListenTogetherClick: () -> Unit,
     onListeningStatsClick: () -> Unit,
+    onDownloadsClick: () -> Unit,
+    onRecognitionClick: () -> Unit,
     onRecentsClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onSignOut: () -> Unit
@@ -260,6 +266,8 @@ private fun ProfileHub(
                 DrawerRow(GeekifyIcons.SwitchAccount, stringResource(R.string.add_or_switch_account), onAccountClick)
             }
             DrawerRow(GeekifyIcons.Groups, "Listen together", onListenTogetherClick)
+            DrawerRow(GeekifyIcons.Download, "Offline downloads", onDownloadsClick)
+            DrawerRow(GeekifyIcons.GraphicEq, "Identify song", onRecognitionClick)
             DrawerRow(GeekifyIcons.History, "Recents", onRecentsClick)
             DrawerRow(GeekifyIcons.BarChart, "Listening statistics", onListeningStatsClick)
             DrawerRow(GeekifyIcons.Settings, "Settings and privacy", onSettingsClick)

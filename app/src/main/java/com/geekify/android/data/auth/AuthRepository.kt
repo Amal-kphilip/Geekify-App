@@ -20,7 +20,6 @@ import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.FirebaseApp
 import com.google.firebase.ktx.Firebase
-import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -28,8 +27,6 @@ import java.util.Base64
 import java.util.concurrent.atomic.AtomicLong
 import org.json.JSONArray
 import org.json.JSONObject
-import javax.inject.Inject
-import javax.inject.Singleton
 import timber.log.Timber
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -80,8 +77,7 @@ data class KnownAccount(
 enum class SyncState { IDLE, SYNCING, SAVED, OFFLINE, ERROR }
 
 /** Mirrors useAuthStore.ts + friendlyAuthError. */
-@Singleton
-class AuthRepository @Inject constructor(@ApplicationContext private val context: Context) {
+class AuthRepository constructor(private val context: Context) {
 
     private val defaultApp: FirebaseApp = FirebaseApp.getInstance()
     private val defaultAuth: FirebaseAuth = FirebaseAuth.getInstance(defaultApp)

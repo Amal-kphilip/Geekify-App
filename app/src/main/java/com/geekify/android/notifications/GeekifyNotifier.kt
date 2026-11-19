@@ -13,13 +13,9 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.geekify.android.MainActivity
 import com.geekify.android.R
-import dagger.hilt.android.qualifiers.ApplicationContext
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /** Builds and posts the update and tip notifications. Never touches the media playback notification. */
-@Singleton
-class GeekifyNotifier @Inject constructor(@ApplicationContext private val context: Context) {
+class GeekifyNotifier constructor(private val context: Context) {
     companion object {
         const val UPDATE_NOTIFICATION_ID = 2001
         const val TIP_NOTIFICATION_ID = 2002

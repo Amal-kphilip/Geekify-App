@@ -23,8 +23,6 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
-import javax.inject.Inject
-import javax.inject.Singleton
 
 data class DiscoveredCandidate(
     val track: Track,
@@ -56,8 +54,7 @@ interface CandidateProvider {
  * Primary candidate provider backed by YouTube Music (InnerTube).
  * All tracks returned by this provider have verified playback availability in Geekify.
  */
-@Singleton
-class YouTubeMusicCandidateProvider @Inject constructor(
+class YouTubeMusicCandidateProvider constructor(
     private val musicSource: MusicSource
 ) : CandidateProvider {
     override val providerId: String = "ytm"
@@ -154,8 +151,7 @@ class YouTubeMusicCandidateProvider @Inject constructor(
  * Discovers recordings and related artists outside YouTube Music's radio bubble, then resolves
  * playable matches through [YouTubeMusicSource] so playback availability is guaranteed.
  */
-@Singleton
-class MusicBrainzCandidateProvider @Inject constructor(
+class MusicBrainzCandidateProvider constructor(
     private val httpClient: OkHttpClient,
     private val musicSource: MusicSource
 ) : CandidateProvider {
@@ -251,8 +247,7 @@ class MusicBrainzCandidateProvider @Inject constructor(
 /**
  * Orchestrates multi-source candidate retrieval with bounded concurrency and canonical deduplication.
  */
-@Singleton
-class CandidateDiscoveryEngine @Inject constructor(
+class CandidateDiscoveryEngine constructor(
     private val primaryProvider: YouTubeMusicCandidateProvider
 ) {
     private val concurrencySemaphore = Semaphore(4)

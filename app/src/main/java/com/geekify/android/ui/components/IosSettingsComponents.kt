@@ -51,9 +51,9 @@ import com.geekify.android.ui.theme.GeekifyIcons
  * Cupertino / iOS 26 Dark Grouped Settings palette and reusable building blocks.
  */
 object IosPalette {
-    val systemGroupedBackground = Color(0xFF000000)
-    val secondarySystemGroupedBackground = Color(0xFF1C1C1E)
-    val tertiarySystemGroupedBackground = Color(0xFF2C2C2E)
+    val systemGroupedBackground: Color get() = com.geekify.android.ui.theme.InkBackground
+    val secondarySystemGroupedBackground: Color get() = com.geekify.android.ui.theme.InkPanel
+    val tertiarySystemGroupedBackground: Color get() = com.geekify.android.ui.theme.InkElevated
     val systemFill = Color(0x5C787880)
     val secondarySystemFill = Color(0x51787880)
     val separator = Color(0x99545458)

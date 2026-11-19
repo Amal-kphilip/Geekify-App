@@ -5,16 +5,13 @@ import com.geekify.android.data.local.HistoryRepository
 import com.geekify.android.data.local.LibraryRepository
 import com.geekify.android.player.PlayerController
 import com.geekify.android.update.AppUpdateManager
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * One pass of "should Geekify say anything right now?". Called by the periodic worker and follow-up kicks.
  * Order = priority: update first, then alternating personalized library/listening engagement and
  * rotating feature tips. At most ONE notification is posted per pass.
  */
-@Singleton
-class NotificationCoordinator @Inject constructor(
+class NotificationCoordinator constructor(
     private val store: NotificationStore,
     private val checker: UpdateChecker,
     private val notifier: GeekifyNotifier,

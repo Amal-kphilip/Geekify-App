@@ -1,12 +1,11 @@
 import java.util.Properties
 
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.plugin.compose")
-    id("org.jetbrains.kotlin.plugin.serialization")
-    id("com.google.dagger.hilt.android")
-    id("com.google.devtools.ksp")
-    id("com.google.gms.google-services")
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.google.services)
 }
 
 fun semanticVersionCode(versionName: String): Int? {
@@ -161,94 +160,102 @@ tasks.matching { task ->
 
 dependencies {
     // Core / lifecycle
-    implementation("androidx.core:core-ktx:1.19.1")
-    implementation("androidx.activity:activity-compose:1.12.1")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
-    implementation("androidx.lifecycle:lifecycle-service:2.10.0")
-    implementation("androidx.navigation:navigation-compose:2.10.2")
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.service)
+    implementation(libs.androidx.navigation.compose)
 
     // Compose
-    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3")
+    implementation(platform(libs.compose.bom))
+    implementation(libs.compose.ui)
+    implementation(libs.compose.ui.tooling.preview)
+    implementation(libs.compose.material3)
     // Animated Material 3 wave seekbar for the expanded player
-    implementation("ir.mahozad.multiplatform:wavy-slider:2.2.0")
-    implementation("androidx.compose.material:material-icons-extended")
-    debugImplementation("androidx.compose.ui:ui-tooling")
+    implementation(libs.wavy.slider)
+    implementation(libs.compose.material.icons.extended)
+    debugImplementation(libs.compose.ui.tooling)
 
     // Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.coroutines.guava)
 
     // Serialization
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.13.0")
+    implementation(libs.kotlinx.serialization.json)
 
     // Network
-    implementation("com.squareup.okhttp3:okhttp:5.5.1")
-    implementation("com.squareup.okhttp3:logging-interceptor:5.3.2")
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging)
 
-    // DI
-    implementation("com.google.dagger:hilt-android:2.60.1")
-    ksp("com.google.dagger:hilt-compiler:2.60.1")
-    implementation("androidx.hilt:hilt-navigation-compose:1.4.0")
+    // DI (Koin)
+    implementation(libs.koin.core)
+    implementation(libs.koin.android)
+    implementation(libs.koin.androidx.compose)
+    implementation(libs.koin.androidx.workmanager)
 
     // Room
-    implementation("androidx.room:room-runtime:2.8.5")
-    implementation("androidx.room:room-ktx:2.8.5")
-    ksp("androidx.room:room-compiler:2.8.5")
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
 
     // Backdrop blur for the Liquid Glass floating surfaces
-    implementation("dev.chrisbanes.haze:haze:1.7.0")
+    implementation(libs.haze)
 
-    // Background checks for update/engagement notifications (about twice a day)
-    implementation("androidx.work:work-runtime-ktx:2.12.0")
+    // Background checks & downloads
+    implementation(libs.androidx.work.runtime.ktx)
 
     // Baseline Profile installer for faster startup and reduced jank
-    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+    implementation(libs.androidx.profileinstaller)
 
     // DataStore
-    implementation("androidx.datastore:datastore-preferences:1.3.0")
+    implementation(libs.androidx.datastore.preferences)
 
     // Coil image loading
-    implementation("io.coil-kt.coil3:coil-compose:3.6.3")
-    implementation("io.coil-kt.coil3:coil-network-okhttp:3.3.0")
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
 
     // Geekify InnerTube backend adapter + InnerTubeX stream extraction
     implementation(project(":innertube"))
-    implementation("com.jakewharton.timber:timber:5.0.1")
-    implementation("androidx.collection:collection-ktx:1.7.0")
-    implementation("io.ktor:ktor-client-core:3.6.0")
-    implementation("io.ktor:ktor-client-okhttp:3.6.0")
-    implementation("io.ktor:ktor-client-content-negotiation:3.6.0")
-    implementation("io.ktor:ktor-client-encoding:3.6.0")
-    implementation("io.ktor:ktor-serialization-kotlinx-json:3.6.0")
+    implementation(libs.timber)
+    implementation(libs.androidx.collection.ktx)
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.okhttp)
+    implementation(libs.ktor.client.content.negotiation)
+    implementation(libs.ktor.client.encoding)
+    implementation(libs.ktor.serialization.kotlinx.json)
 
     // Media3 / ExoPlayer
-    implementation("androidx.media3:media3-exoplayer:1.6.1")
-    implementation("androidx.media3:media3-session:1.6.1")
-    implementation("androidx.media3:media3-ui:1.6.1")
-    implementation("androidx.media3:media3-datasource-okhttp:1.6.1")
+    implementation(libs.media3.common)
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.exoplayer.hls)
+    implementation(libs.media3.session)
+    implementation(libs.media3.ui)
+    implementation(libs.media3.datasource)
+    implementation(libs.media3.datasource.okhttp)
 
     // Firebase (BOM keeps versions aligned)
-    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
-    implementation("com.google.firebase:firebase-auth-ktx")
-    implementation("com.google.firebase:firebase-firestore-ktx")
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth.ktx)
+    implementation(libs.firebase.firestore.ktx)
     // FCM pushes announce published app releases; WorkManager remains the fallback.
-    implementation("com.google.firebase:firebase-messaging")
+    implementation(libs.firebase.messaging)
 
     // Google Credential Manager (replaces deprecated signInWithPopup on Android)
-    implementation("androidx.credentials:credentials:1.5.0")
-    implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
-    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.googleid)
 
     // Testing
-    testImplementation("junit:junit:4.13.2")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
-    testImplementation("org.robolectric:robolectric:4.14.1")
-    testImplementation("androidx.compose.ui:ui-test")
-    testImplementation("androidx.compose.ui:ui-test-junit4")
-    debugImplementation("androidx.compose.ui:ui-test-manifest")
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.koin.test)
+    testImplementation(libs.koin.test.junit4)
+    testImplementation(libs.room.testing)
+    testImplementation(libs.compose.ui.test)
+    testImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
 }
 
 // InnerTubeX v0.8.4 contains Java 21 bytecode (class-file version 65).

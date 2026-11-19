@@ -20,8 +20,6 @@ import com.geekify.android.ui.components.LocalBottomInset
 import com.geekify.android.ui.components.TrackRow
 import com.geekify.android.ui.theme.*
 import kotlinx.coroutines.flow.Flow
-import javax.inject.Inject
-import dagger.hilt.android.lifecycle.HiltViewModel
 
 @Composable
 fun RecentsScreen(viewModel: RecentsViewModel, onBack: () -> Unit, onPlay: (Track, List<Track>) -> Unit) {
@@ -49,8 +47,6 @@ fun RecentsScreen(viewModel: RecentsViewModel, onBack: () -> Unit, onPlay: (Trac
         }
     }
 }
-
-@HiltViewModel
-class RecentsViewModel @Inject constructor(repository: HistoryRepository) : ViewModel() {
+class RecentsViewModel constructor(repository: HistoryRepository) : ViewModel() {
     val recent: Flow<List<Track>> = repository.recent
 }

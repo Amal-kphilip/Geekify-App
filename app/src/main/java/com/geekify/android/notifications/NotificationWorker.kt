@@ -10,16 +10,17 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import dagger.hilt.android.EntryPointAccessors
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Runs twice a day (every 12 hours). Network is only used inside [UpdateChecker], which has its own 12 h cache. */
-class NotificationWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+class NotificationWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params), KoinComponent {
+    private val coordinator: NotificationCoordinator by inject()
+
     override suspend fun doWork(): Result {
-        val entry = EntryPointAccessors.fromApplication(applicationContext, NotificationEntryPoint::class.java)
         return try {
-            val coordinator = entry.coordinator()
             coordinator.syncTopicSubscription { updatesEnabled ->
                 UpdatePushSubscription.sync(
                     context = applicationContext,

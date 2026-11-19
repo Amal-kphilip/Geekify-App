@@ -10,7 +10,6 @@ import com.geekify.android.data.auth.KnownAccount
 import com.geekify.android.data.auth.SyncState
 import com.geekify.android.data.sync.SyncRepository
 import com.geekify.android.player.PlaybackService
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
@@ -18,7 +17,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 import kotlinx.coroutines.sync.Mutex
 
 data class AccountUiState(
@@ -31,9 +29,7 @@ data class AccountUiState(
     val error: String? = null,
     val message: String? = null
 )
-
-@HiltViewModel
-class AccountViewModel @Inject constructor(
+class AccountViewModel constructor(
     private val auth: AuthRepository,
     private val sync: SyncRepository
 ) : ViewModel() {

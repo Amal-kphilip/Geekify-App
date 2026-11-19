@@ -344,6 +344,15 @@ object Parsers {
                     if (continuation == null && curr.containsKey("continuationItemRenderer")) {
                         continuation = parseContinuation(curr)
                     }
+                    if (continuation == null && curr.containsKey("nextContinuationData")) {
+                        continuation = objectOrNull(curr["nextContinuationData"])?.str("continuation")
+                    }
+                    if (continuation == null && curr.containsKey("musicShelfContinuation")) {
+                        val conts = objectOrNull(curr["musicShelfContinuation"])?.get("continuations") as? JsonArray
+                        continuation = conts?.firstNotNullOfOrNull { item ->
+                            objectOrNull(objectOrNull(item)?.get("nextContinuationData"))?.str("continuation")
+                        }
+                    }
                     listOf("musicShelfRenderer", "musicCarouselShelfRenderer", "musicPlaylistShelfRenderer").forEach { key ->
                         objectOrNull(curr[key])?.let { block ->
                             val header = objectOrNull(block["header"])

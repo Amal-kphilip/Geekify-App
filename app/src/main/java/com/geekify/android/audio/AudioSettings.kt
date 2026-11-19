@@ -10,14 +10,11 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.geekify.android.data.local.safeDbCall
 import com.geekify.android.data.source.MusicResult
-import com.geekify.android.di.IoDispatcher
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Everything the audio settings screen can change. This is the contract between the UI and the audio
@@ -70,10 +67,9 @@ object EqPresets {
 }
 
 /** Saves [AudioSettings] in DataStore. Reads never throw (a failed read yields the defaults). */
-@Singleton
-class AudioSettingsRepository @Inject constructor(
+class AudioSettingsRepository constructor(
     private val dataStore: DataStore<Preferences>,
-    @IoDispatcher private val io: CoroutineDispatcher
+    private val io: CoroutineDispatcher
 ) {
     private val eqEnabled = booleanPreferencesKey("audio_eq_enabled")
     private val preset = stringPreferencesKey("audio_eq_preset")

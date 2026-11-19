@@ -25,7 +25,7 @@ data class ArtistItemsPage(
                         ?.runs,
                 )
 
-            // Extract album from last flexColumn (like SimpMusic does)
+            // Extract album from last flexColumn
             val album = renderer.flexColumns.lastOrNull()
                 ?.musicResponsiveListItemFlexColumnRenderer?.text?.runs
                 ?.firstOrNull()?.let {

@@ -12,7 +12,6 @@ import android.provider.Settings
 import androidx.compose.runtime.Immutable
 import androidx.core.content.FileProvider
 import com.geekify.android.notifications.ReleaseParser
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -36,8 +35,6 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.concurrent.TimeUnit
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlin.math.max
 
 enum class ChangelogCategory(val defaultTitle: String) {
@@ -130,9 +127,8 @@ data class CompletedUpdateInfo(
  * multi-release changelog timeline parsing, SHA-256 + signing-certificate verification,
  * and PackageInstaller / unknown-sources lifecycle coordination.
  */
-@Singleton
-class AppUpdateManager @Inject constructor(
-    @ApplicationContext private val context: Context
+class AppUpdateManager constructor(
+    private val context: Context
 ) {
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)

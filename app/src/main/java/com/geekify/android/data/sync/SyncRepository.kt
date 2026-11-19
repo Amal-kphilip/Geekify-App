@@ -27,7 +27,6 @@ import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,8 +42,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 import timber.log.Timber
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Synchronizes the local library (liked songs, playlists, saved collections, and listening history)
@@ -57,9 +54,8 @@ import javax.inject.Singleton
  *   `sync_last_synced_at`) so cloud pulls never overwrite unsynchronized offline local edits.
  * - Schedules [SyncWorker] with network constraints to automatically retry failed offline pushes.
  */
-@Singleton
-class SyncRepository @Inject constructor(
-    @ApplicationContext private val context: Context,
+class SyncRepository constructor(
+    private val context: Context,
     private val auth: AuthRepository,
     private val library: LibraryRepository,
     private val history: HistoryRepository,

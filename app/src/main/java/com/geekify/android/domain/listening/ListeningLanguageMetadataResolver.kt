@@ -16,15 +16,12 @@ import kotlinx.serialization.json.contentOrNull
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Resolves uncertain track languages from LyricsPlus metadata, then from the lyrics'
  * actual writing system. Network failures are non-fatal and never change playback.
  */
-@Singleton
-class ListeningLanguageMetadataResolver @Inject constructor(
+class ListeningLanguageMetadataResolver constructor(
     private val client: OkHttpClient
 ) {
     private val successfulResults = ConcurrentHashMap<String, String>()

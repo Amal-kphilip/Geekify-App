@@ -7,13 +7,9 @@ import com.geekify.android.data.local.LocalPlaylist
 import com.geekify.android.data.local.SavedCollection
 import com.geekify.android.data.model.Track
 import com.geekify.android.data.sync.SyncRepository
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-@HiltViewModel
-class LibraryViewModel @Inject constructor(
+class LibraryViewModel constructor(
     private val library: LibraryRepository,
     private val sync: SyncRepository,
     private val feedbackRepository: com.geekify.android.domain.recommend.RecommendationFeedbackRepository

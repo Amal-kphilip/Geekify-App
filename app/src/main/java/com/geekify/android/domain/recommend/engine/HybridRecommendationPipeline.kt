@@ -14,8 +14,6 @@ import kotlinx.serialization.json.Json
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlin.math.min
 import kotlin.random.Random
 
@@ -66,8 +64,7 @@ data class HybridPipelineOutput(
  * Stage 6: Construction of 8 distinct recommendation mix products (Made for You, Language & Genre/Mood Daily Mixes,
  *          Fresh Finds, More Like <Track>, More Like <Artist>, On Repeat, Repeat Rewind, and Exploration).
  */
-@Singleton
-class HybridRecommendationPipeline @Inject constructor(
+class HybridRecommendationPipeline constructor(
     private val classificationService: MusicClassificationService,
     private val contextEngine: RecommendationContextEngine,
     private val audioEmbeddingService: AudioEmbeddingService,

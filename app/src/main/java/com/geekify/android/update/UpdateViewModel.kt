@@ -7,7 +7,6 @@ import com.geekify.android.BuildConfig
 import com.geekify.android.notifications.GeekifyNotifier
 import com.geekify.android.notifications.NotificationStore
 import com.geekify.android.settings.AudioQualityPreference
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -20,8 +19,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
-import javax.inject.Inject
-import javax.inject.Singleton
 
 enum class UpdateState {
     CHECKING,
@@ -78,8 +75,7 @@ data class UpdateUiState(
  * rotating the screen or temporarily dismissing the update dialog never orphans or restarts
  * an in-progress APK download.
  */
-@Singleton
-class UpdateSessionCoordinator @Inject constructor(
+class UpdateSessionCoordinator constructor(
     private val updateManager: AppUpdateManager,
     private val notificationStore: NotificationStore,
     private val notifier: GeekifyNotifier
@@ -578,9 +574,7 @@ class UpdateSessionCoordinator @Inject constructor(
     private fun ReleaseParserVersionCodeFallback(versionName: String): Int =
         com.geekify.android.notifications.ReleaseParser.versionCodeFor(versionName) ?: 0
 }
-
-@HiltViewModel
-class UpdateViewModel @Inject constructor(
+class UpdateViewModel constructor(
     private val coordinator: UpdateSessionCoordinator
 ) : ViewModel() {
 

@@ -9,8 +9,8 @@ licensed under GNU GPL version 3. The Geekify repository's GPL-3.0 license remai
 applicable to this combined work. Original upstream history and notices should be
 preserved when redistributing modified source.
 
-The `innertube` module depends on the separately published InnerTubeX library
-`com.github.MetrolistGroup.innertubex:innertubex:v0.8.4`. Its upstream publication metadata
+The `innertube` and `app` modules depend on the separately published InnerTubeX library
+`com.github.MetrolistGroup.innertubex:innertubex:v0.11.9`. Its upstream publication metadata
 also declares GNU GPL version 3. See `https://github.com/MetrolistGroup/innertubex` for
 source, release details and contributor notices.
 

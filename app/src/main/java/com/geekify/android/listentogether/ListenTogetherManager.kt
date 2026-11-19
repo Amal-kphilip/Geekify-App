@@ -6,7 +6,6 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.geekify.android.BuildConfig
 import com.geekify.android.data.model.Track
-import com.geekify.android.di.IoDispatcher
 import com.geekify.android.player.QueueManager
 import java.net.URI
 import java.net.URLEncoder
@@ -15,8 +14,6 @@ import java.security.SecureRandom
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlin.math.abs
 import kotlin.math.min
 import kotlinx.coroutines.CoroutineDispatcher
@@ -68,12 +65,11 @@ data class RoomUiState(
  *  - Latency: a ping / pong round trip is measured and added to a peer's reported position; the local player
  *    is only re-seeked when it drifts more than [DRIFT_TOLERANCE_MS], so small jitter never causes stutter.
  */
-@Singleton
-class ListenTogetherManager @Inject constructor(
+class ListenTogetherManager constructor(
     private val http: OkHttpClient,
     private val queue: QueueManager,
     private val dataStore: DataStore<Preferences>,
-    @IoDispatcher io: CoroutineDispatcher
+    io: CoroutineDispatcher
 ) {
     private val scope = CoroutineScope(SupervisorJob() + io)
     private val _state = MutableStateFlow(RoomUiState())

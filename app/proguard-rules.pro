@@ -45,10 +45,9 @@
 # Firebase
 -dontwarn com.google.firebase.**
 
-# Hilt & Dagger
--dontwarn dagger.**
--dontwarn javax.annotation.**
--keep class * extends dagger.hilt.internal.GeneratedComponent
+# Koin DI
+-dontwarn org.koin.**
+-keep class org.koin.** { *; }
 
 # Baseline Profile & ProfileInstaller
 -dontwarn androidx.profileinstaller.**

@@ -7,8 +7,9 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -28,6 +29,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.geekify.android.ui.theme.AppFont
 import kotlin.math.roundToInt
 
 /**
@@ -44,15 +46,22 @@ fun MarqueeText(
     gap: Dp = 28.dp,
     speedDpPerSecond: Float = 42f
 ) {
+    val activeFont = AppFont
+    val localStyle = LocalTextStyle.current
+    val resolvedStyle = remember(localStyle, style, activeFont) {
+        val merged = localStyle.merge(style)
+        if (style.fontFamily != null) merged else merged.copy(fontFamily = activeFont)
+    }
+
     BoxWithConstraints(modifier = modifier.clipToBounds()) {
         val density = LocalDensity.current
         val textMeasurer = rememberTextMeasurer()
         val currentText by rememberUpdatedState(text)
 
-        val textWidthPx = remember(currentText, style) {
+        val textWidthPx = remember(currentText, resolvedStyle, density) {
             textMeasurer.measure(
                 text = AnnotatedString(currentText),
-                style = style,
+                style = resolvedStyle,
                 maxLines = 1,
                 softWrap = false
             ).size.width.toFloat()
@@ -66,7 +75,7 @@ fun MarqueeText(
                 text = currentText,
                 modifier = Modifier.fillMaxWidth(),
                 color = color,
-                style = style,
+                style = resolvedStyle,
                 maxLines = 1,
                 overflow = TextOverflow.Clip,
                 textAlign = textAlign
@@ -103,9 +112,9 @@ fun MarqueeText(
                     .graphicsLayer { translationX = offset.value },
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                MarqueeCopy(currentText, style, color, textAlign)
+                MarqueeCopy(currentText, resolvedStyle, color, textAlign)
                 Spacer(Modifier.width(gap))
-                MarqueeCopy(currentText, style, color, textAlign)
+                MarqueeCopy(currentText, resolvedStyle, color, textAlign)
             }
         }
     }

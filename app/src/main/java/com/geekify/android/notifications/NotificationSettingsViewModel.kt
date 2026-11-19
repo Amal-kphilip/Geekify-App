@@ -3,18 +3,13 @@ package com.geekify.android.notifications
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-@HiltViewModel
-class NotificationSettingsViewModel @Inject constructor(
+class NotificationSettingsViewModel constructor(
     private val store: NotificationStore,
-    @ApplicationContext private val context: Context
+    private val context: Context
 ) : ViewModel() {
     val prefs: StateFlow<NotificationPrefs> =
         store.prefs.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NotificationPrefs())

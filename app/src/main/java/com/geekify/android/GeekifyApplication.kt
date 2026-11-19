@@ -11,18 +11,20 @@ import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
 import com.geekify.android.appicon.AppIconManager
+import com.geekify.android.di.allAppModules
 import com.geekify.android.notifications.NotificationChannels
 import com.geekify.android.notifications.NotificationWorker
-import dagger.hilt.android.HiltAndroidApp
 import okhttp3.OkHttpClient
+import org.koin.android.ext.koin.androidContext
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
+import org.koin.core.context.GlobalContext
+import org.koin.core.context.startKoin
 import timber.log.Timber
-import javax.inject.Inject
 
-@HiltAndroidApp
-class GeekifyApplication : Application(), SingletonImageLoader.Factory {
+class GeekifyApplication : Application(), SingletonImageLoader.Factory, KoinComponent {
 
-    @Inject
-    lateinit var okHttpClient: OkHttpClient
+    private val okHttpClient: OkHttpClient by inject()
 
     override fun newImageLoader(context: PlatformContext): ImageLoader {
         return ImageLoader.Builder(context)
@@ -52,6 +54,26 @@ class GeekifyApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+
+        // Guard isolated subprocesses (e.g. :potoken WebView minter) from initializing main-process Koin/DB/WorkManager.
+        val currentProcess = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            runCatching { Application.getProcessName() }.getOrNull().orEmpty()
+        } else {
+            ""
+        }
+        if (currentProcess.endsWith(":potoken")) {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                runCatching { android.webkit.WebView.setDataDirectorySuffix("potoken") }
+            }
+            return
+        }
+
+        if (GlobalContext.getOrNull() == null) {
+            startKoin {
+                androidContext(this@GeekifyApplication)
+                modules(allAppModules)
+            }
+        }
 
         if (BuildConfig.DEBUG) {
             Timber.plant(Timber.DebugTree())

@@ -5,8 +5,6 @@ import com.geekify.android.data.local.RecommendationEngineDao
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlin.math.abs
 import kotlin.math.ln
 import kotlin.math.sqrt
@@ -68,8 +66,7 @@ data class StatisticalComparisonResult(
 /**
  * Randomized, reproducible, account-scoped A/B experimentation and statistical evaluation engine.
  */
-@Singleton
-class RecommendationExperimentManager @Inject constructor() {
+class RecommendationExperimentManager constructor() {
     companion object {
         const val DEFAULT_EXPERIMENT_ID = "rec_engine_v2_4_ab"
         const val MIN_IMPRESSIONS_PER_GROUP = 100

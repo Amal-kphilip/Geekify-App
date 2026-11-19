@@ -1,14 +1,11 @@
 package com.geekify.android.domain.recommend
 
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Remembers recent recommendation impressions separately for each account. A single global set
  * made one person's recommendations suppress tracks for every other signed-in account.
  */
-@Singleton
-class RecommendationMemory @Inject constructor() {
+class RecommendationMemory constructor() {
     private val shownByAccount = LinkedHashMap<String, LinkedHashSet<String>>()
 
     @Synchronized

@@ -10,8 +10,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.ConcurrentLinkedDeque
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
-import javax.inject.Inject
-import javax.inject.Singleton
 
 data class DiagnosticPlaybackError(
     val timestamp: Long = System.currentTimeMillis(),
@@ -36,9 +34,8 @@ data class DiagnosticsSnapshot(
  * Lightweight, thread-safe diagnostics and observability engine for playback reliability.
  * Redacts all URLs, tokens, and PII from diagnostics data.
  */
-@Singleton
-class PlaybackDiagnosticsTracker @Inject constructor(
-    @dagger.hilt.android.qualifiers.ApplicationContext private val context: Context
+class PlaybackDiagnosticsTracker constructor(
+    private val context: Context
 ) {
     private val totalResolutions = AtomicLong(0L)
     private val successfulResolutions = AtomicLong(0L)

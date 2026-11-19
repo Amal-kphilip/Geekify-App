@@ -24,6 +24,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -74,7 +76,8 @@ fun SearchScreen(
     onAvatarClick: () -> Unit,
     onTrackClick: (Track, List<Track>) -> Unit,
     onTrackActions: (Track) -> Unit,
-    onCardClick: (Card) -> Unit
+    onCardClick: (Card) -> Unit,
+    onRecognitionClick: () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
     val tabs = listOf("All", "Songs", "Videos", "Albums", "Artists", "Playlists")
@@ -191,7 +194,8 @@ fun SearchScreen(
                             singleLine = true,
                             textStyle = TextStyle(
                                 color = IosPalette.label,
-                                fontSize = 16.sp
+                                fontSize = 16.sp,
+                                fontFamily = AppFont
                             ),
                             cursorBrush = SolidColor(IosPalette.systemBlue),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -223,6 +227,22 @@ fun SearchScreen(
                                 contentDescription = "Clear",
                                 tint = IosPalette.secondarySystemGroupedBackground,
                                 modifier = Modifier.size(12.dp)
+                            )
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(Lime.copy(alpha = 0.16f))
+                                .clickable(onClick = onRecognitionClick),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.GraphicEq,
+                                contentDescription = "Identify Song",
+                                tint = Lime,
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }
@@ -743,7 +763,7 @@ fun SearchScreen(
 
                                     // Web Results: Songs / Videos
                                     if (response.songs.isNotEmpty() && (state.selectedTab == "All" || state.selectedTab == "Songs" || state.selectedTab == "Videos")) {
-                                        val displaySongs = if (state.selectedTab == "All") response.songs.take(10) else response.songs
+                                        val displaySongs = response.songs
                                         item(key = "songs_header") {
                                             SectionTitle(if (state.selectedTab == "Videos") "Videos" else "Songs")
                                         }
@@ -802,6 +822,23 @@ fun SearchScreen(
                                                     color = Lime,
                                                     strokeWidth = 2.dp
                                                 )
+                                            }
+                                        }
+                                    } else if (response.continuation != null) {
+                                        item(key = "load_more_btn") {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                TextButton(onClick = { viewModel.loadMore() }) {
+                                                    Text(
+                                                        text = "Load more results",
+                                                        color = Lime,
+                                                        fontWeight = FontWeight.SemiBold
+                                                    )
+                                                }
                                             }
                                         }
                                     }

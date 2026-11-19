@@ -24,7 +24,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import com.geekify.android.core.UiState
 import com.geekify.android.settings.LocalAppSettings
 import com.geekify.android.ui.components.CircleIconButton
@@ -38,7 +38,7 @@ private val Amber = Color(0xFFFCD34D)
 @Composable
 fun ListenTogetherScreen(
     onBack: () -> Unit,
-    viewModel: ListenTogetherViewModel = hiltViewModel()
+    viewModel: ListenTogetherViewModel = koinViewModel()
 ) {
     val ui by viewModel.state.collectAsState()
     val nowPlaying by viewModel.nowPlaying.collectAsState()

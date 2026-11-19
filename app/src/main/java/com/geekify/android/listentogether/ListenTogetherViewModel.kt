@@ -4,15 +4,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.geekify.android.core.UiState
 import com.geekify.android.player.QueueManager
-import dagger.hilt.android.lifecycle.HiltViewModel
-import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-
-@HiltViewModel
-class ListenTogetherViewModel @Inject constructor(
+class ListenTogetherViewModel constructor(
     private val manager: ListenTogetherManager,
     queue: QueueManager
 ) : ViewModel() {

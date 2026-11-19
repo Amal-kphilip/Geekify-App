@@ -3,7 +3,6 @@ package com.geekify.android.audio
 import androidx.annotation.OptIn
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
-import com.geekify.android.di.DefaultDispatcher
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -17,8 +16,6 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * The single place where audio settings meet the audio pipeline.
@@ -30,17 +27,39 @@ import javax.inject.Singleton
  * to DataStore a moment after the last one. Nothing here re-creates the player.
  */
 @OptIn(UnstableApi::class)
-@Singleton
-class AudioEffectsController @Inject constructor(
+class AudioEffectsController constructor(
     private val repository: AudioSettingsRepository,
-    @DefaultDispatcher dispatcher: CoroutineDispatcher
+    dispatcher: CoroutineDispatcher
 ) {
     val equalizer = BiquadEqualizerProcessor()
     val normalizer = NormalizationProcessor()
     val reactiveMeter = MusicReactiveMeterProcessor()
 
-    /** The processors in the order the audio sink runs them. */
+    private val secondaryEqualizer = BiquadEqualizerProcessor()
+    private val secondaryNormalizer = NormalizationProcessor()
+
+    /** The processors in the order the primary audio sink runs them. */
     val processors: Array<AudioProcessor> get() = arrayOf(equalizer, normalizer, reactiveMeter)
+
+    /**
+     * Independent processor chain for the secondary/preloaded ExoPlayer so two concurrent
+     * [androidx.media3.exoplayer.audio.DefaultAudioSink] threads never mutate the same DSP state.
+     */
+    fun createProcessorChain(usePrimarySlot: Boolean): Array<AudioProcessor> {
+        val current = _settings.value
+        return if (usePrimarySlot) {
+            equalizer.setBands(current.eqEnabled, current.bandGainsDb)
+            normalizer.setEnabled(current.normalize)
+            arrayOf(equalizer, normalizer, reactiveMeter)
+        } else {
+            secondaryEqualizer.setBands(current.eqEnabled, current.bandGainsDb)
+            secondaryNormalizer.setEnabled(current.normalize)
+            arrayOf(secondaryEqualizer, secondaryNormalizer)
+        }
+    }
+
+    /** Updates loudness on the secondary/preloaded player's normalizer before crossfade starts. */
+    fun setSecondaryTrackLoudness(loudnessDb: Float?) = secondaryNormalizer.setTrackLoudnessDb(loudnessDb)
 
     val beatIntensity: StateFlow<Float>
         get() = reactiveMeter.beatIntensity
@@ -82,6 +101,8 @@ class AudioEffectsController @Inject constructor(
     private fun apply(s: AudioSettings) {
         equalizer.setBands(s.eqEnabled, s.bandGainsDb)
         normalizer.setEnabled(s.normalize)
+        secondaryEqualizer.setBands(s.eqEnabled, s.bandGainsDb)
+        secondaryNormalizer.setEnabled(s.normalize)
     }
 
     private companion object {

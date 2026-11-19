@@ -3,14 +3,10 @@ package com.geekify.android.data.local
 import com.geekify.android.data.model.Track
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /** A song and how many times it has been properly listened to. */
 data class PlayStat(val videoId: String, val title: String, val artist: String, val plays: Int, val lastPlayedAt: Long)
-
-@Singleton
-class HistoryRepository @Inject constructor(
+class HistoryRepository constructor(
     private val dao: HistoryDao,
     private val stats: PlayStatDao
 ) {

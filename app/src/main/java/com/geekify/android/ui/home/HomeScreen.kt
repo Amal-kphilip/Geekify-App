@@ -80,6 +80,7 @@ fun HomeScreen(
     onAddToQueue: (Track) -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
+    val homeCust = com.geekify.android.customization.LocalCustomizationState.current.home
     val filters = listOf("Everything", "Songs", "Albums", "Playlists", "Artists")
     var showAllPlaylists by remember { mutableStateOf(false) }
 
@@ -287,17 +288,19 @@ fun HomeScreen(
                                 .fillMaxWidth()
                                 .padding(top = 16.dp)
                         ) {
-                            Text(
-                                text = "Hi, $firstName",
-                                color = TextPrimary,
-                                fontSize = 32.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(horizontal = 20.dp)
-                            )
+                            if (homeCust.showGreetingHeader) {
+                                Text(
+                                    text = "Hi, $firstName",
+                                    color = TextPrimary,
+                                    fontSize = 32.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 20.dp)
+                                )
 
-                            Spacer(Modifier.height(20.dp))
+                                Spacer(Modifier.height(20.dp))
+                            }
 
                             LazyRow(
                                 contentPadding = PaddingValues(horizontal = 20.dp),
@@ -385,124 +388,215 @@ fun HomeScreen(
                     }
                 }
 
-                // ---- Curated & trending ----
-                if (discover.isNotEmpty()) {
-                    item {
-                        val activeDiscoverIndex by remember(discover.size) {
-                            derivedStateOf {
-                                if (discover.isEmpty()) 0
-                                else {
-                                    val raw = discoverListState.firstVisibleItemIndex % discover.size
-                                    if (raw < 0) raw + discover.size else raw
+                // ---- Dynamic ordered & toggleable Home sections ----
+                val orderedVisibleSections = homeCust.sectionOrder.filter { it !in homeCust.hiddenSections }
+                for (sectionId in orderedVisibleSections) {
+                    when (sectionId) {
+                        com.geekify.android.customization.HomeSectionId.DISCOVER_CAROUSEL -> {
+                            if (discover.isNotEmpty()) {
+                                item(key = "section_discover_carousel") {
+                                    val activeDiscoverIndex by remember(discover.size) {
+                                        derivedStateOf {
+                                            if (discover.isEmpty()) 0
+                                            else {
+                                                val raw = discoverListState.firstVisibleItemIndex % discover.size
+                                                if (raw < 0) raw + discover.size else raw
+                                            }
+                                        }
+                                    }
+                                    Column(modifier = Modifier.padding(top = 32.dp)) {
+                                        if (homeCust.showSectionTitles) {
+                                            SectionTitle("Curated & trending")
+                                            Spacer(Modifier.height(6.dp))
+                                        }
+                                        val discoverItemCount = if (isLooping) discover.size * DISCOVER_LOOP_FACTOR else discover.size
+                                        LazyRow(
+                                            state = discoverListState,
+                                            flingBehavior = discoverSnapFling,
+                                            contentPadding = PaddingValues(horizontal = 20.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                        ) {
+                                            items(
+                                                count = discoverItemCount,
+                                                key = { index ->
+                                                    val realIdx = index % discover.size
+                                                    val cycle = index / discover.size
+                                                    "${discover[realIdx].key}:$cycle"
+                                                },
+                                                contentType = { "discover_card" }
+                                            ) { index ->
+                                                val realIdx = index % discover.size
+                                                val card = discover[realIdx]
+                                                val lead = card.lead
+                                                DiscoverCard(
+                                                    item = card,
+                                                    color = DiscoverColors[realIdx % DiscoverColors.size],
+                                                    liked = lead != null && lead.videoId in likedIds,
+                                                    onToggleLike = { lead?.let(onToggleLike) },
+                                                    onAddToQueue = { lead?.let(onAddToQueue) },
+                                                    onMore = { lead?.let(onTrackActions) },
+                                                    cornerRadiusDp = homeCust.cardCornerRadiusDp,
+                                                    showMetadata = homeCust.showMetadata,
+                                                    modifier = Modifier.width((LocalConfiguration.current.screenWidthDp.dp * 0.86f).coerceAtMost(350.dp))
+                                                )
+                                            }
+                                        }
+                                        if (discover.size > 1) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(top = 12.dp),
+                                                horizontalArrangement = Arrangement.Center,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                discover.indices.forEach { idx ->
+                                                    val isSelected = idx == activeDiscoverIndex
+                                                    val dotWidth by animateDpAsState(
+                                                        targetValue = if (isSelected) 18.dp else 6.dp,
+                                                        animationSpec = tween(240),
+                                                        label = "discoverDotWidth"
+                                                    )
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .padding(horizontal = 3.dp)
+                                                            .height(6.dp)
+                                                            .width(dotWidth)
+                                                            .clip(CircleShape)
+                                                            .background(
+                                                                if (isSelected) Lime else Color.White.copy(alpha = 0.22f)
+                                                            )
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
-                        Column(modifier = Modifier.padding(top = 32.dp)) {
-                            SectionTitle("Curated & trending")
-                            Spacer(Modifier.height(6.dp))
-                            val discoverItemCount = if (isLooping) discover.size * DISCOVER_LOOP_FACTOR else discover.size
-                            LazyRow(
-                                state = discoverListState,
-                                flingBehavior = discoverSnapFling,
-                                contentPadding = PaddingValues(horizontal = 20.dp),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp)
-                            ) {
-                                items(
-                                    count = discoverItemCount,
-                                    key = { index ->
-                                        val realIdx = index % discover.size
-                                        val cycle = index / discover.size
-                                        "${discover[realIdx].key}:$cycle"
-                                    },
-                                    contentType = { "discover_card" }
-                                ) { index ->
-                                    val realIdx = index % discover.size
-                                    val card = discover[realIdx]
-                                    val lead = card.lead
-                                    DiscoverCard(
-                                        item = card,
-                                        color = DiscoverColors[realIdx % DiscoverColors.size],
-                                        liked = lead != null && lead.videoId in likedIds,
-                                        onToggleLike = { lead?.let(onToggleLike) },
-                                        onAddToQueue = { lead?.let(onAddToQueue) },
-                                        onMore = { lead?.let(onTrackActions) },
-                                        modifier = Modifier.width((LocalConfiguration.current.screenWidthDp.dp * 0.86f).coerceAtMost(350.dp))
-                                    )
-                                }
-                            }
-                            if (discover.size > 1) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 12.dp),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    discover.indices.forEach { idx ->
-                                        val isSelected = idx == activeDiscoverIndex
-                                        val dotWidth by animateDpAsState(
-                                            targetValue = if (isSelected) 18.dp else 6.dp,
-                                            animationSpec = tween(240),
-                                            label = "discoverDotWidth"
-                                        )
-                                        Box(
+
+                        com.geekify.android.customization.HomeSectionId.DAILY_PICKS -> {
+                            if (listItems.isNotEmpty()) {
+                                if (homeCust.showSectionTitles) {
+                                    item(key = "section_daily_header") {
+                                        Row(
                                             modifier = Modifier
-                                                .padding(horizontal = 3.dp)
-                                                .height(6.dp)
-                                                .width(dotWidth)
-                                                .clip(CircleShape)
-                                                .background(
-                                                    if (isSelected) Lime else Color.White.copy(alpha = 0.22f)
+                                                .fillMaxWidth()
+                                                .padding(top = 32.dp, end = 20.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            SectionTitle(listSectionTitle, modifier = Modifier.weight(1f))
+                                            if (listItems.size > 5) {
+                                                Text(
+                                                    text = if (showAllPlaylists) "Show less" else "See all",
+                                                    color = TextSecondary,
+                                                    fontSize = 16.sp,
+                                                    modifier = Modifier.bouncyClickable { showAllPlaylists = !showAllPlaylists }
                                                 )
+                                            }
+                                        }
+                                    }
+                                }
+                                if (homeCust.layoutMode == com.geekify.android.customization.HomeLayoutMode.COMPACT_GRID) {
+                                    val cols = homeCust.gridColumns.coerceIn(2, 3)
+                                    val chunked = visibleList.chunked(cols)
+                                    itemsIndexed(
+                                        items = chunked,
+                                        key = { rowIdx, row -> "daily_grid:$rowIdx:${row.firstOrNull()?.id}" },
+                                        contentType = { _, _ -> "daily_grid_row" }
+                                    ) { _, rowItems ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 20.dp, vertical = 6.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                        ) {
+                                            rowItems.forEach { item ->
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clip(RoundedCornerShape(homeCust.cardCornerRadiusDp.dp))
+                                                        .background(InkPanel)
+                                                        .bouncyClickable { item.onClick() }
+                                                        .padding(10.dp)
+                                                ) {
+                                                    Column {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .height(homeCust.artworkSizeDp.dp)
+                                                                .clip(RoundedCornerShape((homeCust.cardCornerRadiusDp - 4).coerceAtLeast(8).dp))
+                                                                .background(InkElevated),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            if (item.art != null) {
+                                                                AsyncImage(
+                                                                    model = item.art,
+                                                                    contentDescription = item.title,
+                                                                    modifier = Modifier.fillMaxSize(),
+                                                                    contentScale = ContentScale.Crop
+                                                                )
+                                                            } else {
+                                                                Icon(GeekifyIcons.MusicNote, contentDescription = null, tint = TextSecondary)
+                                                            }
+                                                        }
+                                                        Spacer(Modifier.height(8.dp))
+                                                        Text(
+                                                            text = item.title,
+                                                            color = TextPrimary,
+                                                            fontSize = 14.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                        if (homeCust.showMetadata) {
+                                                            Text(
+                                                                text = item.subtitle,
+                                                                color = TextSecondary,
+                                                                fontSize = 12.sp,
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            repeat(cols - rowItems.size) {
+                                                Spacer(Modifier.weight(1f))
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    items(
+                                        count = visibleList.size,
+                                        key = { index -> visibleList[index].id },
+                                        contentType = { "daily_row" }
+                                    ) { index ->
+                                        PlaylistRow(
+                                            item = visibleList[index],
+                                            artworkSizeDp = homeCust.artworkSizeDp,
+                                            cornerRadiusDp = (homeCust.cardCornerRadiusDp - 4).coerceAtLeast(8),
+                                            showMetadata = homeCust.showMetadata
                                         )
                                     }
                                 }
                             }
                         }
-                    }
-                }
 
-                // ---- Top daily playlists ----
-                if (listItems.isNotEmpty()) {
-                    item {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 32.dp, end = 20.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            SectionTitle(listSectionTitle, modifier = Modifier.weight(1f))
-                            if (listItems.size > 5) {
-                                Text(
-                                    text = if (showAllPlaylists) "Show less" else "See all",
-                                    color = TextSecondary,
-                                    fontSize = 16.sp,
-                                    modifier = Modifier.bouncyClickable { showAllPlaylists = !showAllPlaylists }
+                        com.geekify.android.customization.HomeSectionId.FEED_SHELVES -> {
+                            itemsIndexed(
+                                items = state.shelves,
+                                key = { index, shelf -> "shelf:$index:${shelf.title}" },
+                                contentType = { _, _ -> "shelf" }
+                            ) { _, shelf ->
+                                ShelfRow(
+                                    shelf = if (homeCust.showSectionTitles) shelf else shelf.copy(title = ""),
+                                    onTrackClick = onTrackClick,
+                                    onCardClick = onCardClick,
+                                    onTrackLongClick = onTrackActions
                                 )
                             }
                         }
                     }
-                    items(
-                        count = visibleList.size,
-                        key = { index -> visibleList[index].id },
-                        contentType = { "daily_row" }
-                    ) { index ->
-                        PlaylistRow(item = visibleList[index])
-                    }
-                }
-
-                // ---- Remaining shelves from the feed ----
-                itemsIndexed(
-                    items = state.shelves,
-                    key = { index, shelf -> "shelf:$index:${shelf.title}" },
-                    contentType = { _, _ -> "shelf" }
-                ) { _, shelf ->
-                    ShelfRow(
-                        shelf = shelf,
-                        onTrackClick = onTrackClick,
-                        onCardClick = onCardClick,
-                        onTrackLongClick = onTrackActions
-                    )
                 }
             }
         }
@@ -535,7 +629,9 @@ private fun DiscoverCard(
     onToggleLike: () -> Unit,
     onAddToQueue: () -> Unit,
     onMore: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    cornerRadiusDp: Int = 28,
+    showMetadata: Boolean = true
 ) {
     val currentTrackId = LocalNowPlayingId.current
     val isPlayingNow = LocalIsPlaying.current
@@ -547,7 +643,7 @@ private fun DiscoverCard(
     Box(
         modifier = modifier
             .height(186.dp)
-            .clip(RoundedCornerShape(28.dp))
+            .clip(RoundedCornerShape(cornerRadiusDp.dp))
             .background(color)
             .run {
                 if (item.lead != null) {
@@ -600,15 +696,17 @@ private fun DiscoverCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = item.description,
-                color = OnPastel.copy(alpha = 0.82f),
-                fontSize = 13.sp,
-                lineHeight = 18.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
+            if (showMetadata) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = item.description,
+                    color = OnPastel.copy(alpha = 0.82f),
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
 
         Row(
@@ -675,7 +773,12 @@ private fun CardAction(icon: ImageVector, description: String, onClick: () -> Un
 }
 
 @Composable
-internal fun PlaylistRow(item: ListRowItem) {
+internal fun PlaylistRow(
+    item: ListRowItem,
+    artworkSizeDp: Int = 72,
+    cornerRadiusDp: Int = 20,
+    showMetadata: Boolean = true
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -691,8 +794,8 @@ internal fun PlaylistRow(item: ListRowItem) {
     ) {
         Box(
             modifier = Modifier
-                .size(72.dp)
-                .clip(RoundedCornerShape(20.dp))
+                .size(artworkSizeDp.dp)
+                .clip(RoundedCornerShape(cornerRadiusDp.dp))
                 .background(InkElevated),
             contentAlignment = Alignment.Center
         ) {
@@ -717,14 +820,16 @@ internal fun PlaylistRow(item: ListRowItem) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = item.subtitle,
-                color = TextSecondary,
-                fontSize = 14.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            if (showMetadata) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = item.subtitle,
+                    color = TextSecondary,
+                    fontSize = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
         Spacer(Modifier.width(12.dp))
         PlaylistRowPlayButton(item = item)

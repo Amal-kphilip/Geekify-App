@@ -18,7 +18,6 @@ import com.geekify.android.domain.recommend.Recommender
 import com.geekify.android.domain.recommend.engine.CandidateScoreDiagnostics
 import com.geekify.android.domain.recommend.engine.HybridRecommendationPipeline
 import kotlin.random.Random
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -32,7 +31,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Calendar
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
-import javax.inject.Inject
 
 data class HomeUiState(
     val greeting: String = "",
@@ -47,9 +45,7 @@ data class HomeUiState(
     /** The shelves on screen come from the local cache (cold start or offline), not from a fresh response. */
     val fromCache: Boolean = false
 )
-
-@HiltViewModel
-class HomeViewModel @Inject constructor(
+class HomeViewModel constructor(
     private val musicSource: MusicSource,
     private val library: LibraryRepository,
     private val history: HistoryRepository,

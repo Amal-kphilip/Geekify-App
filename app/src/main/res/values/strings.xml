@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="widget_music_description">Now Playing controls and artwork</string>
+    <string name="widget_recognizer_description">Identify playing music with one tap</string>
     <string name="channel_playback_name">Music playback</string>
     <string name="channel_updates_name">Geekify updates</string>
     <string name="channel_tips_name">Geekify tips</string>

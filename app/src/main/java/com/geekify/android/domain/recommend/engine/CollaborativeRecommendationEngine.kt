@@ -3,8 +3,6 @@ package com.geekify.android.domain.recommend.engine
 import com.geekify.android.data.local.CollaborativeInteractionEntity
 import java.security.MessageDigest
 import java.util.Locale
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlin.math.ln
 import kotlin.math.sqrt
 import kotlin.random.Random
@@ -51,8 +49,7 @@ data class CollaborativeModelSnapshot(
  * 3. Artist-to-Artist cross-listener co-occurrence (discovering e.g. Malayalam -> Tamil artist bridges).
  * 4. Privacy-preserving salted SHA-256 user identifier hashing and strict account isolation.
  */
-@Singleton
-class CollaborativeRecommendationEngine @Inject constructor() {
+class CollaborativeRecommendationEngine constructor() {
     companion object {
         const val LATENT_DIM = 16
         const val DEFAULT_MIN_COHORT_LISTENERS = 2

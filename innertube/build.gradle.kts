@@ -1,6 +1,6 @@
 plugins {
-    id("com.android.library")
-    id("org.jetbrains.kotlin.plugin.serialization")
+    alias(libs.plugins.android.library)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -23,20 +23,20 @@ kotlin {
 }
 
 dependencies {
-    // InnerTubeX provides client fallback, player config/cipher handling and stream extraction.
-    api("com.github.MetrolistGroup.innertubex:innertubex:v0.8.4")
-    implementation("io.ktor:ktor-client-core:3.6.0")
-    implementation("io.ktor:ktor-client-okhttp:3.6.0")
-    implementation("io.ktor:ktor-client-content-negotiation:3.6.0")
-    implementation("io.ktor:ktor-client-encoding:3.6.0")
-    implementation("io.ktor:ktor-serialization-kotlinx-json:3.6.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.13.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
-    implementation("com.squareup.okhttp3:okhttp:5.5.1")
-    implementation("com.jakewharton.timber:timber:5.0.1")
+    // InnerTubeX provides client fallback, player config/cipher handling, SABR and stream extraction.
+    api(libs.innertubex)
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.okhttp)
+    implementation(libs.ktor.client.content.negotiation)
+    implementation(libs.ktor.client.encoding)
+    implementation(libs.ktor.serialization.kotlinx.json)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.okhttp)
+    implementation(libs.timber)
 
-    testImplementation("junit:junit:4.13.2")
-    testImplementation("io.ktor:ktor-client-mock:3.6.0")
+    testImplementation(libs.junit)
+    testImplementation(libs.ktor.client.mock)
 }
 
 // InnerTubeX v0.8.4 contains Java 21 bytecode (class-file version 65).

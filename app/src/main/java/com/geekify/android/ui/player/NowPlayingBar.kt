@@ -70,6 +70,8 @@ fun NowPlayingBar(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val liked by viewModel.isCurrentLiked.collectAsStateWithLifecycle()
     val track = state.current ?: return
+    val miniCust = com.geekify.android.customization.LocalCustomizationState.current.miniPlayer
+    val gestureCust = com.geekify.android.customization.LocalCustomizationState.current.gestures
 
     // Use the same resolved artwork URL as ExpandedPlayerScreen so Coil reuses the exact
     // decoded in-memory bitmap across both player states without reloading.
@@ -77,9 +79,20 @@ fun NowPlayingBar(
     val pressed = remember { mutableStateOf(false) }
     val pressAnim by animateFloatAsState(if (pressed.value) 1f else 0f, label = "miniPress")
     val density = LocalDensity.current
-    val dismissThresholdPx = with(density) { 72.dp.toPx() }
+    val dismissThresholdPx = with(density) { (72.dp / gestureCust.gestureSensitivity.coerceIn(0.6f, 1.5f)).toPx() }
     val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
-    val shape = if (isInline) RoundedCornerShape(28.dp) else RoundedCornerShape(32.dp)
+    val resolvedRadius = when {
+        isInline -> 28.dp
+        miniCust.style == com.geekify.android.customization.MiniPlayerStyle.ROUNDED_CARD -> 18.dp
+        miniCust.style == com.geekify.android.customization.MiniPlayerStyle.COMPACT_SLIM -> 24.dp
+        else -> miniCust.cornerRadiusDp.dp
+    }
+    val resolvedHeight = when {
+        isInline -> 56.dp
+        miniCust.style == com.geekify.android.customization.MiniPlayerStyle.COMPACT_SLIM -> 54.dp
+        else -> miniCust.heightDp.dp
+    }
+    val shape = RoundedCornerShape(resolvedRadius)
 
     DisposableEffect(isInline, transitionState) {
         transitionState?.miniIsInline = isInline
@@ -96,7 +109,7 @@ fun NowPlayingBar(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .then(if (isInline) Modifier.height(56.dp) else Modifier.height(64.dp))
+            .height(resolvedHeight)
             .onGloballyPositioned { coords ->
                 if (coords.isAttached) {
                     transitionState?.miniContainerBounds = coords.boundsInRoot()
@@ -151,7 +164,7 @@ fun NowPlayingBar(
                                 density = density,
                                 fallbackScreenHeightPx = screenHeightPx
                             )
-                        } else if (!state.isPlaying && totalDownDrag >= dismissThresholdPx) {
+                        } else if (!state.isPlaying && gestureCust.swipeToDismissMiniPlayer && totalDownDrag >= dismissThresholdPx) {
                             onDismiss()
                         }
                         totalDownDrag = 0f
@@ -180,35 +193,42 @@ fun NowPlayingBar(
                 ),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val artSize = if (isInline) 38.dp else 46.dp
-            Box(
-                modifier = Modifier
-                    .size(artSize)
-                    .onGloballyPositioned { coords ->
-                        if (coords.isAttached) {
-                            transitionState?.miniArtBounds = coords.boundsInRoot()
-                        }
-                    }
-                    .graphicsLayer {
-                        alpha = if (transitionState?.isExpandedOrTransitioning == true) 0f else 1f
-                    }
-                    .clip(CircleShape)
-                    .background(InkElevated),
-                contentAlignment = Alignment.Center
-            ) {
-                if (thumbUrl != null) {
-                    AsyncImage(
-                        model = thumbUrl,
-                        contentDescription = track.title,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Icon(GeekifyIcons.MusicNote, contentDescription = null, tint = TextSecondary)
-                }
+            val artSize = if (isInline) 38.dp else (resolvedHeight - 18.dp).coerceIn(36.dp, 52.dp)
+            val artShape = when (miniCust.artworkShape) {
+                com.geekify.android.customization.MiniPlayerArtworkShape.CIRCLE -> CircleShape
+                com.geekify.android.customization.MiniPlayerArtworkShape.ROUNDED -> RoundedCornerShape(12.dp)
+                com.geekify.android.customization.MiniPlayerArtworkShape.SQUARE -> RoundedCornerShape(4.dp)
             }
+            if (miniCust.showArtwork) {
+                Box(
+                    modifier = Modifier
+                        .size(artSize)
+                        .onGloballyPositioned { coords ->
+                            if (coords.isAttached) {
+                                transitionState?.miniArtBounds = coords.boundsInRoot()
+                            }
+                        }
+                        .graphicsLayer {
+                            alpha = if (transitionState?.isExpandedOrTransitioning == true) 0f else 1f
+                        }
+                        .clip(artShape)
+                        .background(InkElevated),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (thumbUrl != null) {
+                        AsyncImage(
+                            model = thumbUrl,
+                            contentDescription = track.title,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Icon(GeekifyIcons.MusicNote, contentDescription = null, tint = TextSecondary)
+                    }
+                }
 
-            Spacer(Modifier.width(if (isInline) 10.dp else 12.dp))
+                Spacer(Modifier.width(if (isInline) 10.dp else 12.dp))
+            }
 
             Column(
                 modifier = Modifier
@@ -254,19 +274,34 @@ fun NowPlayingBar(
             }
 
             if (!isInline) {
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
 
-                LikeButton(
-                    liked = liked,
-                    onClick = { if (controlsInteractive()) viewModel.toggleLikeCurrent() },
-                    modifier = Modifier
-                        .size(40.dp)
-                        .graphicsLayer {
-                            val p = transitionState?.progress ?: 1f
-                            alpha = ((p - 0.62f) / 0.38f).coerceIn(0f, 1f)
-                        },
-                    size = 22.dp
-                )
+                if (miniCust.showLikeButton) {
+                    LikeButton(
+                        liked = liked,
+                        onClick = { if (controlsInteractive()) viewModel.toggleLikeCurrent() },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .graphicsLayer {
+                                val p = transitionState?.progress ?: 1f
+                                alpha = ((p - 0.62f) / 0.38f).coerceIn(0f, 1f)
+                            },
+                        size = 22.dp
+                    )
+                }
+                if (miniCust.showPreviousButton) {
+                    IconButton(
+                        onClick = { if (controlsInteractive()) viewModel.previous() },
+                        modifier = Modifier
+                            .size(38.dp)
+                            .graphicsLayer {
+                                val p = transitionState?.progress ?: 1f
+                                alpha = ((p - 0.62f) / 0.38f).coerceIn(0f, 1f)
+                            }
+                    ) {
+                        Icon(GeekifyIcons.SkipPrevious, contentDescription = "Previous", tint = Color.White, modifier = Modifier.size(21.dp))
+                    }
+                }
             } else {
                 Spacer(Modifier.width(6.dp))
             }
@@ -310,67 +345,73 @@ fun NowPlayingBar(
             }
 
             if (!isInline) {
-                Spacer(Modifier.width(2.dp))
+                if (miniCust.showNextButton) {
+                    Spacer(Modifier.width(2.dp))
 
-                IconButton(
-                    onClick = { if (controlsInteractive()) viewModel.next() },
-                    modifier = Modifier
-                        .size(40.dp)
-                        .onGloballyPositioned { coords ->
-                            if (coords.isAttached) {
-                                transitionState?.miniNextBounds = coords.boundsInRoot()
+                    IconButton(
+                        onClick = { if (controlsInteractive()) viewModel.next() },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .onGloballyPositioned { coords ->
+                                if (coords.isAttached) {
+                                    transitionState?.miniNextBounds = coords.boundsInRoot()
+                                }
                             }
-                        }
-                        .graphicsLayer {
-                            alpha = if (transitionState?.isExpandedOrTransitioning == true) 0f else 1f
-                        }
-                ) {
-                    Icon(GeekifyIcons.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(22.dp))
+                            .graphicsLayer {
+                                alpha = if (transitionState?.isExpandedOrTransitioning == true) 0f else 1f
+                            }
+                    ) {
+                        Icon(GeekifyIcons.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
                 }
 
-                Box(
-                    modifier = Modifier
-                        .padding(horizontal = 4.dp)
-                        .width(1.dp)
-                        .height(22.dp)
-                        .graphicsLayer {
-                            val p = transitionState?.progress ?: 1f
-                            alpha = ((p - 0.65f) / 0.35f).coerceIn(0f, 1f)
-                        }
-                        .background(Color.White.copy(alpha = 0.22f))
-                )
-
-                IconButton(
-                    onClick = { if (controlsInteractive()) viewModel.toggleShuffle() },
-                    modifier = Modifier
-                        .size(40.dp)
-                        .graphicsLayer {
-                            val p = transitionState?.progress ?: 1f
-                            alpha = ((p - 0.65f) / 0.35f).coerceIn(0f, 1f)
-                        }
-                ) {
-                    Icon(
-                        GeekifyIcons.Shuffle,
-                        contentDescription = "Shuffle",
-                        tint = if (state.shuffle) Lime else Color.White,
-                        modifier = Modifier.size(20.dp)
+                if (miniCust.showShuffleButton) {
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 4.dp)
+                            .width(1.dp)
+                            .height(22.dp)
+                            .graphicsLayer {
+                                val p = transitionState?.progress ?: 1f
+                                alpha = ((p - 0.65f) / 0.35f).coerceIn(0f, 1f)
+                            }
+                            .background(Color.White.copy(alpha = 0.22f))
                     )
+
+                    IconButton(
+                        onClick = { if (controlsInteractive()) viewModel.toggleShuffle() },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .graphicsLayer {
+                                val p = transitionState?.progress ?: 1f
+                                alpha = ((p - 0.65f) / 0.35f).coerceIn(0f, 1f)
+                            }
+                    ) {
+                        Icon(
+                            GeekifyIcons.Shuffle,
+                            contentDescription = "Shuffle",
+                            tint = if (state.shuffle) Lime else Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }
 
         // Hairline progress, eased so it glides rather than ticking. Isolated in its own composable so
         // position ticks recompose only this line, not the whole capsule.
-        MiniProgressLine(
-            position = viewModel.position,
-            isInline = isInline,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .graphicsLayer {
-                    val p = transitionState?.progress ?: 1f
-                    alpha = ((p - 0.60f) / 0.40f).coerceIn(0f, 1f)
-                }
-        )
+        if (miniCust.showProgressIndicator) {
+            MiniProgressLine(
+                position = viewModel.position,
+                isInline = isInline,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .graphicsLayer {
+                        val p = transitionState?.progress ?: 1f
+                        alpha = ((p - 0.60f) / 0.40f).coerceIn(0f, 1f)
+                    }
+            )
+        }
     }
 }
 

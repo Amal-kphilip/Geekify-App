@@ -9,19 +9,11 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import dagger.hilt.EntryPoint
-import dagger.hilt.InstallIn
-import dagger.hilt.android.EntryPointAccessors
-import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CancellationException
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 import timber.log.Timber
 import java.util.concurrent.TimeUnit
-
-@EntryPoint
-@InstallIn(SingletonComponent::class)
-interface SyncEntryPoint {
-    fun syncRepository(): SyncRepository
-}
 
 /**
  * Retries cloud library synchronization when connectivity is available.
@@ -31,12 +23,13 @@ interface SyncEntryPoint {
 class SyncWorker(
     context: Context,
     params: WorkerParameters
-) : CoroutineWorker(context, params) {
+) : CoroutineWorker(context, params), KoinComponent {
+
+    private val syncRepository: SyncRepository by inject()
 
     override suspend fun doWork(): Result {
-        val entry = EntryPointAccessors.fromApplication(applicationContext, SyncEntryPoint::class.java)
         return try {
-            val succeeded = entry.syncRepository().flushPendingSync(isBackgroundWorker = true)
+            val succeeded = syncRepository.flushPendingSync(isBackgroundWorker = true)
             if (succeeded) {
                 Result.success()
             } else if (runAttemptCount < MAX_ATTEMPTS) {

@@ -23,4 +23,10 @@ sealed class Screen(val route: String) {
     object AppIconSettings : Screen("app_icon_settings")
     object ListenTogether : Screen("listen_together")
     object AddAccount : Screen("add_account")
+    object Recognition : Screen("recognition")
+    object Downloads : Screen("downloads")
+    object Personalization : Screen("personalization?category={category}") {
+        fun createRoute(category: String? = null): String =
+            if (category.isNullOrBlank()) "personalization" else "personalization?category=$category"
+    }
 }

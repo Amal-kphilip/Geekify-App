@@ -22,8 +22,6 @@ import com.geekify.android.innertube.YouTube
 import com.geekify.android.innertube.models.YouTubeLocale
 import com.geekify.android.player.QueueManager
 import com.geekify.android.ui.navigation.FloatingTabBarInlineBehavior
-import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,7 +31,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
-import javax.inject.Inject
 
 @Serializable
 data class GeekifyBackupPayload(
@@ -55,9 +52,8 @@ data class StorageStats(
 }
 
 @OptIn(UnstableApi::class)
-@HiltViewModel
-class SettingsViewModel @Inject constructor(
-    @ApplicationContext private val context: Context,
+class SettingsViewModel constructor(
+    private val context: Context,
     private val repository: AppSettingsRepository,
     private val audioCache: SimpleCache,
     private val ttlCache: TtlLruCache,

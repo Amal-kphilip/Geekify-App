@@ -3,8 +3,6 @@ package com.geekify.android.domain.recommend.engine
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.sqrt
@@ -125,8 +123,7 @@ internal data class PersistedNeuralModelSnapshot(
  *     weight updates on chronological train/validation splits.
  *   - Versioned model registry with validation loss/accuracy gate and automatic rollback on regression or corrupt weights.
  */
-@Singleton
-class NeuralRecommendationEngine @Inject constructor() {
+class NeuralRecommendationEngine constructor() {
     companion object {
         const val TOWER_DIM = 32
         const val HIDDEN_DIM = 24

@@ -44,11 +44,18 @@ fun LibraryScreen(
     onPlaylistClick: (String, String) -> Unit,
     onCollectionClick: (String, String) -> Unit = { _, _ -> },
     onBack: () -> Unit = {},
-    onPlayTracks: (List<Track>) -> Unit = {}
+    onPlayTracks: (List<Track>) -> Unit = {},
+    onDownloadsClick: () -> Unit = {},
+    onRecognitionClick: () -> Unit = {}
 ) {
     val liked by viewModel.liked.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     val savedCollections by viewModel.savedCollections.collectAsState()
+    val downloadManager: com.geekify.android.downloads.SongDownloadManager = org.koin.compose.koinInject()
+    val allDownloads by downloadManager.downloads.collectAsState(initial = emptyList())
+    val completedDownloadsCount = remember(allDownloads) {
+        allDownloads.count { it.status == com.geekify.android.data.local.DownloadEntity.STATUS_COMPLETED }
+    }
     var showCreateDialog by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf("All") }
@@ -108,6 +115,14 @@ fun LibraryScreen(
                             menuOpen = false
                             showCreateDialog = true
                         }
+                        GlassMenuItem("Offline downloads") {
+                            menuOpen = false
+                            onDownloadsClick()
+                        }
+                        GlassMenuItem("Identify song") {
+                            menuOpen = false
+                            onRecognitionClick()
+                        }
                         GlassMenuItem("Account") {
                             menuOpen = false
                             onAvatarClick()
@@ -143,6 +158,19 @@ fun LibraryScreen(
                             art = {
                                 Box(Modifier.fillMaxSize().background(LikedGradient), contentAlignment = Alignment.Center) {
                                     Icon(GeekifyIcons.Favorite, contentDescription = null, tint = Color.White, modifier = Modifier.size(30.dp))
+                                }
+                            }
+                        )
+                    }
+                    item {
+                        LibraryRow(
+                            title = "Offline Downloads",
+                            subtitle = "On Device  •  $completedDownloadsCount downloaded",
+                            onClick = onDownloadsClick,
+                            trailing = TrailingAction.Chevron,
+                            art = {
+                                Box(Modifier.fillMaxSize().background(Color(0xFF1F2B24)), contentAlignment = Alignment.Center) {
+                                    Icon(GeekifyIcons.Download, contentDescription = null, tint = Lime, modifier = Modifier.size(30.dp))
                                 }
                             }
                         )

@@ -28,17 +28,15 @@ import com.geekify.android.notifications.UpdatePushSubscription
 import com.geekify.android.player.PlaybackService
 import com.geekify.android.ui.navigation.MainScreen
 import com.geekify.android.ui.theme.GeekifyTheme
-import dagger.hilt.android.AndroidEntryPoint
-import javax.inject.Inject
 import kotlinx.coroutines.launch
+import org.koin.android.ext.android.inject
 
-@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
-    @Inject lateinit var syncRepository: dagger.Lazy<SyncRepository>
-    @Inject lateinit var notificationStore: NotificationStore
-    @Inject lateinit var notificationCoordinator: NotificationCoordinator
-    @Inject lateinit var appSettings: com.geekify.android.settings.AppSettingsRepository
+    private val syncRepository: SyncRepository by inject()
+    private val notificationStore: NotificationStore by inject()
+    private val notificationCoordinator: NotificationCoordinator by inject()
+    private val appSettings: com.geekify.android.settings.AppSettingsRepository by inject()
 
     /** Screen requested by a notification tap (e.g. "recents"); consumed once by MainScreen. */
     private var requestedRoute by mutableStateOf<String?>(null)
@@ -96,7 +94,7 @@ class MainActivity : ComponentActivity() {
         // Observe foregrounding for Firestore pull sync
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
-                syncRepository.get().onForeground()
+                syncRepository.onForeground()
             }
         }
 

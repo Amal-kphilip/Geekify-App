@@ -320,6 +320,8 @@ fun TrackActionsDialog(
     onAddToQueue: () -> Unit,
     onAddToPlaylist: (String) -> Unit,
     onCreatePlaylist: (String) -> Unit,
+    onPlayNext: (() -> Unit)? = null,
+    onDownload: (() -> Unit)? = null,
     onMoreLikeThis: (() -> Unit)? = null,
     onLessLikeThis: (() -> Unit)? = null,
     onHideTrack: (() -> Unit)? = null,
@@ -364,10 +366,24 @@ fun TrackActionsDialog(
             iconTint = if (liked) Lime else TextPrimary
         ) { onToggleLike(); onDismiss() }
 
+        if (onPlayNext != null) {
+            ActionRow(
+                icon = GeekifyIcons.PlaylistAdd,
+                label = "Play Next"
+            ) { onPlayNext(); onDismiss() }
+        }
+
         ActionRow(
             icon = GeekifyIcons.AddCircleOutline,
             label = "Add to Queue"
         ) { onAddToQueue(); onDismiss() }
+
+        if (onDownload != null) {
+            ActionRow(
+                icon = GeekifyIcons.Download,
+                label = "Download Offline"
+            ) { onDownload(); onDismiss() }
+        }
 
         if (onMoreLikeThis != null) {
             ActionRow(

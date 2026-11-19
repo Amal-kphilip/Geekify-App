@@ -8,9 +8,6 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
-import com.geekify.android.di.IoDispatcher
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -50,10 +47,9 @@ data class NotificationState(
 )
 
 /** Reuses the app's existing DataStore (the same one AudioSettings and QueueManager use). */
-@Singleton
-class NotificationStore @Inject constructor(
+class NotificationStore constructor(
     private val dataStore: DataStore<Preferences>,
-    @IoDispatcher private val io: CoroutineDispatcher
+    private val io: CoroutineDispatcher
 ) {
     private object K {
         val updates = booleanPreferencesKey("notif_updates")

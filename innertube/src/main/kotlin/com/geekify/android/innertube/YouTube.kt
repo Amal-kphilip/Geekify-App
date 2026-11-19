@@ -3007,8 +3007,53 @@ object YouTube {
             )
         }
 
+    private val ANDROID_MUSIC_LYRICS_CLIENT =
+        YouTubeClient.ANDROID_MUSIC.copy(
+            clientVersion = "8.25.52",
+            userAgent = "com.google.android.apps.youtube.music/8.25.52 (Linux; U; Android 14) gzip",
+            androidSdkVersion = "34",
+        )
+
+    private fun extractTimedLrcFromElement(element: kotlinx.serialization.json.JsonElement): String? {
+        val timedLines = mutableListOf<Pair<Long, String>>()
+        fun walk(el: kotlinx.serialization.json.JsonElement) {
+            when (el) {
+                is kotlinx.serialization.json.JsonObject -> {
+                    val lineText = el["lyricLine"]?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+                    val cueRange = el["cueRange"] as? kotlinx.serialization.json.JsonObject
+                    if (!lineText.isNullOrBlank() && cueRange != null) {
+                        val startMs = (cueRange["startTimeMilliseconds"] as? kotlinx.serialization.json.JsonPrimitive)
+                            ?.content
+                            ?.toLongOrNull() ?: 0L
+                        timedLines += startMs to lineText.trim()
+                    }
+                    el.values.forEach(::walk)
+                }
+                is kotlinx.serialization.json.JsonArray -> el.forEach(::walk)
+                else -> Unit
+            }
+        }
+        walk(element)
+        if (timedLines.size >= 2 && timedLines.any { it.first > 0L }) {
+            return timedLines.joinToString("\n") { (timeMs, text) ->
+                "[%02d:%02d.%03d]%s".format(timeMs / 60_000L, (timeMs / 1_000L) % 60L, timeMs % 1_000L, text)
+            }
+        }
+        return null
+    }
+
     suspend fun lyrics(endpoint: BrowseEndpoint): Result<String?> =
         runCatching {
+            val androidJsonText = runCatching {
+                innerTube.browse(ANDROID_MUSIC_LYRICS_CLIENT, endpoint.browseId, endpoint.params).bodyAsText()
+            }.getOrNull()
+            if (!androidJsonText.isNullOrBlank()) {
+                val root = runCatching { Json.parseToJsonElement(androidJsonText) }.getOrNull()
+                if (root != null) {
+                    extractTimedLrcFromElement(root)?.let { return@runCatching it }
+                }
+            }
+
             val response = innerTube.browse(WEB_REMIX, endpoint.browseId, endpoint.params).body<BrowseResponse>()
             response.contents
                 ?.sectionListRenderer

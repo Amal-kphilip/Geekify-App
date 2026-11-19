@@ -1,8 +1,5 @@
 package com.geekify.android.notifications
 
-import com.geekify.android.di.IoDispatcher
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
@@ -16,11 +13,10 @@ import okhttp3.Response
  * Network is touched at most once per [CHECK_INTERVAL_MS], uses `If-None-Match` ETags so `304 Not Modified`
  * responses do not consume GitHub API quota, and respects `X-RateLimit-Reset` / `Retry-After` headers.
  */
-@Singleton
-class UpdateChecker @Inject constructor(
+class UpdateChecker constructor(
     private val http: OkHttpClient,
     private val store: NotificationStore,
-    @IoDispatcher private val io: CoroutineDispatcher
+    private val io: CoroutineDispatcher
 ) {
     companion object {
         const val CHECK_INTERVAL_MS = 12 * NotificationPolicy.HOUR_MS

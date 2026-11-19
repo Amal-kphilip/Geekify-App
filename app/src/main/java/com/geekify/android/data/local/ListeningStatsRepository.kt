@@ -1,12 +1,9 @@
 package com.geekify.android.data.local
 
 import kotlinx.coroutines.flow.Flow
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /** Persists listening sessions locally; SyncRepository is responsible for cloud reconciliation. */
-@Singleton
-class ListeningStatsRepository @Inject constructor(
+class ListeningStatsRepository constructor(
     private val dao: ListeningSessionDao
 ) {
     fun observeSessions(): Flow<List<ListeningSessionEntity>> = dao.observeAll()

@@ -51,15 +51,14 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import com.geekify.android.BuildConfig
+import com.geekify.android.customization.CustomizationCategory
 import com.geekify.android.data.auth.AccountUser
 import com.geekify.android.notifications.NotificationSettingsViewModel
 import com.geekify.android.settings.AppSettingsState
 import com.geekify.android.settings.AudioQualityPreference
 import com.geekify.android.settings.SettingsViewModel
-import com.geekify.android.ui.ascii.AsciiBackgroundSettingsPage
-import com.geekify.android.ui.ascii.AsciiBackgroundSettingsSubPage
 import com.geekify.android.ui.ascii.AsciiCatalog
 import com.geekify.android.ui.components.*
 import com.geekify.android.ui.glass.GlassStyle
@@ -74,16 +73,15 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private enum class SettingsSubPage(val title: String) {
     ROOT("Settings"),
-    APPEARANCE("Appearance"),
-    BACKGROUND_TWEAKS("Background & Tweaks"),
-    PLAYER("Player & playback"),
     CONTENT("Content & region"),
     NOTIFICATIONS("Notifications"),
     PRIVACY("Privacy & security"),
     STORAGE("Storage & backup"),
+    DISCORD("Discord Rich Presence"),
     DIAGNOSTICS("Playback diagnostics"),
     ABOUT("About Geekify")
 }
@@ -100,6 +98,7 @@ private data class SettingsRootItem(
 )
 
 private data class SearchableSettingEntry(
+    val id: String,
     val title: String,
     val subtitle: String,
     val category: String,
@@ -146,6 +145,7 @@ private val LANGUAGES = listOf(
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    onPersonalizationClick: (CustomizationCategory?) -> Unit = {},
     onAudioClick: () -> Unit = {},
     onAppIconClick: () -> Unit = {},
     @Suppress("UNUSED_PARAMETER") onProfileClick: () -> Unit = {},
@@ -153,10 +153,11 @@ fun SettingsScreen(
     @Suppress("UNUSED_PARAMETER") onListeningStatsClick: () -> Unit = {},
     @Suppress("UNUSED_PARAMETER") onRecentsClick: () -> Unit = {},
     onHealthClick: () -> Unit = {},
+    onDownloadsClick: () -> Unit = {},
     onCheckUpdatesClick: () -> Unit = {},
     @Suppress("UNUSED_PARAMETER") currentUser: AccountUser? = null,
-    notificationSettings: NotificationSettingsViewModel = hiltViewModel(),
-    settingsViewModel: SettingsViewModel = hiltViewModel()
+    notificationSettings: NotificationSettingsViewModel = koinViewModel(),
+    settingsViewModel: SettingsViewModel = koinViewModel()
 ) {
     val notif by notificationSettings.prefs.collectAsState()
     val state by settingsViewModel.settings.collectAsState()
@@ -175,7 +176,7 @@ fun SettingsScreen(
     }
 
     var currentPage by rememberSaveable { mutableStateOf(SettingsSubPage.ROOT) }
-    var splitActivePage by rememberSaveable { mutableStateOf(SettingsSubPage.APPEARANCE) }
+    var splitActivePage by rememberSaveable { mutableStateOf(SettingsSubPage.CONTENT) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     val rootScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
 
@@ -212,7 +213,8 @@ fun SettingsScreen(
     ) {
         val isSplitLayout = maxWidth >= 840.dp
 
-        // Non-overlapping root settings groups (each option appears in exactly one place)
+        // Non-overlapping root settings groups: Personalization Studio is the single authoritative
+        // location for all 13 customization domains; no duplicate customization rows appear here.
         val rootGroups = remember(
             state,
             storageStats.totalBytes,
@@ -222,42 +224,13 @@ fun SettingsScreen(
             listOf(
                 listOf(
                     SettingsRootItem(
-                        key = "appearance",
-                        title = "Appearance & Liquid Glass",
-                        subtitle = "Glass blur, refraction, bottom bar & startup tab",
-                        value = if (state.glass.enabled) "${state.glass.blurDp.roundToInt()} dp" else "Off",
-                        icon = GeekifyIcons.AutoAwesome,
-                        tint = IosPalette.systemCyan,
-                        subPage = SettingsSubPage.APPEARANCE,
-                        onClick = { openSubPage(SettingsSubPage.APPEARANCE, isSplitLayout) }
-                    ),
-                    SettingsRootItem(
-                        key = "background_tweaks",
-                        title = "Background Animations & Tweaks",
-                        subtitle = "ASCII creatures, scenes, live preview, colour cycle & butterfly palettes",
-                        value = if (state.ascii.enabled) AsciiCatalog.byId(state.ascii.animalId).name else "Off",
-                        icon = GeekifyIcons.Tune,
-                        tint = IosPalette.systemPurple,
-                        subPage = SettingsSubPage.BACKGROUND_TWEAKS,
-                        onClick = { openSubPage(SettingsSubPage.BACKGROUND_TWEAKS, isSplitLayout) }
-                    ),
-                    SettingsRootItem(
-                        key = "app_icon",
-                        title = "App Icon",
-                        subtitle = "Customize the home screen launcher icon",
-                        icon = GeekifyIcons.Apps,
-                        tint = IosPalette.systemBlue,
-                        onClick = onAppIconClick
-                    ),
-                    SettingsRootItem(
-                        key = "player",
-                        title = "Player & Playback",
-                        subtitle = "Streaming quality, queue & autoplay behavior",
-                        value = state.audioQuality.label,
-                        icon = GeekifyIcons.PlayCircleFilled,
-                        tint = IosPalette.systemRed,
-                        subPage = SettingsSubPage.PLAYER,
-                        onClick = { openSubPage(SettingsSubPage.PLAYER, isSplitLayout) }
+                        key = "personalization_studio",
+                        title = "Personalization Studio",
+                        subtitle = "Themes, Liquid Glass, ASCII background, layouts, player, typography, lyrics, widgets & app icon",
+                        value = state.customization.theme.palettePreset.label,
+                        icon = GeekifyIcons.Palette,
+                        tint = IosPalette.systemPink,
+                        onClick = { onPersonalizationClick(null) }
                     ),
                     SettingsRootItem(
                         key = "equalizer",
@@ -309,6 +282,23 @@ fun SettingsScreen(
                         tint = IosPalette.systemGreen,
                         subPage = SettingsSubPage.STORAGE,
                         onClick = { openSubPage(SettingsSubPage.STORAGE, isSplitLayout) }
+                    ),
+                    SettingsRootItem(
+                        key = "downloads",
+                        title = "Offline Downloads",
+                        subtitle = "Manage downloaded songs, progress & offline playback",
+                        icon = GeekifyIcons.Download,
+                        tint = IosPalette.systemTeal,
+                        onClick = onDownloadsClick
+                    ),
+                    SettingsRootItem(
+                        key = "discord",
+                        title = "Discord Rich Presence",
+                        subtitle = "Broadcast your live Now Playing activity to Discord",
+                        icon = GeekifyIcons.Groups,
+                        tint = IosPalette.systemIndigo,
+                        subPage = SettingsSubPage.DISCORD,
+                        onClick = { openSubPage(SettingsSubPage.DISCORD, isSplitLayout) }
                     )
                 ),
                 listOf(
@@ -346,8 +336,10 @@ fun SettingsScreen(
         val searchRegistry = remember(isSplitLayout) {
             buildSearchRegistry(
                 openPage = { openSubPage(it, isSplitLayout) },
+                onPersonalizationCategory = { cat -> onPersonalizationClick(cat) },
                 onAudioClick = onAudioClick,
                 onAppIconClick = onAppIconClick,
+                onDownloadsClick = onDownloadsClick,
                 onHealthClick = onHealthClick
             )
         }
@@ -364,21 +356,6 @@ fun SettingsScreen(
             }
 
             when (page) {
-                SettingsSubPage.APPEARANCE -> AppearanceGlassSubPage(
-                    state = state,
-                    viewModel = settingsViewModel
-                )
-
-                SettingsSubPage.BACKGROUND_TWEAKS -> AsciiBackgroundSettingsSubPage(
-                    config = state.ascii,
-                    viewModel = settingsViewModel
-                )
-
-                SettingsSubPage.PLAYER -> PlayerAudioSubPage(
-                    state = state,
-                    viewModel = settingsViewModel
-                )
-
                 SettingsSubPage.CONTENT -> ContentRegionSubPage(
                     state = state,
                     viewModel = settingsViewModel
@@ -409,6 +386,8 @@ fun SettingsScreen(
                         openBackupLauncher.launch(arrayOf("application/json", "*/*"))
                     }
                 )
+
+                SettingsSubPage.DISCORD -> DiscordRichPresenceSubPage()
 
                 SettingsSubPage.DIAGNOSTICS -> PlaybackDiagnosticsSubPage()
 
@@ -464,29 +443,19 @@ fun SettingsScreen(
                         animationSpec = tween(200),
                         label = "splitSettingsDetail"
                     ) { detailPage ->
-                        if (detailPage == SettingsSubPage.BACKGROUND_TWEAKS) {
-                            AsciiBackgroundSettingsPage(
-                                config = state.ascii,
-                                viewModel = settingsViewModel,
-                                onBack = onBack,
-                                showBackButton = false,
-                                bottomPadding = bottomInset + 40.dp
-                            )
-                        } else {
-                            val detailScroll = rememberSaveable(
-                                "split_${detailPage.name}",
-                                saver = ScrollState.Saver
-                            ) { ScrollState(0) }
-                            IosSettingsPageScaffold(
-                                title = detailPage.title,
-                                scrollState = detailScroll,
-                                onBack = onBack,
-                                showBackButton = false,
-                                maxContentWidth = 680.dp,
-                                bottomPadding = bottomInset + 40.dp
-                            ) {
-                                RenderSubPageContent(detailPage)
-                            }
+                        val detailScroll = rememberSaveable(
+                            "split_${detailPage.name}",
+                            saver = ScrollState.Saver
+                        ) { ScrollState(0) }
+                        IosSettingsPageScaffold(
+                            title = detailPage.title,
+                            scrollState = detailScroll,
+                            onBack = onBack,
+                            showBackButton = false,
+                            maxContentWidth = 680.dp,
+                            bottomPadding = bottomInset + 40.dp
+                        ) {
+                            RenderSubPageContent(detailPage)
                         }
                     }
                 }
@@ -530,14 +499,6 @@ fun SettingsScreen(
                             onClearSearch = { searchQuery = "" }
                         )
                     }
-                } else if (page == SettingsSubPage.BACKGROUND_TWEAKS) {
-                    AsciiBackgroundSettingsPage(
-                        config = state.ascii,
-                        viewModel = settingsViewModel,
-                        onBack = { currentPage = SettingsSubPage.ROOT },
-                        showBackButton = true,
-                        bottomPadding = bottomInset + 40.dp
-                    )
                 } else {
                     val subScroll = rememberSaveable(page.name, saver = ScrollState.Saver) { ScrollState(0) }
                     IosSettingsPageScaffold(
@@ -712,7 +673,8 @@ private fun DockedSearchPill(
                         singleLine = true,
                         textStyle = TextStyle(
                             color = IosPalette.label,
-                            fontSize = 16.sp
+                            fontSize = 16.sp,
+                            fontFamily = AppFont
                         ),
                         cursorBrush = SolidColor(SettingsVisuals.blue),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -1743,74 +1705,162 @@ private fun AboutAndUpdateSubPage(
 }
 
 // ============================================================================
-// DEEP SEARCH REGISTRY
+// DEEP SEARCH REGISTRY (Single Authoritative Entry Per Setting)
 // ============================================================================
 private fun buildSearchRegistry(
     openPage: (SettingsSubPage) -> Unit,
+    onPersonalizationCategory: (CustomizationCategory) -> Unit,
     onAudioClick: () -> Unit,
     onAppIconClick: () -> Unit,
+    onDownloadsClick: () -> Unit,
     onHealthClick: () -> Unit
 ): List<SearchableSettingEntry> = listOf(
     SearchableSettingEntry(
-        title = "Liquid Glass & Blur",
-        subtitle = "Real-time AGSL lens refraction, blur, vibrancy & depth",
-        category = "Appearance",
-        keywords = listOf("glass", "blur", "refraction", "lens", "vibrancy", "saturation", "chromatic", "depth", "mini player", "nav bar"),
+        id = "cust_theme_colors",
+        title = "Theme & Color Palettes",
+        subtitle = "Dark variants, AMOLED black, accent palettes & dynamic artwork colors",
+        category = "Personalization Studio",
+        keywords = listOf("theme", "dark", "amoled", "black", "graphite", "color", "palette", "accent", "lime", "violet", "cyan"),
+        icon = GeekifyIcons.Palette,
+        tint = IosPalette.systemPurple,
+        onSelect = { onPersonalizationCategory(CustomizationCategory.THEME_COLORS) }
+    ),
+    SearchableSettingEntry(
+        id = "cust_liquid_glass",
+        title = "Liquid Glass & Visual Effects",
+        subtitle = "Optical refraction presets, backdrop blur, saturation, lens & depth",
+        category = "Personalization Studio",
+        keywords = listOf("glass", "blur", "refraction", "lens", "vibrancy", "saturation", "chromatic", "depth"),
         icon = GeekifyIcons.AutoAwesome,
         tint = IosPalette.systemCyan,
-        onSelect = { openPage(SettingsSubPage.APPEARANCE) }
+        onSelect = { onPersonalizationCategory(CustomizationCategory.LIQUID_GLASS) }
     ),
     SearchableSettingEntry(
-        title = "Background Animations & Tweaks",
-        subtitle = "Live ASCII creatures, scenes, preview, colour changing & multi-coloured butterflies",
-        category = "Background & Tweaks",
+        id = "cust_ascii_background",
+        title = "ASCII Background & Performance",
+        subtitle = "Animated creatures, atmospheric scenes, density, hue & battery profile",
+        category = "Personalization Studio",
         keywords = listOf(
-            "ascii", "background", "animations", "tweaks", "preview", "butterfly", "butterflies",
-            "multi color", "multicolor", "colour", "color", "hue", "koi", "jellyfish",
-            "frog", "crane", "crab", "whale", "rain", "snow", "snowfall", "waves", "ocean waves",
-            "aurora", "detail", "grid"
+            "ascii", "background", "animations", "tweaks", "butterfly", "butterflies",
+            "koi", "jellyfish", "frog", "crane", "crab", "whale", "rain", "snow", "waves",
+            "aurora", "detail", "grid", "battery saver"
         ),
         icon = GeekifyIcons.Tune,
-        tint = IosPalette.systemPurple,
-        onSelect = { openPage(SettingsSubPage.BACKGROUND_TWEAKS) }
+        tint = IosPalette.systemIndigo,
+        onSelect = { onPersonalizationCategory(CustomizationCategory.ASCII_BACKGROUND) }
     ),
     SearchableSettingEntry(
-        title = "Adaptive Bottom Bar & Default Tab",
-        subtitle = "Scroll collapse behavior and startup tab",
-        category = "Appearance",
-        keywords = listOf("default tab", "home", "search", "library", "collapse", "scroll", "bottom bar"),
-        icon = GeekifyIcons.ViewDay,
+        id = "cust_home_screen",
+        title = "Home Screen Layout & Sections",
+        subtitle = "Reorder or hide home shelves, grid columns, card sizing & corner radius",
+        category = "Personalization Studio",
+        keywords = listOf("home", "shelves", "carousel", "daily picks", "grid", "card radius", "greeting"),
+        icon = GeekifyIcons.Home,
+        tint = IosPalette.systemBlue,
+        onSelect = { onPersonalizationCategory(CustomizationCategory.HOME_SCREEN) }
+    ),
+    SearchableSettingEntry(
+        id = "cust_navigation",
+        title = "Navigation Bar & Startup Tab",
+        subtitle = "Visible destinations, tab order, capsule style, labels & startup tab",
+        category = "Personalization Studio",
+        keywords = listOf("navigation", "tabs", "bottom bar", "default tab", "startup tab", "labels", "collapse", "scroll"),
+        icon = GeekifyIcons.Navigation,
         tint = IosPalette.systemTeal,
-        onSelect = { openPage(SettingsSubPage.APPEARANCE) }
+        onSelect = { onPersonalizationCategory(CustomizationCategory.NAVIGATION) }
     ),
     SearchableSettingEntry(
+        id = "cust_player_appearance",
+        title = "Music Player Appearance (6 Layouts)",
+        subtitle = "Vinyl tonearm, standard, minimal, artwork-focused, fullscreen & expressive layouts",
+        category = "Personalization Studio",
+        keywords = listOf("player", "now playing", "vinyl", "tonearm", "minimal", "fullscreen", "expressive", "artwork shape", "backdrop"),
+        icon = GeekifyIcons.Album,
+        tint = IosPalette.systemPink,
+        onSelect = { onPersonalizationCategory(CustomizationCategory.PLAYER_APPEARANCE) }
+    ),
+    SearchableSettingEntry(
+        id = "cust_mini_player",
+        title = "Mini-Player Style & Controls",
+        subtitle = "Floating capsule, compact bar, thumbnail shape & visible buttons",
+        category = "Personalization Studio",
+        keywords = listOf("mini player", "pill", "capsule", "progress ring", "corner radius"),
+        icon = GeekifyIcons.PlayCircleFilled,
+        tint = IosPalette.systemGreen,
+        onSelect = { onPersonalizationCategory(CustomizationCategory.MINI_PLAYER) }
+    ),
+    SearchableSettingEntry(
+        id = "cust_gestures",
+        title = "Gestures & Touch Controls",
+        subtitle = "Swipe artwork to skip, pull to collapse, queue swipe & haptics",
+        category = "Personalization Studio",
+        keywords = listOf("gestures", "swipe", "haptics", "sensitivity", "skip", "collapse"),
+        icon = GeekifyIcons.Tune,
+        tint = IosPalette.systemYellow,
+        onSelect = { onPersonalizationCategory(CustomizationCategory.GESTURES) }
+    ),
+    SearchableSettingEntry(
+        id = "cust_typography",
+        title = "Typography & UI Density",
+        subtitle = "Global application font family, text scaling & spacing density",
+        category = "Personalization Studio",
+        keywords = listOf("font", "typography", "montserrat", "serif", "monospace", "text scale", "font size", "density"),
+        icon = GeekifyIcons.Translate,
+        tint = IosPalette.systemOrange,
+        onSelect = { onPersonalizationCategory(CustomizationCategory.TYPOGRAPHY_DENSITY) }
+    ),
+    SearchableSettingEntry(
+        id = "cust_lyrics",
+        title = "Lyrics Appearance & Romanization",
+        subtitle = "Synchronized lyrics font size, alignment, word highlight & phonetic romanization",
+        category = "Personalization Studio",
+        keywords = listOf("lyrics", "karaoke", "romanization", "alignment", "line spacing", "synced"),
+        icon = GeekifyIcons.Lyrics,
+        tint = IosPalette.systemMint,
+        onSelect = { onPersonalizationCategory(CustomizationCategory.LYRICS_APPEARANCE) }
+    ),
+    SearchableSettingEntry(
+        id = "cust_playback_preferences",
+        title = "Playback & Audio Preferences",
+        subtitle = "Streaming quality, crossfade, skip silence, normalization, bass boost & autoplay",
+        category = "Personalization Studio",
+        keywords = listOf("quality", "bitrate", "crossfade", "skip silence", "normalization", "bass boost", "queue", "autoplay", "shuffle", "repeat", "keep screen on"),
+        icon = GeekifyIcons.GraphicEq,
+        tint = IosPalette.systemRed,
+        onSelect = { onPersonalizationCategory(CustomizationCategory.PLAYBACK_PREFERENCES) }
+    ),
+    SearchableSettingEntry(
+        id = "cust_widgets",
+        title = "Home Screen Widgets",
+        subtitle = "Widget surface theme, artwork visibility & transport controls",
+        category = "Personalization Studio",
+        keywords = listOf("widget", "home screen widget", "remoteviews"),
+        icon = GeekifyIcons.ViewDay,
+        tint = IosPalette.systemCyan,
+        onSelect = { onPersonalizationCategory(CustomizationCategory.WIDGETS) }
+    ),
+    SearchableSettingEntry(
+        id = "cust_app_icon",
         title = "App Icon",
         subtitle = "Choose the home screen launcher icon",
-        category = "App Icon",
+        category = "Personalization Studio",
         keywords = listOf("icon", "launcher", "logo", "home screen"),
         icon = GeekifyIcons.Apps,
         tint = IosPalette.systemBlue,
         onSelect = onAppIconClick
     ),
     SearchableSettingEntry(
-        title = "Streaming Audio Quality & Queue",
-        subtitle = "Bitrate, persistent queue, autoplay, shuffle & screen wake",
-        category = "Player & Playback",
-        keywords = listOf("quality", "bitrate", "kbps", "stream", "queue", "autoplay", "shuffle", "repeat", "keep screen on"),
-        icon = GeekifyIcons.PlayCircleFilled,
-        tint = IosPalette.systemRed,
-        onSelect = { openPage(SettingsSubPage.PLAYER) }
-    ),
-    SearchableSettingEntry(
-        title = "Equalizer & Audio Effects",
-        subtitle = "5-band EQ, presets, speed, pitch & volume normalization",
-        category = "Equalizer",
-        keywords = listOf("eq", "equalizer", "bass", "tempo", "speed", "pitch", "skip silence", "normalize"),
+        id = "sys_equalizer",
+        title = "Equalizer & Audio Effects Studio",
+        subtitle = "5-band EQ, presets, speed & pitch shifting",
+        category = "Audio Effects",
+        keywords = listOf("eq", "equalizer", "5-band", "tempo", "speed", "pitch"),
         icon = GeekifyIcons.GraphicEq,
         tint = IosPalette.systemGreen,
         onSelect = onAudioClick
     ),
     SearchableSettingEntry(
+        id = "sys_content_region",
         title = "Content Country, Language & Explicit Filter",
         subtitle = "Regional charts, catalog language & explicit content restriction",
         category = "Content & Region",
@@ -1820,6 +1870,7 @@ private fun buildSearchRegistry(
         onSelect = { openPage(SettingsSubPage.CONTENT) }
     ),
     SearchableSettingEntry(
+        id = "sys_notifications",
         title = "Notifications",
         subtitle = "App updates, feature tips, and listening reminders",
         category = "Notifications",
@@ -1829,6 +1880,7 @@ private fun buildSearchRegistry(
         onSelect = { openPage(SettingsSubPage.NOTIFICATIONS) }
     ),
     SearchableSettingEntry(
+        id = "sys_privacy",
         title = "Privacy, History & Screenshots",
         subtitle = "Pause or clear listening history and block screenshots",
         category = "Privacy & Security",
@@ -1838,6 +1890,7 @@ private fun buildSearchRegistry(
         onSelect = { openPage(SettingsSubPage.PRIVACY) }
     ),
     SearchableSettingEntry(
+        id = "sys_storage_backup",
         title = "Storage, Cache & Library Backup",
         subtitle = "Clear audio/image cache, export or restore JSON backup",
         category = "Storage & Backup",
@@ -1847,15 +1900,47 @@ private fun buildSearchRegistry(
         onSelect = { openPage(SettingsSubPage.STORAGE) }
     ),
     SearchableSettingEntry(
+        id = "sys_offline_downloads",
+        title = "Offline Downloads",
+        subtitle = "Manage downloaded songs, progress & offline playback",
+        category = "Storage & Downloads",
+        keywords = listOf("downloads", "offline", "saved songs"),
+        icon = GeekifyIcons.Download,
+        tint = IosPalette.systemTeal,
+        onSelect = onDownloadsClick
+    ),
+    SearchableSettingEntry(
+        id = "sys_discord_rpc",
+        title = "Discord Rich Presence",
+        subtitle = "Broadcast your live Now Playing activity to Discord",
+        category = "Integrations",
+        keywords = listOf("discord", "rich presence", "rpc", "gateway", "status"),
+        icon = GeekifyIcons.Groups,
+        tint = IosPalette.systemIndigo,
+        onSelect = { openPage(SettingsSubPage.DISCORD) }
+    ),
+    SearchableSettingEntry(
+        id = "sys_extractor_health",
         title = "Extractor Health",
         subtitle = "Stream resolver and catalog diagnostics",
         category = "Diagnostics",
-        keywords = listOf("health", "extractor", "diagnostics", "stream"),
+        keywords = listOf("health", "extractor", "probe"),
         icon = GeekifyIcons.MonitorHeart,
         tint = IosPalette.systemMint,
         onSelect = onHealthClick
     ),
     SearchableSettingEntry(
+        id = "sys_playback_diagnostics",
+        title = "Playback Diagnostics",
+        subtitle = "Real-time stream resolution & reliability metrics",
+        category = "Diagnostics",
+        keywords = listOf("diagnostics", "latency", "codec", "stalls"),
+        icon = GeekifyIcons.Speed,
+        tint = IosPalette.systemGreen,
+        onSelect = { openPage(SettingsSubPage.DIAGNOSTICS) }
+    ),
+    SearchableSettingEntry(
+        id = "sys_about",
         title = "About & Software Update",
         subtitle = "Check for updates, version info, and GitHub releases",
         category = "About",
@@ -1864,7 +1949,7 @@ private fun buildSearchRegistry(
         tint = IosPalette.systemGray,
         onSelect = { openPage(SettingsSubPage.ABOUT) }
     )
-)
+).distinctBy { it.id }
 
 @Composable
 private fun <T> OptionPickerDialog(
@@ -1946,13 +2031,7 @@ private fun formatBytes(bytes: Long): String {
 @Composable
 private fun PlaybackDiagnosticsSubPage() {
     val context = LocalContext.current
-    val diagnosticsTracker = remember {
-        val entryPoint = dagger.hilt.android.EntryPointAccessors.fromApplication(
-            context.applicationContext,
-            com.geekify.android.di.DiagnosticsEntryPoint::class.java
-        )
-        entryPoint.diagnosticsTracker()
-    }
+    val diagnosticsTracker: com.geekify.android.player.PlaybackDiagnosticsTracker = org.koin.compose.koinInject()
     val snapshot by diagnosticsTracker.snapshot.collectAsState()
     var copiedReport by remember { mutableStateOf(false) }
 
@@ -2013,5 +2092,142 @@ private fun PlaybackDiagnosticsSubPage() {
                 copiedReport = true
             }
         )
+    }
+}
+
+@Composable
+private fun DiscordRichPresenceSubPage() {
+    val discordManager: com.geekify.android.discord.DiscordRpcManager = org.koin.compose.koinInject()
+    val uiState by discordManager.uiState.collectAsState()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var appIdInput by remember(uiState.applicationId) { mutableStateOf(uiState.applicationId) }
+    var tokenInput by remember { mutableStateOf("") }
+
+    val statusTextAndColor: Pair<String, Color> = when (val s = uiState.status) {
+        is com.geekify.android.discord.DiscordConnectionStatus.Disabled ->
+            "Disabled" to IosPalette.secondaryLabel
+        is com.geekify.android.discord.DiscordConnectionStatus.NotConfigured ->
+            "Not configured (enter Application ID & Token)" to IosPalette.systemYellow
+        is com.geekify.android.discord.DiscordConnectionStatus.Idle ->
+            "Ready (will connect on playback or Test)" to IosPalette.systemCyan
+        is com.geekify.android.discord.DiscordConnectionStatus.Connecting ->
+            "Connecting to Discord Gateway v10..." to IosPalette.systemBlue
+        is com.geekify.android.discord.DiscordConnectionStatus.Connected ->
+            ("Connected" + (s.username?.let { " as @$it" } ?: "")) to IosPalette.systemGreen
+        is com.geekify.android.discord.DiscordConnectionStatus.Error ->
+            s.message to IosPalette.systemRed
+    }
+
+    IosSettingsSection(
+        title = "Discord Rich Presence",
+        footer = "Broadcasts your current song title, artist, and elapsed/remaining time as a Listening activity on Discord while music is playing."
+    ) {
+        IosSettingsSwitchRow(
+            icon = GeekifyIcons.Groups,
+            tileColor = IosPalette.systemIndigo,
+            title = "Enable Discord Rich Presence",
+            subtitle = "Connect to Discord Gateway when playback starts",
+            checked = uiState.enabled,
+            onCheckedChange = { enabled ->
+                scope.launch {
+                    discordManager.setConfig(
+                        enabled = enabled,
+                        applicationId = appIdInput,
+                        accessToken = tokenInput.takeIf { it.isNotBlank() }
+                    )
+                }
+            }
+        )
+        IosSettingsDivider()
+        IosSettingsRow(
+            icon = GeekifyIcons.MonitorHeart,
+            tileColor = IosPalette.systemGreen,
+            title = "Connection Status",
+            subtitle = statusTextAndColor.first,
+            value = when (uiState.status) {
+                is com.geekify.android.discord.DiscordConnectionStatus.Connected -> "Online"
+                is com.geekify.android.discord.DiscordConnectionStatus.Connecting -> "..."
+                is com.geekify.android.discord.DiscordConnectionStatus.Error -> "Error"
+                else -> "Offline"
+            }
+        )
+        uiState.lastSyncedTrack?.let { synced ->
+            IosSettingsDivider()
+            IosSettingsRow(
+                icon = GeekifyIcons.Audiotrack,
+                tileColor = IosPalette.systemPurple,
+                title = "Active Presence",
+                subtitle = synced
+            )
+        }
+    }
+
+    Spacer(Modifier.height(20.dp))
+
+    IosSettingsSection(
+        title = "Authentication & Credentials",
+        footer = "Android Connection Requirements:\n1. Create or select a Discord Application at discord.com/developers/applications and copy its Application ID.\n2. Provide an OAuth2 access token with presence scope (or authorize via OAuth2 PKCE in your browser).\n3. Keep an active internet connection while playing music."
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedTextField(
+                value = appIdInput,
+                onValueChange = { appIdInput = it },
+                label = { Text("Discord Application ID") },
+                placeholder = { Text("e.g. 123456789012345678") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                value = tokenInput,
+                onValueChange = { tokenInput = it },
+                label = {
+                    Text(
+                        if (uiState.hasToken) "Access Token (Saved: ${uiState.maskedToken})"
+                        else "Discord Access Token"
+                    )
+                },
+                placeholder = { Text("Paste token to set or update") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            discordManager.setConfig(
+                                enabled = true,
+                                applicationId = appIdInput,
+                                accessToken = tokenInput.takeIf { it.isNotBlank() }
+                            )
+                            tokenInput = ""
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Save & Connect")
+                }
+                OutlinedButton(
+                    onClick = {
+                        val id = appIdInput.trim()
+                        if (id.isNotBlank()) {
+                            val (url, _) = discordManager.buildOAuthPkceUrl(id)
+                            runCatching {
+                                context.startActivity(
+                                    android.content.Intent(
+                                        android.content.Intent.ACTION_VIEW,
+                                        android.net.Uri.parse(url)
+                                    )
+                                )
+                            }
+                        }
+                    },
+                    enabled = appIdInput.isNotBlank()
+                ) {
+                    Text("OAuth2 Browser")
+                }
+            }
+        }
     }
 }

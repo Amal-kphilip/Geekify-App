@@ -29,8 +29,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import javax.inject.Inject
-import javax.inject.Singleton
 
 enum class RepeatMode { OFF, ALL, ONE }
 
@@ -70,14 +68,11 @@ data class QueueState(
     }
     val hasPrev: Boolean get() = queue.isNotEmpty()
 }
-
-@Singleton
 class QueueManager(
     private val dataStore: DataStore<Preferences>,
     dispatcher: CoroutineDispatcher,
     private val debounceMs: Long
 ) {
-    @Inject
     constructor(dataStore: DataStore<Preferences>) : this(
         dataStore = dataStore,
         dispatcher = Dispatchers.IO,
@@ -158,6 +153,8 @@ class QueueManager(
         val KEY_QUEUE = stringPreferencesKey("player_queue")
         val KEY_INDEX = intPreferencesKey("player_index")
         val KEY_SHUFFLE = stringPreferencesKey("player_shuffle")
+        val KEY_SHUFFLE_ORDER = stringPreferencesKey("player_shuffle_order")
+        val KEY_SHUFFLE_POINTER = intPreferencesKey("player_shuffle_pointer")
         val KEY_REPEAT = stringPreferencesKey("player_repeat")
         val KEY_VOLUME = floatPreferencesKey("player_volume")
         val KEY_PROGRESS = longPreferencesKey("player_progress_ms")
@@ -198,11 +195,26 @@ class QueueManager(
                         val reasons = prefs[KEY_RECOMMENDATION_REASONS]?.let {
                             runCatching { json.decodeFromString<Map<String, String>>(it) }.getOrNull()
                         }.orEmpty()
+                        val validIndex = index.coerceIn(-1, queue.size - 1)
+                        if (shuf && queue.size > 1) {
+                            val savedOrder = prefs[KEY_SHUFFLE_ORDER]?.let { raw ->
+                                runCatching { json.decodeFromString<List<Int>>(raw) }.getOrNull()
+                            }
+                            val savedPtr = prefs[KEY_SHUFFLE_POINTER] ?: 0
+                            if (savedOrder != null && savedOrder.size == queue.size &&
+                                savedOrder.all { it in queue.indices } &&
+                                savedPtr in savedOrder.indices &&
+                                savedOrder[savedPtr] == validIndex
+                            ) {
+                                shuffleOrder = savedOrder
+                                shufflePointer = savedPtr
+                            }
+                        }
                         // A restored queue is always PAUSED (isPlaying = false): reopening the app never starts
                         // music by itself. The track and the position are kept so Play continues where it stopped.
                         QueueState(
                             queue = queue,
-                            index = index.coerceIn(-1, queue.size - 1),
+                            index = validIndex,
                             isPlaying = false,
                             isBuffering = false,
                             shuffle = shuf,
@@ -392,7 +404,96 @@ class QueueManager(
         schedulePersist()
     }
 
-    fun next() = runWhenLoaded {
+    /** Peeks up to [count] upcoming tracks respecting repeat and shuffle state, without mutating queue state. */
+    fun peekUpcomingTracks(count: Int = 2): List<Track> = synchronized(stateLock) {
+        val s = _state.value
+        if (s.queue.isEmpty() || count <= 0) return emptyList()
+        if (s.repeat == RepeatMode.ONE) return listOfNotNull(s.current)
+        val result = mutableListOf<Track>()
+        if (s.shuffle && s.queue.size > 1) {
+            val order = shuffleOrder
+            if (order != null && order.isNotEmpty()) {
+                var ptr = shufflePointer
+                repeat(count) {
+                    val nextPtr = ptr + 1
+                    val idx = when {
+                        nextPtr < order.size -> {
+                            ptr = nextPtr
+                            order[ptr]
+                        }
+                        s.repeat == RepeatMode.ALL -> {
+                            ptr = 0
+                            order[0]
+                        }
+                        else -> null
+                    }
+                    if (idx != null) {
+                        s.queue.getOrNull(idx)?.let { track ->
+                            if (result.none { it.videoId == track.videoId }) result.add(track)
+                        }
+                    }
+                }
+                return result
+            }
+        }
+        var idx = s.index
+        repeat(count) {
+            val nextIdx = when {
+                idx + 1 < s.queue.size -> idx + 1
+                s.repeat == RepeatMode.ALL -> 0
+                else -> -1
+            }
+            if (nextIdx >= 0) {
+                idx = nextIdx
+                s.queue.getOrNull(idx)?.let { track ->
+                    if (result.none { it.videoId == track.videoId }) result.add(track)
+                }
+            }
+        }
+        result
+    }
+
+    /** Peeks the next upcoming track respecting repeat and shuffle state, without mutating queue state. */
+    fun peekNextTrack(): Track? = synchronized(stateLock) {
+        val s = _state.value
+        if (s.queue.isEmpty()) return null
+        if (s.repeat == RepeatMode.ONE) return s.current
+        val nextIndex = when {
+            s.shuffle && s.queue.size > 1 -> {
+                val order = shuffleOrder
+                when {
+                    order != null && shufflePointer + 1 < order.size -> order[shufflePointer + 1]
+                    order != null && s.repeat == RepeatMode.ALL -> order.firstOrNull()
+                    else -> null
+                }
+            }
+            s.index + 1 < s.queue.size -> s.index + 1
+            s.repeat == RepeatMode.ALL -> 0
+            else -> null
+        }
+        nextIndex?.let { s.queue.getOrNull(it) }
+    }
+
+    /** Inserts [track] immediately after the current track so it plays next. */
+    fun playNext(track: Track) = runWhenLoaded {
+        val s = _state.value
+        if (s.queue.isEmpty()) {
+            play(track)
+            return@runWhenLoaded
+        }
+        val q = s.queue.toMutableList()
+        val insertAt = (s.index + 1).coerceIn(0, q.size)
+        q.add(insertAt, track)
+        shuffleOrder?.let { existing ->
+            val shifted = existing.map { idx -> if (idx >= insertAt) idx + 1 else idx }.toMutableList()
+            val ptrInsert = (shufflePointer + 1).coerceIn(0, shifted.size)
+            shifted.add(ptrInsert, insertAt)
+            shuffleOrder = shifted
+        }
+        update(s.copy(queue = q), queueChanged = true, modesChanged = true)
+    }
+
+    fun next(suppressTonearm: Boolean = false) = runWhenLoaded {
         val s = _state.value
         if (s.queue.isEmpty()) return@runWhenLoaded
         if (s.repeat == RepeatMode.ONE) {
@@ -415,11 +516,13 @@ class QueueManager(
                     shufflePointer++
                     order[shufflePointer]
                 } else if (s.repeat == RepeatMode.ALL) {
-                    val ind = s.queue.indices.toMutableList()
-                    ind.shuffle()
-                    shuffleOrder = ind
+                    // Keep order[0] first so peekNextTrack() and crossfade preloading always match!
+                    val head = order.firstOrNull()?.takeIf { it in s.queue.indices } ?: 0
+                    val rest = s.queue.indices.filter { it != head }.shuffled()
+                    val newOrder = listOf(head) + rest
+                    shuffleOrder = newOrder
                     shufflePointer = 0
-                    ind[0]
+                    head
                 } else {
                     _state.value = s.copy(isPlaying = false)
                     return@runWhenLoaded
@@ -443,12 +546,13 @@ class QueueManager(
             s.copy(
                 index = next,
                 isPlaying = true,
-                isBuffering = true,
+                isBuffering = !suppressTonearm,
                 error = null,
                 skipDirection = 1,
-                tonearmTransitionPending = tonearmSyncEnabled
+                tonearmTransitionPending = tonearmSyncEnabled && !suppressTonearm
             ),
             queueChanged = true,
+            modesChanged = s.shuffle,
             progressChanged = true
         )
     }
@@ -462,7 +566,7 @@ class QueueManager(
             if (s.queue.isEmpty()) return@runWhenLoaded
 
             val now = System.currentTimeMillis()
-            val isRapidSecondPress = (now - lastPreviousPressTimeMs) in 1..2500L
+            val isRapidSecondPress = lastPreviousPressTimeMs > 0L && (now - lastPreviousPressTimeMs) in 0..2500L
             lastPreviousPressTimeMs = now
 
             if (!isRapidSecondPress && progressSeconds > 3L && s.current != null) {
@@ -578,10 +682,49 @@ class QueueManager(
         )
     }
 
+    private fun reconcileShuffleOrder(oldQueue: List<Track>, newQueue: List<Track>, newCurrentIndex: Int) {
+        val existing = shuffleOrder ?: return
+        if (newQueue.isEmpty() || newCurrentIndex !in newQueue.indices) {
+            shuffleOrder = null
+            shufflePointer = 0
+            return
+        }
+        val newIndexByVideoId = HashMap<String, Int>(newQueue.size)
+        newQueue.forEachIndexed { idx, track ->
+            newIndexByVideoId.putIfAbsent(track.videoId, idx)
+        }
+        val mapped = ArrayList<Int>(newQueue.size)
+        val seen = HashSet<Int>(newQueue.size)
+        var newPointer = 0
+        existing.forEachIndexed { pos, oldIdx ->
+            val vid = oldQueue.getOrNull(oldIdx)?.videoId ?: return@forEachIndexed
+            val mappedIdx = newIndexByVideoId[vid] ?: return@forEachIndexed
+            if (seen.add(mappedIdx)) {
+                if (pos <= shufflePointer) {
+                    newPointer = mapped.size
+                }
+                mapped.add(mappedIdx)
+            }
+        }
+        val newlyAdded = newQueue.indices.filter { it !in seen }.shuffled()
+        mapped.addAll(newlyAdded)
+        val currentPos = mapped.indexOf(newCurrentIndex)
+        if (currentPos >= 0) {
+            shufflePointer = currentPos
+        } else {
+            shufflePointer = newPointer.coerceIn(0, (mapped.size - 1).coerceAtLeast(0))
+        }
+        shuffleOrder = mapped
+    }
+
     fun addToQueue(track: Track) = runWhenLoaded {
+        val s = _state.value
+        val newQueue = s.queue + track
+        reconcileShuffleOrder(s.queue, newQueue, s.index)
         update(
-            _state.value.copy(queue = _state.value.queue + track),
-            queueChanged = true
+            s.copy(queue = newQueue),
+            queueChanged = true,
+            modesChanged = shuffleOrder != null
         )
     }
 
@@ -594,6 +737,7 @@ class QueueManager(
             index == s.index -> if (q.isEmpty()) -1 else s.index.coerceAtMost(q.size - 1)
             else -> s.index
         }
+        reconcileShuffleOrder(s.queue, q, newIdx)
         val remainingIds = q.map { it.videoId }.toSet()
         update(
             s.copy(
@@ -602,7 +746,8 @@ class QueueManager(
                 recommendationReasons = s.recommendationReasons.filterKeys { it in remainingIds },
                 skipDirection = if (index == s.index && newIdx >= 0) 1 else s.skipDirection
             ),
-            queueChanged = true
+            queueChanged = true,
+            modesChanged = shuffleOrder != null
         )
     }
 
@@ -613,9 +758,11 @@ class QueueManager(
         val item = q.removeAt(from); q.add(to, item)
         val current = s.current
         val idx = if (current != null) q.indexOfFirst { it.videoId == current.videoId }.coerceAtLeast(0) else s.index
+        reconcileShuffleOrder(s.queue, q, idx)
         update(
             s.copy(queue = q, index = idx),
-            queueChanged = true
+            queueChanged = true,
+            modesChanged = shuffleOrder != null
         )
     }
 
@@ -654,6 +801,8 @@ class QueueManager(
                 prefs.remove(KEY_INDEX)
                 prefs.remove(KEY_PROGRESS)
                 prefs.remove(KEY_RECOMMENDATION_REASONS)
+                prefs.remove(KEY_SHUFFLE_ORDER)
+                prefs.remove(KEY_SHUFFLE_POINTER)
             }
         }
     }
@@ -661,14 +810,17 @@ class QueueManager(
     fun clearQueue() = runWhenLoaded {
         val s = _state.value
         val kept = if (s.current != null) listOf(s.current!!) else emptyList()
+        val newIdx = if (kept.isEmpty()) -1 else 0
+        reconcileShuffleOrder(s.queue, kept, newIdx)
         val keptIds = kept.map { it.videoId }.toSet()
         update(
             s.copy(
                 queue = kept,
-                index = if (kept.isEmpty()) -1 else 0,
+                index = newIdx,
                 recommendationReasons = s.recommendationReasons.filterKeys { it in keptIds }
             ),
-            queueChanged = true
+            queueChanged = true,
+            modesChanged = true
         )
     }
 
@@ -677,12 +829,15 @@ class QueueManager(
         val existing = s.queue.map { it.videoId }.toSet()
         val fresh = tracks.filter { it.videoId !in existing }.distinctBy { it.videoId }
         if (fresh.isNotEmpty()) {
+            val newQueue = s.queue + fresh
+            reconcileShuffleOrder(s.queue, newQueue, s.index)
             val nextReasons = s.recommendationReasons + fresh.mapNotNull { track ->
                 reasonsByVideoId[track.videoId]?.takeIf { it.isNotBlank() }?.let { track.videoId to it }
             }
             update(
-                s.copy(queue = s.queue + fresh, recommendationReasons = nextReasons),
-                queueChanged = true
+                s.copy(queue = newQueue, recommendationReasons = nextReasons),
+                queueChanged = true,
+                modesChanged = shuffleOrder != null
             )
         }
     }
@@ -696,13 +851,15 @@ class QueueManager(
             idx <= s.index || track.videoId !in autoIds
         }
         if (filtered.size != s.queue.size) {
+            reconcileShuffleOrder(s.queue, filtered, s.index)
             val remainingIds = filtered.map { it.videoId }.toSet()
             update(
                 s.copy(
                     queue = filtered,
                     recommendationReasons = s.recommendationReasons.filterKeys { it in remainingIds }
                 ),
-                queueChanged = true
+                queueChanged = true,
+                modesChanged = shuffleOrder != null
             )
         }
     }
@@ -715,13 +872,15 @@ class QueueManager(
             idx <= s.index || !track.explicit
         }
         if (filtered.size != s.queue.size) {
+            reconcileShuffleOrder(s.queue, filtered, s.index)
             val remainingIds = filtered.map { it.videoId }.toSet()
             update(
                 s.copy(
                     queue = filtered,
                     recommendationReasons = s.recommendationReasons.filterKeys { it in remainingIds }
                 ),
-                queueChanged = true
+                queueChanged = true,
+                modesChanged = shuffleOrder != null
             )
         }
     }
@@ -812,6 +971,10 @@ class QueueManager(
             val encodedReasons = if (writeQueue) {
                 json.encodeToString(snapshot.recommendationReasons)
             } else null
+            val encodedShuffleOrder = synchronized(stateLock) {
+                if (snapshot.shuffle && shuffleOrder != null) json.encodeToString(shuffleOrder!!) else null
+            }
+            val savedShufflePointer = synchronized(stateLock) { shufflePointer }
 
             dataStore.edit { prefs ->
                 val persistentQueue = prefs[AppSettingsRepository.KEY_PERSISTENT_QUEUE] ?: true
@@ -830,6 +993,8 @@ class QueueManager(
                         prefs.remove(KEY_QUEUE)
                         prefs.remove(KEY_INDEX)
                         prefs.remove(KEY_RECOMMENDATION_REASONS)
+                        prefs.remove(KEY_SHUFFLE_ORDER)
+                        prefs.remove(KEY_SHUFFLE_POINTER)
                     }
                 }
                 if (writeProgress) {
@@ -839,13 +1004,22 @@ class QueueManager(
                         prefs.remove(KEY_PROGRESS)
                     }
                 }
-                if (writeModes) {
+                if (writeModes || writeQueue) {
                     if (rememberShuffleRepeat) {
                         prefs[KEY_SHUFFLE] = snapshot.shuffle.toString()
                         prefs[KEY_REPEAT] = snapshot.repeat.name
+                        if (persistentQueue && encodedShuffleOrder != null) {
+                            prefs[KEY_SHUFFLE_ORDER] = encodedShuffleOrder
+                            prefs[KEY_SHUFFLE_POINTER] = savedShufflePointer
+                        } else {
+                            prefs.remove(KEY_SHUFFLE_ORDER)
+                            prefs.remove(KEY_SHUFFLE_POINTER)
+                        }
                     } else {
                         prefs.remove(KEY_SHUFFLE)
                         prefs.remove(KEY_REPEAT)
+                        prefs.remove(KEY_SHUFFLE_ORDER)
+                        prefs.remove(KEY_SHUFFLE_POINTER)
                     }
                 }
             }

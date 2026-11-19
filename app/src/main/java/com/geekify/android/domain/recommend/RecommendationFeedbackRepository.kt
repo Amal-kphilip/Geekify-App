@@ -7,11 +7,7 @@ import com.geekify.android.data.local.UserRecommendationFeedbackEntity
 import com.geekify.android.data.model.Track
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import javax.inject.Inject
-import javax.inject.Singleton
-
-@Singleton
-class RecommendationFeedbackRepository @Inject constructor(
+class RecommendationFeedbackRepository constructor(
     private val dao: RecommendationFeedbackDao
 ) {
     val hiddenTrackIds: Flow<Set<String>> = dao.observeHiddenTrackIds().map { it.toSet() }

@@ -25,8 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
-import dagger.hilt.android.lifecycle.HiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.geekify.android.data.local.ListeningStatsRepository
@@ -51,10 +50,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
-import javax.inject.Inject
-
-@HiltViewModel
-class ListeningStatsViewModel @Inject constructor(
+class ListeningStatsViewModel constructor(
     repository: ListeningStatsRepository,
     private val languageMetadataResolver: ListeningLanguageMetadataResolver
 ) : ViewModel() {
@@ -123,7 +119,7 @@ private val statsChartColors = listOf(
 @Composable
 fun ListeningStatsScreen(
     onBack: () -> Unit,
-    viewModel: ListeningStatsViewModel = hiltViewModel()
+    viewModel: ListeningStatsViewModel = koinViewModel()
 ) {
     val stats by viewModel.stats.collectAsState()
     val scrollState = androidx.compose.foundation.rememberScrollState()

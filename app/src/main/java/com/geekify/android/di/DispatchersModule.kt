@@ -1,22 +1,17 @@
 package com.geekify.android.di
 
-import dagger.Module
-import dagger.Provides
-import dagger.hilt.InstallIn
-import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import javax.inject.Qualifier
+import org.koin.core.qualifier.named
+import org.koin.dsl.module
 
-@Qualifier @Retention(AnnotationRetention.BINARY) annotation class IoDispatcher
-@Qualifier @Retention(AnnotationRetention.BINARY) annotation class DefaultDispatcher
-@Qualifier @Retention(AnnotationRetention.BINARY) annotation class MainDispatcher
+val IoDispatcherQualifier = named("io")
+val DefaultDispatcherQualifier = named("default")
+val MainDispatcherQualifier = named("main")
 
-/** Dispatchers are injected (not hard-coded) so repositories can be tested and never block the main thread. */
-@Module
-@InstallIn(SingletonComponent::class)
-object DispatchersModule {
-    @Provides @IoDispatcher fun provideIo(): CoroutineDispatcher = Dispatchers.IO
-    @Provides @DefaultDispatcher fun provideDefault(): CoroutineDispatcher = Dispatchers.Default
-    @Provides @MainDispatcher fun provideMain(): CoroutineDispatcher = Dispatchers.Main
+/** Dispatchers are injected via Koin qualifiers so repositories can be tested and never block the main thread. */
+val dispatchersModule = module {
+    single<CoroutineDispatcher>(IoDispatcherQualifier) { Dispatchers.IO }
+    single<CoroutineDispatcher>(DefaultDispatcherQualifier) { Dispatchers.Default }
+    single<CoroutineDispatcher>(MainDispatcherQualifier) { Dispatchers.Main }
 }

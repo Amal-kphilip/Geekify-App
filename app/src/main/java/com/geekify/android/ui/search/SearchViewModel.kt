@@ -7,9 +7,6 @@ import com.geekify.android.data.local.*
 import com.geekify.android.data.model.*
 import com.geekify.android.data.source.MusicResult
 import com.geekify.android.data.source.MusicSource
-import com.geekify.android.di.DefaultDispatcher
-import com.geekify.android.di.IoDispatcher
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -33,7 +30,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
-import javax.inject.Inject
 
 data class SearchUiState(
     val query: String = "",
@@ -55,7 +51,6 @@ data class SearchUiState(
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
-@HiltViewModel
 class SearchViewModel internal constructor(
     private val musicSource: MusicSource,
     private val recentSearchDao: RecentSearchDao,
@@ -64,12 +59,11 @@ class SearchViewModel internal constructor(
     private val playlistDao: PlaylistDao,
     private val playStatDao: PlayStatDao,
     private val auth: AuthRepository?,
-    @DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher,
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    private val defaultDispatcher: CoroutineDispatcher,
+    private val ioDispatcher: CoroutineDispatcher,
     accountFlowOverride: kotlinx.coroutines.flow.Flow<String?>?
 ) : ViewModel() {
 
-    @Inject
     constructor(
         musicSource: MusicSource,
         recentSearchDao: RecentSearchDao,
@@ -78,8 +72,8 @@ class SearchViewModel internal constructor(
         playlistDao: PlaylistDao,
         playStatDao: PlayStatDao,
         auth: AuthRepository,
-        @DefaultDispatcher defaultDispatcher: CoroutineDispatcher,
-        @IoDispatcher ioDispatcher: CoroutineDispatcher
+        defaultDispatcher: CoroutineDispatcher,
+        ioDispatcher: CoroutineDispatcher
     ) : this(
         musicSource = musicSource,
         recentSearchDao = recentSearchDao,
@@ -460,7 +454,7 @@ class SearchViewModel internal constructor(
                     title = p.name,
                     subtitle = "Local Playlist",
                     thumbnails = emptyList(),
-                    type = "playlist",
+                    type = "local_playlist",
                     playlistId = p.id
                 )
             }

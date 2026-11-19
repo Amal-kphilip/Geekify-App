@@ -5,13 +5,11 @@ import androidx.lifecycle.viewModelScope
 import com.geekify.android.data.model.*
 import com.geekify.android.data.source.MusicResult
 import com.geekify.android.data.source.MusicSource
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 data class ArtistUiState(
     val artist: ArtistPage? = null,
@@ -24,9 +22,7 @@ data class CollectionUiState(
     val isLoading: Boolean = false,
     val error: String? = null
 )
-
-@HiltViewModel
-class DetailsViewModel @Inject constructor(
+class DetailsViewModel constructor(
     private val musicSource: MusicSource,
     private val streamResolver: com.geekify.android.player.StreamResolver
 ) : ViewModel() {

@@ -8,8 +8,6 @@ import com.geekify.android.domain.listening.TimeOfDayPart
 import com.geekify.android.domain.recommend.engine.MusicClassificationService
 import com.geekify.android.domain.recommend.engine.MusicMood
 import java.util.Locale
-import javax.inject.Inject
-import javax.inject.Singleton
 
 enum class SmartMixType(
     val title: String,
@@ -28,9 +26,7 @@ data class SmartMix(
     val explanationBadge: String,
     val tracks: List<Track>
 )
-
-@Singleton
-class SmartMixManager @Inject constructor(
+class SmartMixManager constructor(
     private val classificationService: MusicClassificationService,
     private val listeningBehaviorManager: ListeningBehaviorManager,
     private val feedbackRepository: RecommendationFeedbackRepository

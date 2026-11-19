@@ -2,8 +2,6 @@ package com.geekify.android.domain.recommend.engine
 
 import com.geekify.android.domain.listening.ListeningLanguageClassifier
 import java.util.Locale
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlin.math.exp
 
 enum class MusicGenre(val displayName: String) {
@@ -65,9 +63,7 @@ data class TrackClassification(
     val primaryGenre: MusicGenre?,
     val primaryMood: MusicMood?
 )
-
-@Singleton
-class MusicClassificationService @Inject constructor() {
+class MusicClassificationService constructor() {
     private val wordRegex = Regex("[\\p{L}\\p{N}_-]+")
 
     fun classify(
@@ -231,9 +227,7 @@ class MusicClassificationService @Inject constructor() {
         )
     }
 }
-
-@Singleton
-class RecommendationContextEngine @Inject constructor(
+class RecommendationContextEngine constructor(
     private val classificationService: MusicClassificationService
 ) {
     fun inferContextFromHour(hourOfDay: Int?): ListeningContext = when (hourOfDay) {
