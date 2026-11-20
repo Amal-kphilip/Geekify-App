@@ -127,6 +127,53 @@ object OfflineRomanizer {
 }
 
 /**
+ * Alignment, deduplication, and cache-key utilities for translated and romanized lyric subtitles.
+ */
+object LyricsSubtitleAligner {
+    private val multiSpace = Regex("""\s+""")
+
+    fun normalize(text: String?): String =
+        text.orEmpty().trim().replace(multiSpace, " ").lowercase()
+
+    /**
+     * Returns the cleaned subtitle only when it adds genuine information (non-blank and not
+     * identical to the original lyric line after normalization).
+     */
+    fun sanitizeSubtitle(original: String, candidate: String?): String? {
+        val cleaned = candidate?.trim()?.replace(multiSpace, " ").orEmpty()
+        if (cleaned.isEmpty()) return null
+        if (normalize(cleaned) == normalize(original)) return null
+        return cleaned
+    }
+
+    /**
+     * Aligns provider-returned [rawTranslations] strictly 1:1 with [originalLines].
+     * Missing lines remain blank placeholders (`""`) rather than shifting subsequent lines.
+     * Redundant translations identical to the original are cleared to `""`.
+     */
+    fun alignTranslations(originalLines: List<String>, rawTranslations: List<String>): List<String> {
+        if (originalLines.isEmpty()) return emptyList()
+        return originalLines.indices.map { i ->
+            sanitizeSubtitle(originalLines[i], rawTranslations.getOrNull(i)).orEmpty()
+        }
+    }
+
+    /**
+     * Builds a stable cache identity for a track's lyrics translation state so switching tracks,
+     * lyric providers, content, or target language immediately invalidates stale translations.
+     */
+    fun buildTranslationKey(
+        trackId: String,
+        provider: String,
+        originalLines: List<String>,
+        targetLanguage: String
+    ): String {
+        val contentHash = originalLines.joinToString("\n").hashCode()
+        return "$trackId|$provider|$contentHash|${targetLanguage.lowercase()}"
+    }
+}
+
+/**
  * Translates lyric lines via Google Translate (no key) or BYOK LLM providers
  * (OpenRouter, OpenAI, Gemini, Anthropic). Never stores hardcoded API keys.
  */
@@ -157,7 +204,7 @@ class LyricsTranslationClient(private val http: OkHttpClient) {
         val req = Request.Builder().url(url).get().build()
         return http.newCall(req).execute().use { res ->
             if (!res.isSuccessful) error("Google Translate HTTP ${res.code}")
-            val body = res.body?.string().orEmpty()
+            val body = res.body.string()
             val root = json.parseToJsonElement(body).jsonArray
             val chunks = root.firstOrNull()?.jsonArray.orEmpty()
             val fullTranslated = buildString {
@@ -194,7 +241,7 @@ class LyricsTranslationClient(private val http: OkHttpClient) {
             .build()
         return http.newCall(req).execute().use { res ->
             if (!res.isSuccessful) error("${config.provider.displayName} HTTP ${res.code}")
-            val root = json.parseToJsonElement(res.body?.string().orEmpty()).jsonObject
+            val root = json.parseToJsonElement(res.body.string()).jsonObject
             val content = root["choices"]?.jsonArray?.firstOrNull()?.jsonObject
                 ?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull.orEmpty()
             val split = content.trim().split('\n')
@@ -218,7 +265,7 @@ class LyricsTranslationClient(private val http: OkHttpClient) {
         val req = Request.Builder().url(url).post(payload.toRequestBody(jsonMedia)).build()
         return http.newCall(req).execute().use { res ->
             if (!res.isSuccessful) error("Gemini HTTP ${res.code}")
-            val root = json.parseToJsonElement(res.body?.string().orEmpty()).jsonObject
+            val root = json.parseToJsonElement(res.body.string()).jsonObject
             val content = root["candidates"]?.jsonArray?.firstOrNull()?.jsonObject
                 ?.get("content")?.jsonObject?.get("parts")?.jsonArray?.firstOrNull()?.jsonObject
                 ?.get("text")?.jsonPrimitive?.contentOrNull.orEmpty()
@@ -247,7 +294,7 @@ class LyricsTranslationClient(private val http: OkHttpClient) {
             .build()
         return http.newCall(req).execute().use { res ->
             if (!res.isSuccessful) error("Anthropic HTTP ${res.code}")
-            val root = json.parseToJsonElement(res.body?.string().orEmpty()).jsonObject
+            val root = json.parseToJsonElement(res.body.string()).jsonObject
             val content = root["content"]?.jsonArray?.firstOrNull()?.jsonObject
                 ?.get("text")?.jsonPrimitive?.contentOrNull.orEmpty()
             val split = content.trim().split('\n')

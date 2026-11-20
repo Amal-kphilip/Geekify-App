@@ -95,7 +95,7 @@ class ScrobbleManager(
             }.build()
             val req = Request.Builder().url(LASTFM_API_URL).post(form).build()
             http.newCall(req).execute().use { res ->
-                val body = res.body?.string().orEmpty()
+                val body = res.body.string()
                 if (!res.isSuccessful) error("Last.fm auth failed with HTTP ${res.code}")
                 val root = json.parseToJsonElement(body).jsonObject
                 val sessionKey = root["session"]?.jsonObject?.get("key")?.jsonPrimitive?.contentOrNull

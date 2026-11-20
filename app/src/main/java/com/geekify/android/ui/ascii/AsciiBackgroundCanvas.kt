@@ -373,7 +373,7 @@ fun AsciiBackgroundCanvas(
                         val forceCpu = com.geekify.android.BuildConfig.DEBUG && AsciiCalibration.activePath == "cpu"
                         val currentGpu = gpuRenderer
                         val useGpu = !forceCpu && AsciiGpuSupport.isSupported() && currentGpu != null
-                        if (useGpu && currentGpu != null) {
+                        if (useGpu) {
                             writeFrame.copyFrom(engine.renderer, engine.timeSec)
                             currentGpu.uploadFrame(writeFrame)
                         } else {
@@ -490,7 +490,7 @@ fun AsciiBackgroundCanvas(
                 val forceCpu = com.geekify.android.BuildConfig.DEBUG && AsciiCalibration.activePath == "cpu"
                 val currentGpu = gpuRenderer
                 val useGpu = !forceCpu && AsciiGpuSupport.isSupported() && currentGpu != null
-                if (useGpu && currentGpu != null) {
+                if (useGpu) {
                     gpuDrawn = currentGpu.draw(native, frame, displayInterp, scaleFactor)
                 }
                 if (!gpuDrawn) {

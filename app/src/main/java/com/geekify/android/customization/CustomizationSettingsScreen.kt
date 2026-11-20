@@ -1,14 +1,16 @@
 package com.geekify.android.customization
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import androidx.compose.ui.graphics.graphicsLayer
+import com.geekify.android.ui.navigation.GeekifyNavMotion
+import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -37,6 +39,10 @@ import com.geekify.android.settings.AppSettingsState
 import com.geekify.android.settings.AudioQualityPreference
 import com.geekify.android.ui.ascii.AsciiCatalog
 import com.geekify.android.ui.components.*
+import com.geekify.android.ui.glass.GlassStyle
+import com.geekify.android.ui.glass.glassBackdropSource
+import com.geekify.android.ui.glass.liquidGlass
+import com.geekify.android.ui.glass.rememberGlassBackdrop
 import com.geekify.android.ui.navigation.FloatingTabBarInlineBehavior
 import com.geekify.android.ui.theme.*
 import kotlin.math.roundToInt
@@ -65,8 +71,43 @@ fun CustomizationSettingsScreen(
     var showResetAllDialog by rememberSaveable { mutableStateOf(false) }
     val rootScroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
 
-    BackHandler(enabled = activeCategory != null) {
-        activeCategory = null
+    // Responsive gesture-driven predictive back for settings subpages, aligned with GeekifyNavMotion:
+    // - Tracks live swipe progress & edge so the subpage follows the user's finger immediately
+    // - Completes with an instant snappy handoff (no delayed secondary slide animation)
+    // - Cancels smoothly back to 0f with zero snap or flicker
+    val backCancelScope = rememberCoroutineScope()
+    val predictiveBackAnim = remember { Animatable(0f) }
+    var predictiveBackEdge by remember { mutableIntStateOf(GeekifyNavMotion.SWIPE_EDGE_LEFT) }
+    var lastBackWasGesture by remember { mutableStateOf(false) }
+
+    PredictiveBackHandler(enabled = activeCategory != null && !showResetAllDialog) { backEvents ->
+        try {
+            backEvents.collect { event ->
+                predictiveBackEdge = event.swipeEdge
+                predictiveBackAnim.snapTo(event.progress.coerceIn(0f, 1f))
+            }
+            lastBackWasGesture = true
+            predictiveBackAnim.snapTo(0f)
+            activeCategory = null
+        } catch (_: CancellationException) {
+            lastBackWasGesture = false
+            backCancelScope.launch {
+                predictiveBackAnim.animateTo(
+                    targetValue = 0f,
+                    animationSpec = tween(
+                        durationMillis = GeekifyNavMotion.GESTURE_CANCEL_RETURN_DURATION_MS,
+                        easing = FastOutSlowInEasing
+                    )
+                )
+            }
+        }
+    }
+
+    LaunchedEffect(activeCategory) {
+        if (activeCategory != null) {
+            lastBackWasGesture = false
+            predictiveBackAnim.snapTo(0f)
+        }
     }
 
     LaunchedEffect(toastMessage) {
@@ -115,13 +156,10 @@ fun CustomizationSettingsScreen(
     AnimatedContent(
         targetState = activeCategory,
         transitionSpec = {
-            if (targetState != null) {
-                (slideInHorizontally(tween(240)) { it / 3 } + fadeIn(tween(200)))
-                    .togetherWith(slideOutHorizontally(tween(200)) { -it / 4 } + fadeOut(tween(150)))
-            } else {
-                (slideInHorizontally(tween(240)) { -it / 4 } + fadeIn(tween(200)))
-                    .togetherWith(slideOutHorizontally(tween(200)) { it / 3 } + fadeOut(tween(150)))
-            }
+            GeekifyNavMotion.subPageTransition(
+                isForward = targetState != null,
+                lastBackWasGesture = lastBackWasGesture
+            )
         },
         label = "customizationCategoryNav"
     ) { category ->
@@ -137,10 +175,6 @@ fun CustomizationSettingsScreen(
                         CustomizationToastBanner(message = msg, onDismiss = viewModel::clearToast)
                     }
                 }
-
-                LiveStudioHeroCard(state = state)
-
-                Spacer(Modifier.height(22.dp))
 
                 IosSettingsSection(
                     title = "Visual Identity & Atmosphere",
@@ -307,6 +341,21 @@ fun CustomizationSettingsScreen(
                 saver = ScrollState.Saver
             ) { ScrollState(0) }
 
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val tf = GeekifyNavMotion.computePredictiveBackTransform(
+                            progress = predictiveBackAnim.value,
+                            density = density,
+                            swipeEdge = predictiveBackEdge
+                        )
+                        translationX = tf.translationXPx
+                        scaleX = tf.scale
+                        scaleY = tf.scale
+                        alpha = tf.alpha
+                    }
+            ) {
             IosSettingsPageScaffold(
                 title = category.title,
                 scrollState = detailScroll,
@@ -357,6 +406,7 @@ fun CustomizationSettingsScreen(
                         onClick = { viewModel.resetCategory(category) }
                     )
                 }
+            }
             }
         }
     }
@@ -554,18 +604,58 @@ private fun ThemeColorsCategoryPage(
     Spacer(Modifier.height(22.dp))
 
     IosSettingsSection(
-        title = "Dark Surface Variant",
-        footer = "AMOLED Black uses true #000000 pixels to save battery on OLED displays."
+        title = "Theme Mode",
+        footer = "Automatic follows your Android system dark/light theme. Pure Black turns off OLED pixels."
     ) {
-        DarkThemeVariant.entries.forEachIndexed { idx, variant ->
+        ThemeMode.entries.forEachIndexed { idx, mode ->
             if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
             IosSettingsRow(
-                title = variant.label,
-                subtitle = variant.subtitle,
-                value = if (theme.themeVariant == variant) "Active" else null,
-                selected = theme.themeVariant == variant,
+                title = mode.label,
+                subtitle = mode.subtitle,
+                value = if (theme.themeMode == mode) "Active" else null,
+                selected = theme.themeMode == mode,
                 showChevron = false,
-                onClick = { viewModel.setThemeVariant(variant) }
+                onClick = { viewModel.setThemeMode(mode) }
+            )
+        }
+    }
+
+    if (theme.themeMode == ThemeMode.DARK || theme.themeMode == ThemeMode.AUTO) {
+        Spacer(Modifier.height(22.dp))
+
+        IosSettingsSection(
+            title = "Dark Surface Variant",
+            footer = "Choose the dark background tone used in Dark mode."
+        ) {
+            DarkThemeVariant.entries.forEachIndexed { idx, variant ->
+                if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
+                IosSettingsRow(
+                    title = variant.label,
+                    subtitle = variant.subtitle,
+                    value = if (theme.themeVariant == variant) "Active" else null,
+                    selected = theme.themeVariant == variant,
+                    showChevron = false,
+                    onClick = { viewModel.setThemeVariant(variant) }
+                )
+            }
+        }
+    }
+
+    Spacer(Modifier.height(22.dp))
+
+    IosSettingsSection(
+        title = "Palette Style",
+        footer = "Shapes how primary and secondary colors are harmonized across Geekify."
+    ) {
+        ThemePaletteStyle.entries.forEachIndexed { idx, style ->
+            if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsRow(
+                title = style.label,
+                subtitle = style.subtitle,
+                value = if (theme.paletteStyle == style) "Active" else null,
+                selected = theme.paletteStyle == style,
+                showChevron = false,
+                onClick = { viewModel.setPaletteStyle(style) }
             )
         }
     }
@@ -670,7 +760,18 @@ private fun ThemeColorsCategoryPage(
 
     Spacer(Modifier.height(22.dp))
 
-    IosSettingsSection(title = "Artwork Color Extraction") {
+    IosSettingsSection(title = "Dynamic Colors & Enhancements") {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            IosSettingsSwitchRow(
+                title = "Material You Dynamic Colors",
+                subtitle = "Adopt colors from your Android system wallpaper",
+                checked = theme.materialYouEnabled,
+                onCheckedChange = viewModel::setMaterialYouEnabled,
+                icon = GeekifyIcons.AutoAwesome,
+                tileColor = IosPalette.systemBlue
+            )
+            IosSettingsDivider()
+        }
         IosSettingsSwitchRow(
             title = "Dynamic Now Playing Artwork Accent",
             subtitle = "Extract dominant album artwork colors for the expanded player ambient glow",
@@ -678,6 +779,15 @@ private fun ThemeColorsCategoryPage(
             onCheckedChange = viewModel::setDynamicPlayerAccent,
             icon = GeekifyIcons.Palette,
             tileColor = IosPalette.systemPink
+        )
+        IosSettingsDivider()
+        IosSettingsSwitchRow(
+            title = "UI Visual Enhancements",
+            subtitle = "Enhanced depth rims, subtle accent gradients, and expressive highlights",
+            checked = theme.uiEnhancements,
+            onCheckedChange = viewModel::setUiEnhancements,
+            icon = GeekifyIcons.Tune,
+            tileColor = IosPalette.systemPurple
         )
     }
 }
@@ -692,10 +802,86 @@ private fun LiquidGlassCategoryPage(
 ) {
     val glass = state.glass
     val activePreset = state.customization.glassPreset
+    val previewShape = RoundedCornerShape(glass.cornerRadiusDp.coerceIn(8f, 36f).dp)
+    val tintSwatches = remember {
+        listOf(
+            0xFF171717L, 0xFF1E293BL, 0xFF2E1065L, 0xFF064E3BL,
+            0xFF7C2D12L, 0xFF831843L, 0xFFF8FAFCL, 0xFFC8E65AL
+        )
+    }
+
+    // Live Acrylic & Liquid Glass Preview rendered using the real Modifier.liquidGlass pipeline
+    IosSettingsSection(
+        title = "Live Acrylic & Glass Preview",
+        footer = "Uses Geekify's actual Liquid Glass renderer so every tint, blur, border, and grain change reflects live."
+    ) {
+        val previewBackdrop = rememberGlassBackdrop(baseBg = InkBackground)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(156.dp)
+                .clip(RoundedCornerShape(18.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            // Vibrant reference backdrop behind the glass panel
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .glassBackdropSource(previewBackdrop)
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(Lilac.copy(alpha = 0.80f), Lime.copy(alpha = 0.72f), Sky.copy(alpha = 0.78f))
+                        )
+                    )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(modifier = Modifier.size(54.dp).clip(CircleShape).background(Rose.copy(alpha = 0.85f)))
+                    Box(modifier = Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(Peach.copy(alpha = 0.85f)))
+                    Box(modifier = Modifier.size(58.dp).clip(CircleShape).background(Lime.copy(alpha = 0.85f)))
+                }
+            }
+
+            // Real Liquid Glass / Acrylic surface preview
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.84f)
+                    .height(84.dp)
+                    .liquidGlass(
+                        shape = previewShape,
+                        style = GlassStyle.Preview,
+                        backdrop = previewBackdrop
+                    )
+                    .padding(horizontal = 18.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = if (glass.enabled) "Acrylic Glass · ${glass.tintMode.label}" else "Glass Disabled",
+                        color = TextPrimary,
+                        fontSize = 14.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Blur ${glass.blurDp.roundToInt()}dp · Opacity ${(glass.tintAlpha * 100).roundToInt()}% · Radius ${glass.cornerRadiusDp.roundToInt()}dp",
+                        color = TextSecondary,
+                        fontSize = 11.5.sp
+                    )
+                }
+            }
+        }
+    }
+
+    Spacer(Modifier.height(22.dp))
 
     IosSettingsSection(
         title = "Liquid Glass Presets",
-        footer = "Select a curated optical profile or fine-tune individual refraction sliders below."
+        footer = "Select a curated optical profile or fine-tune individual parameters below."
     ) {
         GlassPreset.entries.filter { it != GlassPreset.CUSTOM }.forEachIndexed { idx, preset ->
             if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
@@ -712,7 +898,140 @@ private fun LiquidGlassCategoryPage(
 
     Spacer(Modifier.height(22.dp))
 
-    IosSettingsSection(title = "Master & Surface Toggles") {
+    IosSettingsSection(title = "Acrylic Tint & Color") {
+        GlassTintMode.entries.forEachIndexed { idx, mode ->
+            if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsRow(
+                title = mode.label,
+                value = if (glass.tintMode == mode) "Active" else null,
+                selected = glass.tintMode == mode,
+                showChevron = false,
+                onClick = { viewModel.setGlassAppearance(tintMode = mode) }
+            )
+        }
+        if (glass.tintMode == GlassTintMode.CUSTOM) {
+            IosSettingsDivider(insetStart = 16.dp)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                tintSwatches.forEach { argb ->
+                    val selected = glass.customTintArgb == argb
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(Color(argb))
+                            .border(
+                                width = if (selected) 3.dp else 1.dp,
+                                color = if (selected) Lime else InkGlassBorder,
+                                shape = CircleShape
+                            )
+                            .clickable { viewModel.setGlassAppearance(customTintArgb = argb) }
+                    )
+                }
+            }
+        }
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSliderRow(
+            title = "Tint & Background Opacity",
+            valueLabel = "${(glass.tintAlpha * 100).roundToInt()}%",
+            value = glass.tintAlpha,
+            valueRange = 0f..0.75f,
+            onValueChange = viewModel::setGlassTintAlpha
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSliderRow(
+            title = "Surface Brightness",
+            valueLabel = "${if (glass.brightness >= 0f) "+" else ""}${(glass.brightness * 100).roundToInt()}%",
+            value = glass.brightness,
+            valueRange = -0.35f..0.35f,
+            onValueChange = { viewModel.setGlassAppearance(brightness = it) }
+        )
+    }
+
+    Spacer(Modifier.height(22.dp))
+
+    IosSettingsSection(title = "Surface, Border & Grain") {
+        IosSettingsSliderRow(
+            title = "Corner Radius",
+            valueLabel = "${glass.cornerRadiusDp.roundToInt()} dp",
+            value = glass.cornerRadiusDp,
+            valueRange = 8f..36f,
+            onValueChange = { viewModel.setGlassAppearance(cornerRadiusDp = it.roundToInt().toFloat()) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Surface Border Highlight",
+            checked = glass.borderEnabled,
+            onCheckedChange = { viewModel.setGlassAppearance(borderEnabled = it) }
+        )
+        if (glass.borderEnabled) {
+            IosSettingsDivider(insetStart = 16.dp)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                listOf(0xFFFFFFFFL, 0xFFC8E65AL, 0xFFCF9CF1L, 0xFF38E8FFL, 0xFF14131AL).forEach { argb ->
+                    val selected = glass.borderColorArgb == argb
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(Color(argb))
+                            .border(
+                                width = if (selected) 3.dp else 1.dp,
+                                color = if (selected) Lime else InkGlassBorder,
+                                shape = CircleShape
+                            )
+                            .clickable { viewModel.setGlassAppearance(borderColorArgb = argb) }
+                    )
+                }
+            }
+            IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsSliderRow(
+                title = "Border Opacity",
+                valueLabel = "${(glass.borderOpacity * 100).roundToInt()}%",
+                value = glass.borderOpacity,
+                valueRange = 0f..0.85f,
+                onValueChange = { viewModel.setGlassAppearance(borderOpacity = it) }
+            )
+            IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsSliderRow(
+                title = "Border Thickness",
+                valueLabel = "${"%.1f".format(glass.borderThicknessDp)} dp",
+                value = glass.borderThicknessDp,
+                valueRange = 0.5f..3.0f,
+                onValueChange = { viewModel.setGlassAppearance(borderThicknessDp = it) }
+            )
+        }
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSliderRow(
+            title = "Shadow Elevation",
+            valueLabel = "${glass.shadowElevationDp.roundToInt()} dp",
+            value = glass.shadowElevationDp,
+            valueRange = 0f..24f,
+            onValueChange = { viewModel.setGlassAppearance(shadowElevationDp = it.roundToInt().toFloat()) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSliderRow(
+            title = "Acrylic Noise / Grain",
+            valueLabel = "${(glass.noiseGrainAlpha * 100).roundToInt()}%",
+            value = glass.noiseGrainAlpha,
+            valueRange = 0f..0.25f,
+            onValueChange = { viewModel.setGlassAppearance(noiseGrainAlpha = it) }
+        )
+    }
+
+    Spacer(Modifier.height(22.dp))
+
+    IosSettingsSection(title = "Master, Surfaces & Performance") {
         IosSettingsSwitchRow(
             title = "Enable Liquid Glass Engine",
             subtitle = "Real-time backdrop sampling, lens refraction & specular rim highlights",
@@ -741,6 +1060,16 @@ private fun LiquidGlassCategoryPage(
             icon = GeekifyIcons.Navigation,
             tileColor = IosPalette.systemBlue
         )
+        GlassQualityLevel.entries.forEach { level ->
+            IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsRow(
+                title = "Quality: ${level.label}",
+                value = if (glass.qualityLevel == level) "Active" else null,
+                selected = glass.qualityLevel == level,
+                showChevron = false,
+                onClick = { viewModel.setGlassAppearance(qualityLevel = level) }
+            )
+        }
     }
 
     Spacer(Modifier.height(22.dp))
@@ -771,14 +1100,6 @@ private fun LiquidGlassCategoryPage(
             value = glass.lensAmountDp,
             valueRange = 0f..32f,
             onValueChange = viewModel::setGlassLensAmountDp
-        )
-        IosSettingsDivider(insetStart = 16.dp)
-        IosSettingsSliderRow(
-            title = "Surface Tint Opacity",
-            valueLabel = "${(glass.tintAlpha * 100).roundToInt()}%",
-            value = glass.tintAlpha,
-            valueRange = 0f..0.60f,
-            onValueChange = viewModel::setGlassTintAlpha
         )
         IosSettingsDivider(insetStart = 16.dp)
         IosSettingsSwitchRow(
@@ -916,37 +1237,71 @@ private fun HomeScreenCategoryPage(
                     .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         text = section.label,
                         color = if (isVisible) IosPalette.label else IosPalette.secondaryLabel,
+                        fontFamily = AppFont,
                         fontSize = 15.5.sp,
+                        lineHeight = 20.5.sp,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        text = if (isVisible) "Position ${idx + 1}" else "Hidden",
+                        text = if (isVisible) "Position ${idx + 1}" else "Hidden · Saved slot ${idx + 1}",
                         color = IosPalette.secondaryLabel,
+                        fontFamily = AppFont,
                         fontSize = 12.sp
                     )
                 }
-                TextButton(
-                    onClick = { viewModel.moveHomeSection(section, -1) },
-                    enabled = idx > 0
+                Spacer(Modifier.width(8.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("↑", color = if (idx > 0) Lime else IosPalette.tertiaryLabel, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(SettingsVisuals.cardRaised)
+                            .clickable(enabled = idx > 0) { viewModel.moveHomeSection(section, -1) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "↑",
+                            color = if (idx > 0) Lime else IosPalette.tertiaryLabel,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(SettingsVisuals.cardRaised)
+                            .clickable(enabled = idx < home.sectionOrder.lastIndex) { viewModel.moveHomeSection(section, 1) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "↓",
+                            color = if (idx < home.sectionOrder.lastIndex) Lime else IosPalette.tertiaryLabel,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(Modifier.width(2.dp))
+                    IosSwitch(
+                        checked = isVisible,
+                        onCheckedChange = { viewModel.toggleHomeSectionVisible(section, it) }
+                    )
                 }
-                TextButton(
-                    onClick = { viewModel.moveHomeSection(section, 1) },
-                    enabled = idx < home.sectionOrder.lastIndex
-                ) {
-                    Text("↓", color = if (idx < home.sectionOrder.lastIndex) Lime else IosPalette.tertiaryLabel, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                }
-                IosSwitch(
-                    checked = isVisible,
-                    onCheckedChange = { viewModel.toggleHomeSectionVisible(section, it) }
-                )
             }
         }
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsRow(
+            title = "Reset to Default Order",
+            showChevron = false,
+            onClick = { viewModel.resetHomeSectionOrder() }
+        )
     }
 
     Spacer(Modifier.height(22.dp))
@@ -1022,55 +1377,88 @@ private fun NavigationCategoryPage(
     viewModel: CustomizationViewModel
 ) {
     val nav = state.customization.navigation
+    val fullOrder = nav.normalizedTabOrder
     val visibleTabs = nav.safeVisibleTabs
 
     IosSettingsSection(
         title = "Bottom Navigation Destinations",
-        footer = "At least one primary destination (Home or Library) always remains enabled so you can never get locked out."
+        footer = "Reorder or disable tabs. Hidden tabs preserve their saved position when re-enabled. At least one primary destination (Home or Library) always remains enabled."
     ) {
-        NavTabId.DEFAULT_TABS.forEachIndexed { idx, tab ->
+        fullOrder.forEachIndexed { idx, tab ->
             if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
             val isVisible = tab in visibleTabs
-            val pos = visibleTabs.indexOf(tab)
+            val visiblePos = visibleTabs.indexOf(tab)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         text = tab.label,
-                        color = IosPalette.label,
+                        color = if (isVisible) IosPalette.label else IosPalette.secondaryLabel,
+                        fontFamily = AppFont,
                         fontSize = 15.5.sp,
+                        lineHeight = 20.5.sp,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        text = if (isVisible) "Tab ${pos + 1}" else "Hidden",
+                        text = if (isVisible) "Tab ${visiblePos + 1} · Slot ${idx + 1}" else "Hidden · Saved slot ${idx + 1}",
                         color = IosPalette.secondaryLabel,
+                        fontFamily = AppFont,
                         fontSize = 12.sp
                     )
                 }
-                if (isVisible) {
-                    TextButton(
-                        onClick = { viewModel.moveNavTab(tab, -1) },
-                        enabled = pos > 0
+                Spacer(Modifier.width(8.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(SettingsVisuals.cardRaised)
+                            .clickable(enabled = idx > 0) { viewModel.moveNavTab(tab, -1) },
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text("↑", color = if (pos > 0) Lime else IosPalette.tertiaryLabel, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "↑",
+                            color = if (idx > 0) Lime else IosPalette.tertiaryLabel,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
-                    TextButton(
-                        onClick = { viewModel.moveNavTab(tab, 1) },
-                        enabled = pos < visibleTabs.lastIndex
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(SettingsVisuals.cardRaised)
+                            .clickable(enabled = idx < fullOrder.lastIndex) { viewModel.moveNavTab(tab, 1) },
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text("↓", color = if (pos < visibleTabs.lastIndex) Lime else IosPalette.tertiaryLabel, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "↓",
+                            color = if (idx < fullOrder.lastIndex) Lime else IosPalette.tertiaryLabel,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
+                    Spacer(Modifier.width(2.dp))
+                    IosSwitch(
+                        checked = isVisible,
+                        onCheckedChange = { viewModel.toggleNavTabVisible(tab, it) }
+                    )
                 }
-                IosSwitch(
-                    checked = isVisible,
-                    onCheckedChange = { viewModel.toggleNavTabVisible(tab, it) }
-                )
             }
         }
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsRow(
+            title = "Reset to Default Order",
+            showChevron = false,
+            onClick = { viewModel.resetNavTabOrder() }
+        )
     }
 
     Spacer(Modifier.height(22.dp))
@@ -1092,6 +1480,20 @@ private fun NavigationCategoryPage(
             subtitle = "Display text captions underneath navigation icons",
             checked = nav.showLabels,
             onCheckedChange = viewModel::setNavShowLabels
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Floating Navigation Bar",
+            subtitle = "Float the bottom bar as a pill; disable for a full-width docked bar",
+            checked = nav.floatingNavBar,
+            onCheckedChange = viewModel::setNavFloating
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Floating Top Bar",
+            subtitle = "Use elevated floating chrome for top headers where supported",
+            checked = nav.floatingTopBar,
+            onCheckedChange = viewModel::setNavFloatingTopBar
         )
     }
 
@@ -1135,6 +1537,145 @@ private fun PlayerAppearanceCategoryPage(
     viewModel: CustomizationViewModel
 ) {
     val player = state.customization.player
+    val seekbar = state.customization.seekbar
+    var previewFraction by remember { mutableFloatStateOf(0.42f) }
+    var previewPlaying by remember { mutableStateOf(true) }
+    val previewDurationMs = 238_000L // 3:58 sample track
+
+    // Live Now Playing Layout & Interactive Seekbar Preview Card
+    IosSettingsSection(
+        title = "Live Player Preview",
+        footer = "Drag or tap the preview seekbar to test scrubbing, thumb response, and time labels without affecting active playback."
+    ) {
+        val bgBrush = when (player.backgroundStyle) {
+            PlayerBackgroundStyle.AMOLED_PITCH -> Brush.verticalGradient(listOf(Color.Black, Color.Black))
+            PlayerBackgroundStyle.SOLID_DARK -> Brush.verticalGradient(listOf(InkBackground, InkBackground))
+            PlayerBackgroundStyle.DYNAMIC_GRADIENT -> Brush.verticalGradient(listOf(Lilac.copy(alpha = 0.48f), InkBackground))
+            PlayerBackgroundStyle.ANIMATED_GRADIENT -> Brush.linearGradient(listOf(Lilac.copy(alpha = 0.55f), Lime.copy(alpha = 0.30f), InkBackground))
+            PlayerBackgroundStyle.LIQUID_GLASS -> Brush.linearGradient(listOf(Color.White.copy(alpha = 0.14f), Lilac.copy(alpha = 0.35f), InkPanel))
+            PlayerBackgroundStyle.BLURRED_ARTWORK -> Brush.verticalGradient(listOf(Lime.copy(alpha = 0.35f), InkPanel))
+        }
+        val previewArtShape = when {
+            player.layoutStyle == PlayerLayoutStyle.VINYL_TONEARM || player.artworkShape == PlayerArtworkShape.VINYL_DISC -> CircleShape
+            player.artworkShape == PlayerArtworkShape.CIRCLE -> CircleShape
+            player.artworkShape == PlayerArtworkShape.SQUARE -> RoundedCornerShape(4.dp)
+            else -> RoundedCornerShape(16.dp)
+        }
+        val previewArtSize = when (player.layoutStyle) {
+            PlayerLayoutStyle.MINIMAL -> 52.dp
+            PlayerLayoutStyle.ARTWORK_FOCUSED -> 86.dp
+            PlayerLayoutStyle.FULLSCREEN_ARTWORK -> 78.dp
+            else -> 68.dp
+        }
+        val previewPosMs = (previewFraction * previewDurationMs).toLong().coerceIn(0L, previewDurationMs)
+        val previewRemMs = (previewDurationMs - previewPosMs).coerceAtLeast(0L)
+        val previewLabelSize = (12.5f * seekbar.timeLabelScale.coerceIn(0.8f, 1.35f)).sp
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(bgBrush)
+                .padding(18.dp),
+            horizontalAlignment = if (player.layoutStyle == PlayerLayoutStyle.EXPRESSIVE || player.layoutStyle == PlayerLayoutStyle.STANDARD) Alignment.Start else Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(previewArtSize)
+                    .align(Alignment.CenterHorizontally)
+                    .clip(previewArtShape)
+                    .background(Brush.linearGradient(listOf(Lime, Lilac)))
+                    .border(
+                        width = if (player.layoutStyle == PlayerLayoutStyle.VINYL_TONEARM) 6.dp else 1.dp,
+                        color = if (player.layoutStyle == PlayerLayoutStyle.VINYL_TONEARM) Color(0xFF141418) else Color.White.copy(alpha = 0.25f),
+                        shape = previewArtShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(GeekifyIcons.Album, contentDescription = null, tint = OnAccent, modifier = Modifier.size(28.dp))
+            }
+            Spacer(Modifier.height(12.dp))
+            if (player.layoutStyle == PlayerLayoutStyle.EXPRESSIVE) {
+                Text("PLAYING FROM QUEUE", color = Lime, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+            }
+            Text(
+                text = player.layoutStyle.label,
+                color = Color.White,
+                fontSize = if (player.layoutStyle == PlayerLayoutStyle.EXPRESSIVE) 18.sp else 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "${player.backgroundStyle.label} · ${seekbar.style.label}",
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 11.5.sp
+            )
+            Spacer(Modifier.height(10.dp))
+            com.geekify.android.ui.player.PlayerProgressBar(
+                fraction = previewFraction,
+                config = seekbar,
+                onChange = { previewFraction = it },
+                onChangeFinished = {},
+                activeColor = Lime,
+                secondaryAccentColor = Lilac,
+                isPlaying = previewPlaying
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (seekbar.showElapsedTime) {
+                    Text(
+                        text = com.geekify.android.ui.player.formatPlaybackTime(previewPosMs),
+                        color = Color.White.copy(alpha = 0.76f),
+                        fontSize = previewLabelSize,
+                        fontWeight = FontWeight.Medium
+                    )
+                } else {
+                    Spacer(Modifier.width(1.dp))
+                }
+                if (seekbar.showRemainingTime) {
+                    Text(
+                        text = if (player.showRemainingTime) {
+                            "-" + com.geekify.android.ui.player.formatPlaybackTime(previewRemMs)
+                        } else {
+                            com.geekify.android.ui.player.formatPlaybackTime(previewDurationMs)
+                        },
+                        color = Color.White.copy(alpha = 0.76f),
+                        fontSize = previewLabelSize,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(GeekifyIcons.SkipPrevious, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(18.dp))
+                Box(
+                    modifier = Modifier
+                        .size(if (player.compactControls) 36.dp else 44.dp)
+                        .clip(if (player.roundedPlayButton) CircleShape else RoundedCornerShape(12.dp))
+                        .background(Lime)
+                        .clickable { previewPlaying = !previewPlaying },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (previewPlaying) GeekifyIcons.Pause else GeekifyIcons.Play,
+                        contentDescription = "Toggle preview playback",
+                        tint = OnAccent,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(Modifier.width(18.dp))
+                Icon(GeekifyIcons.SkipNext, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+
+    Spacer(Modifier.height(22.dp))
 
     IosSettingsSection(
         title = "Now Playing Layout Style (6 Modes)",
@@ -1155,7 +1696,7 @@ private fun PlayerAppearanceCategoryPage(
 
     Spacer(Modifier.height(22.dp))
 
-    IosSettingsSection(title = "Artwork Framing & Scale") {
+    IosSettingsSection(title = "Artwork Shape, Presentation & Motion") {
         PlayerArtworkShape.entries.forEachIndexed { idx, shape ->
             if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
             IosSettingsRow(
@@ -1167,6 +1708,30 @@ private fun PlayerAppearanceCategoryPage(
             )
         }
         IosSettingsDivider(insetStart = 16.dp)
+        PlayerArtworkPresentation.entries.forEachIndexed { idx, pres ->
+            if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsRow(
+                title = "Framing: ${pres.label}",
+                subtitle = pres.subtitle,
+                value = if (player.artworkPresentation == pres) "Active" else null,
+                selected = player.artworkPresentation == pres,
+                showChevron = false,
+                onClick = { viewModel.setPlayerArtworkPresentation(pres) }
+            )
+        }
+        IosSettingsDivider(insetStart = 16.dp)
+        PlayerArtworkCropMode.entries.forEachIndexed { idx, crop ->
+            if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsRow(
+                title = "Artwork Fit: ${crop.label}",
+                subtitle = crop.subtitle,
+                value = if (player.artworkCropMode == crop) "Active" else null,
+                selected = player.artworkCropMode == crop,
+                showChevron = false,
+                onClick = { viewModel.setPlayerArtworkCropMode(crop) }
+            )
+        }
+        IosSettingsDivider(insetStart = 16.dp)
         IosSettingsSliderRow(
             title = "Artwork Scale Multiplier",
             valueLabel = "${(player.artworkScale * 100).roundToInt()}%",
@@ -1174,11 +1739,33 @@ private fun PlayerAppearanceCategoryPage(
             valueRange = 0.75f..1.20f,
             onValueChange = viewModel::setPlayerArtworkScale
         )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Track Change Artwork Transitions",
+            subtitle = "Slide and crossfade album covers when skipping tracks",
+            checked = player.artworkTransitions,
+            onCheckedChange = { viewModel.setPlayerArtworkOptions(transitions = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Animated & Beat-Reactive Artwork",
+            subtitle = "Enable dynamic beat scaling and play/pause cover motion",
+            checked = player.animatedArtworkEnabled,
+            onCheckedChange = { viewModel.setPlayerArtworkOptions(animatedArtwork = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Pause Animated Artwork on Mobile Data",
+            subtitle = "Reduce animated artwork effects while on metered cellular connections",
+            checked = player.disableAnimatedArtworkOnMobileData,
+            enabled = player.animatedArtworkEnabled,
+            onCheckedChange = { viewModel.setPlayerArtworkOptions(disableOnMobileData = it) }
+        )
     }
 
     Spacer(Modifier.height(22.dp))
 
-    IosSettingsSection(title = "Player Backdrop Style") {
+    IosSettingsSection(title = "Player Backdrop Style (6 Modes)") {
         PlayerBackgroundStyle.entries.forEachIndexed { idx, bg ->
             if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
             IosSettingsRow(
@@ -1193,11 +1780,388 @@ private fun PlayerAppearanceCategoryPage(
 
     Spacer(Modifier.height(22.dp))
 
+    IosSettingsSection(
+        title = "Seekbar Style (5 Modes)",
+        footer = "Live interactive preview below — scrub or tap to inspect your customized seekbar."
+    ) {
+        // Inline Interactive Seekbar Preview right above the style controls
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(InkBackground.copy(alpha = 0.65f))
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${seekbar.style.label} · ${seekbar.thumbStyle.label}",
+                    color = TextSecondary,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Lime.copy(alpha = 0.16f))
+                        .clickable { previewPlaying = !previewPlaying }
+                        .padding(horizontal = 10.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = if (previewPlaying) "Playing" else "Paused",
+                        color = Lime,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+            com.geekify.android.ui.player.PlayerProgressBar(
+                fraction = previewFraction,
+                config = seekbar,
+                onChange = { previewFraction = it },
+                onChangeFinished = {},
+                activeColor = Lime,
+                secondaryAccentColor = Lilac,
+                isPlaying = previewPlaying
+            )
+            val pPosMs = (previewFraction * previewDurationMs).toLong().coerceIn(0L, previewDurationMs)
+            val pRemMs = (previewDurationMs - pPosMs).coerceAtLeast(0L)
+            val pLblSp = (12.5f * seekbar.timeLabelScale.coerceIn(0.8f, 1.35f)).sp
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                if (seekbar.showElapsedTime) {
+                    Text(
+                        text = com.geekify.android.ui.player.formatPlaybackTime(pPosMs),
+                        color = TextSecondary,
+                        fontSize = pLblSp
+                    )
+                } else {
+                    Spacer(Modifier.width(1.dp))
+                }
+                if (seekbar.showRemainingTime) {
+                    Text(
+                        text = "-" + com.geekify.android.ui.player.formatPlaybackTime(pRemMs),
+                        color = TextSecondary,
+                        fontSize = pLblSp
+                    )
+                }
+            }
+        }
+        IosSettingsDivider(insetStart = 0.dp)
+        PlayerProgressStyle.entries.forEachIndexed { idx, pStyle ->
+            if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsRow(
+                title = pStyle.label,
+                subtitle = pStyle.subtitle,
+                value = if (seekbar.style == pStyle) "Active" else null,
+                selected = seekbar.style == pStyle,
+                showChevron = false,
+                onClick = { viewModel.setPlayerProgressStyle(pStyle) }
+            )
+        }
+    }
+
+    Spacer(Modifier.height(22.dp))
+
+    IosSettingsSection(title = "Seekbar Thumb & Handle") {
+        SeekbarThumbStyle.entries.forEachIndexed { idx, thumb ->
+            if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsRow(
+                title = thumb.label,
+                value = if (seekbar.thumbStyle == thumb) "Active" else null,
+                selected = seekbar.thumbStyle == thumb,
+                showChevron = false,
+                onClick = { viewModel.setSeekbarThumbStyle(thumb) }
+            )
+        }
+        if (seekbar.thumbStyle != SeekbarThumbStyle.HIDDEN) {
+            IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsSliderRow(
+                title = "Thumb Size",
+                valueLabel = "${seekbar.thumbSizeDp.roundToInt()} dp",
+                value = seekbar.thumbSizeDp,
+                valueRange = 6f..24f,
+                onValueChange = { viewModel.setSeekbarNumeric(thumbSizeDp = it.roundToInt().toFloat()) }
+            )
+        }
+    }
+
+    Spacer(Modifier.height(22.dp))
+
+    val isWaveSeekbar = seekbar.style == PlayerProgressStyle.WAVY ||
+        seekbar.style == PlayerProgressStyle.WAVE_GLOW
+
+    IosSettingsSection(title = "Seekbar Track Geometry & Touch") {
+        IosSettingsSliderRow(
+            title = "Track Thickness",
+            valueLabel = "${seekbar.thicknessDp.roundToInt()} dp",
+            value = seekbar.thicknessDp,
+            valueRange = 2f..12f,
+            onValueChange = { viewModel.setPlayerProgressHeightDp(it.roundToInt().toFloat()) }
+        )
+        if (!isWaveSeekbar) {
+            IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsSliderRow(
+                title = "Track Corner Radius",
+                valueLabel = "${seekbar.cornerRadiusDp.roundToInt()} dp",
+                value = seekbar.cornerRadiusDp,
+                valueRange = 0f..12f,
+                onValueChange = { viewModel.setSeekbarNumeric(cornerRadiusDp = it.roundToInt().toFloat()) }
+            )
+        }
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSliderRow(
+            title = "Inactive Track Opacity",
+            valueLabel = "${(seekbar.inactiveTrackAlpha * 100).roundToInt()}%",
+            value = seekbar.inactiveTrackAlpha,
+            valueRange = 0.08f..0.65f,
+            onValueChange = { viewModel.setSeekbarNumeric(inactiveAlpha = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSliderRow(
+            title = "Touch Target Height",
+            valueLabel = "${seekbar.touchTargetHeightDp.roundToInt()} dp",
+            value = seekbar.touchTargetHeightDp,
+            valueRange = 32f..56f,
+            onValueChange = { viewModel.setSeekbarNumeric(touchTargetHeightDp = it.roundToInt().toFloat()) }
+        )
+    }
+
+    Spacer(Modifier.height(22.dp))
+
+    val seekbarSwatches = remember {
+        listOf(
+            0xFFC8E65AL to "Lime",
+            0xFFCF9CF1L to "Lavender",
+            0xFF38E8FFL to "Cyan",
+            0xFFFF7A6BL to "Coral",
+            0xFFFFD15CL to "Amber",
+            0xFF3EF0A8L to "Mint",
+            0xFFFFFFFFL to "White"
+        )
+    }
+
+    IosSettingsSection(title = "Seekbar Colors & Gradients") {
+        IosSettingsSwitchRow(
+            title = "Custom Active Track Color",
+            subtitle = "Override the dynamic player accent for the played track",
+            checked = seekbar.useCustomActiveColor,
+            onCheckedChange = { viewModel.setSeekbarColors(useCustomActive = it) }
+        )
+        if (seekbar.useCustomActiveColor) {
+            IosSettingsDivider(insetStart = 16.dp)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                seekbarSwatches.forEach { (argb, label) ->
+                    val selected = seekbar.customActiveColorArgb == argb
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(Color(argb))
+                            .border(
+                                width = if (selected) 3.dp else 1.dp,
+                                color = if (selected) TextPrimary else InkGlassBorder,
+                                shape = CircleShape
+                            )
+                            .clickable { viewModel.setSeekbarColors(customActiveArgb = argb) }
+                    )
+                }
+            }
+        }
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Custom Thumb Color",
+            subtitle = "Choose an independent color for the seekbar handle",
+            checked = seekbar.useCustomThumbColor,
+            onCheckedChange = { viewModel.setSeekbarColors(useCustomThumb = it) }
+        )
+        if (seekbar.useCustomThumbColor) {
+            IosSettingsDivider(insetStart = 16.dp)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                seekbarSwatches.forEach { (argb, _) ->
+                    val selected = seekbar.customThumbColorArgb == argb
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(Color(argb))
+                            .border(
+                                width = if (selected) 3.dp else 1.dp,
+                                color = if (selected) TextPrimary else InkGlassBorder,
+                                shape = CircleShape
+                            )
+                            .clickable { viewModel.setSeekbarColors(customThumbArgb = argb) }
+                    )
+                }
+            }
+        }
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Gradient Active Track",
+            subtitle = "Blend two colors across the played segment",
+            checked = seekbar.gradientEnabled,
+            onCheckedChange = { viewModel.setSeekbarToggles(gradientEnabled = it) }
+        )
+        if (seekbar.gradientEnabled) {
+            SeekbarGradientPreset.entries.forEach { preset ->
+                IosSettingsDivider(insetStart = 16.dp)
+                IosSettingsRow(
+                    title = preset.label,
+                    value = if (seekbar.gradientPreset == preset) "Active" else null,
+                    selected = seekbar.gradientPreset == preset,
+                    showChevron = false,
+                    onClick = { viewModel.setSeekbarGradientPreset(preset) }
+                )
+            }
+        }
+    }
+
+    if (isWaveSeekbar) {
+        Spacer(Modifier.height(22.dp))
+        IosSettingsSection(
+            title = "Wave & Glow Motion",
+            footer = "Animations automatically pause while playback is paused, buffering, or scrubbing."
+        ) {
+            IosSettingsSwitchRow(
+                title = "Enable Seekbar Animations",
+                checked = seekbar.animationsEnabled,
+                onCheckedChange = { viewModel.setSeekbarToggles(animationsEnabled = it) }
+            )
+            IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsSwitchRow(
+                title = "Animated Waveform Motion",
+                checked = seekbar.waveAnimationEnabled,
+                enabled = seekbar.animationsEnabled,
+                onCheckedChange = { viewModel.setSeekbarToggles(waveAnimationEnabled = it) }
+            )
+            IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsSliderRow(
+                title = "Wave Amplitude",
+                valueLabel = "${"%.1f".format(seekbar.waveAmplitudeDp)} dp",
+                value = seekbar.waveAmplitudeDp,
+                valueRange = 1f..10f,
+                onValueChange = { viewModel.setSeekbarNumeric(waveAmplitudeDp = it) }
+            )
+            IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsSliderRow(
+                title = "Wave Frequency",
+                valueLabel = "${"%.2f".format(seekbar.waveFrequency)}x",
+                value = seekbar.waveFrequency,
+                valueRange = 0.5f..2.2f,
+                onValueChange = { viewModel.setSeekbarNumeric(waveFrequency = it) }
+            )
+            IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsSliderRow(
+                title = "Wave Speed",
+                valueLabel = "${"%.2f".format(seekbar.waveSpeed)}x",
+                value = seekbar.waveSpeed,
+                valueRange = 0.4f..2.5f,
+                onValueChange = { viewModel.setSeekbarNumeric(waveSpeed = it) }
+            )
+            IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsSliderRow(
+                title = "Animation Intensity",
+                valueLabel = "${(seekbar.animationIntensity * 100).roundToInt()}%",
+                value = seekbar.animationIntensity,
+                valueRange = 0.2f..1.8f,
+                onValueChange = { viewModel.setSeekbarNumeric(animationIntensity = it) }
+            )
+            if (seekbar.style == PlayerProgressStyle.WAVE_GLOW) {
+                IosSettingsDivider(insetStart = 16.dp)
+                IosSettingsSliderRow(
+                    title = "Glow Halo Intensity",
+                    valueLabel = "${(seekbar.glowIntensity * 100).roundToInt()}%",
+                    value = seekbar.glowIntensity,
+                    valueRange = 0f..1f,
+                    onValueChange = { viewModel.setSeekbarNumeric(glowIntensity = it) }
+                )
+            }
+        }
+    }
+
+    Spacer(Modifier.height(22.dp))
+
+    IosSettingsSection(title = "Seekbar Time Labels & Haptics") {
+        IosSettingsSwitchRow(
+            title = "Seekbar Haptic Feedback",
+            subtitle = "Subtle tactile tick when pressing and releasing the seekbar",
+            checked = seekbar.hapticFeedback,
+            onCheckedChange = { viewModel.setSeekbarToggles(hapticFeedback = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Show Elapsed Time",
+            checked = seekbar.showElapsedTime,
+            onCheckedChange = { viewModel.setSeekbarToggles(showElapsedTime = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Show Remaining / Total Time",
+            checked = seekbar.showRemainingTime,
+            onCheckedChange = { viewModel.setSeekbarToggles(showRemainingTime = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSliderRow(
+            title = "Time Label Size",
+            valueLabel = "${(seekbar.timeLabelScale * 100).roundToInt()}%",
+            value = seekbar.timeLabelScale,
+            valueRange = 0.8f..1.35f,
+            onValueChange = { viewModel.setSeekbarNumeric(timeLabelScale = it) }
+        )
+    }
+
+    Spacer(Modifier.height(22.dp))
+
     IosSettingsSection(title = "Control & Action Visibility") {
         IosSettingsSwitchRow(
-            title = "Rounded Pill Play/Pause Button",
+            title = "Circular Play/Pause Button",
+            subtitle = "Disable for a modern rounded-rectangle play/pause control",
             checked = player.roundedPlayButton,
             onCheckedChange = viewModel::setPlayerRoundedPlayButton
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Compact Control Arrangement",
+            subtitle = "Tighter transport button spacing and sleeker sizing",
+            checked = player.compactControls,
+            onCheckedChange = { viewModel.setPlayerControlVisibility(compactControls = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Immersive Player Mode",
+            subtitle = "Hide the system status bar while Now Playing is expanded",
+            checked = player.immersivePlayer,
+            onCheckedChange = { viewModel.setPlayerControlVisibility(immersivePlayer = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Show Album Metadata in Header",
+            checked = player.showAlbumMetadata,
+            onCheckedChange = { viewModel.setPlayerControlVisibility(showAlbumMetadata = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Show Remaining Time (-m:ss)",
+            subtitle = "Disable to show total track duration instead",
+            checked = player.showRemainingTime,
+            onCheckedChange = { viewModel.setPlayerControlVisibility(showRemainingTime = it) }
         )
         IosSettingsDivider(insetStart = 16.dp)
         IosSettingsSwitchRow(
@@ -1259,12 +2223,120 @@ private fun MiniPlayerCategoryPage(
     viewModel: CustomizationViewModel
 ) {
     val mini = state.customization.miniPlayer
+    val isExpressive = mini.style == MiniPlayerStyle.EXPRESSIVE
 
-    IosSettingsSection(title = "Mini-Player Style") {
+    // Live Mini-Player Preview
+    IosSettingsSection(title = "Live Mini-Player Preview") {
+        val previewRadius = when (mini.style) {
+            MiniPlayerStyle.ROUNDED_CARD -> mini.cornerRadiusDp.coerceAtMost(20).dp
+            MiniPlayerStyle.VINTAGE -> 12.dp
+            MiniPlayerStyle.MODERN, MiniPlayerStyle.EXPRESSIVE -> (mini.heightDp / 2).coerceIn(24, 34).dp
+            else -> mini.cornerRadiusDp.dp
+        }
+        val previewBg = when {
+            isExpressive -> androidx.compose.ui.graphics.lerp(InkElevated, Lime, 0.20f)
+            mini.backgroundStyle == MiniPlayerBackgroundStyle.AMOLED_BLACK -> Color.Black
+            mini.backgroundStyle == MiniPlayerBackgroundStyle.SOLID_DARK -> InkPanel
+            mini.backgroundStyle == MiniPlayerBackgroundStyle.DYNAMIC_GRADIENT -> Lilac.copy(alpha = 0.45f)
+            else -> NavPill
+        }.copy(alpha = mini.surfaceAlpha)
+        val previewArtShape = when {
+            isExpressive && mini.expressiveCookieArtwork -> com.geekify.android.ui.player.ScallopedCookieShape
+            mini.artworkShape == MiniPlayerArtworkShape.CIRCLE -> CircleShape
+            mini.artworkShape == MiniPlayerArtworkShape.ROUNDED -> RoundedCornerShape(10.dp)
+            else -> RoundedCornerShape(4.dp)
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(mini.heightDp.dp)
+                    .clip(RoundedCornerShape(previewRadius))
+                    .background(previewBg)
+                    .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(previewRadius))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = mini.horizontalPaddingDp.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (mini.showArtwork) {
+                        Box(
+                            modifier = Modifier
+                                .size(mini.artworkSizeDp.dp.coerceAtMost((mini.heightDp - 14).dp))
+                                .clip(previewArtShape)
+                                .background(Brush.linearGradient(listOf(Lime, Lilac))),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(GeekifyIcons.MusicNote, contentDescription = null, tint = OnAccent, modifier = Modifier.size(18.dp))
+                        }
+                        Spacer(Modifier.width(10.dp))
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Starlight Drift", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Text("Geekify Radio", color = Color.White.copy(alpha = 0.7f), fontSize = 11.5.sp, maxLines = 1)
+                    }
+                    if (mini.showLikeButton) {
+                        Icon(GeekifyIcons.Favorite, contentDescription = null, tint = Lime, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    if (mini.showPreviousButton) {
+                        Icon(GeekifyIcons.SkipPrevious, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    if (mini.showPlayPauseButton) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(if (isExpressive) RoundedCornerShape(12.dp) else CircleShape)
+                                .background(Lime),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(GeekifyIcons.Pause, contentDescription = null, tint = OnAccent, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                    if (mini.showNextButton) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(GeekifyIcons.SkipNext, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
+                    if (mini.showQueueButton) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(GeekifyIcons.QueueMusic, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
+                    if (mini.showShuffleButton) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(GeekifyIcons.Shuffle, contentDescription = null, tint = Lime, modifier = Modifier.size(17.dp))
+                    }
+                }
+                if (mini.showProgressIndicator && !isExpressive && mini.style != MiniPlayerStyle.MODERN) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(horizontal = if (mini.style == MiniPlayerStyle.VINTAGE) 0.dp else 24.dp, vertical = 3.dp)
+                            .fillMaxWidth(0.58f)
+                            .height(2.dp)
+                            .background(Lime)
+                    )
+                }
+            }
+        }
+    }
+
+    Spacer(Modifier.height(22.dp))
+
+    IosSettingsSection(title = "Mini-Player Style (6 Modes)") {
         MiniPlayerStyle.entries.forEachIndexed { idx, style ->
             if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
             IosSettingsRow(
                 title = style.label,
+                subtitle = style.subtitle.takeIf { it.isNotBlank() },
                 value = if (mini.style == style) "Active" else null,
                 selected = mini.style == style,
                 showChevron = false,
@@ -1275,17 +2347,80 @@ private fun MiniPlayerCategoryPage(
 
     Spacer(Modifier.height(22.dp))
 
-    IosSettingsSection(title = "Thumbnail Shape & Dimensions") {
+    IosSettingsSection(title = "Mini-Player Background") {
+        MiniPlayerBackgroundStyle.entries.forEachIndexed { idx, bg ->
+            if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsRow(
+                title = bg.label,
+                value = if (mini.backgroundStyle == bg) "Active" else null,
+                selected = mini.backgroundStyle == bg,
+                showChevron = false,
+                onClick = { viewModel.setMiniPlayerBackgroundStyle(bg) }
+            )
+        }
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Liquid Glass Surface",
+            subtitle = "Apply frosted backdrop glass when using Themed background",
+            checked = mini.glassEffect,
+            onCheckedChange = { viewModel.setMiniPlayerToggles(glassEffect = it) }
+        )
+    }
+
+    if (isExpressive) {
+        Spacer(Modifier.height(22.dp))
+        IosSettingsSection(
+            title = "Expressive Mini-Player Features",
+            footer = "Metrolist-inspired animated scalloped artwork, circular progress ring, and direct artwork playback control."
+        ) {
+            IosSettingsSwitchRow(
+                title = "Scalloped Expressive Artwork Shape",
+                checked = mini.expressiveCookieArtwork,
+                onCheckedChange = { viewModel.setMiniPlayerToggles(expressiveCookieArtwork = it) }
+            )
+            IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsSwitchRow(
+                title = "Rotating Artwork Shape Motion",
+                checked = mini.expressiveShapeMotion,
+                enabled = mini.expressiveCookieArtwork,
+                onCheckedChange = { viewModel.setMiniPlayerToggles(expressiveShapeMotion = it) }
+            )
+            IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsSwitchRow(
+                title = "Circular Progress Ring Overlay",
+                checked = mini.expressiveProgressRing,
+                onCheckedChange = { viewModel.setMiniPlayerToggles(expressiveProgressRing = it) }
+            )
+            IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsSwitchRow(
+                title = "Tap Artwork to Play / Pause",
+                checked = mini.expressiveArtworkPlaybackTap,
+                onCheckedChange = { viewModel.setMiniPlayerToggles(expressiveArtworkPlaybackTap = it) }
+            )
+        }
+    }
+
+    Spacer(Modifier.height(22.dp))
+
+    IosSettingsSection(title = "Dimensions, Artwork & Surface") {
         MiniPlayerArtworkShape.entries.forEachIndexed { idx, shape ->
             if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
             IosSettingsRow(
-                title = shape.label,
+                title = "Artwork Shape: ${shape.label}",
                 value = if (mini.artworkShape == shape) "Active" else null,
                 selected = mini.artworkShape == shape,
                 showChevron = false,
                 onClick = { viewModel.setMiniPlayerArtworkShape(shape) }
             )
         }
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSliderRow(
+            title = "Artwork Size",
+            valueLabel = "${mini.artworkSizeDp} dp",
+            value = mini.artworkSizeDp.toFloat(),
+            valueRange = 32f..56f,
+            onValueChange = { viewModel.setMiniPlayerArtworkSizeDp(it.roundToInt()) }
+        )
         IosSettingsDivider(insetStart = 16.dp)
         IosSettingsSliderRow(
             title = "Bar Height",
@@ -1302,6 +2437,30 @@ private fun MiniPlayerCategoryPage(
             valueRange = 12f..36f,
             onValueChange = { viewModel.setMiniPlayerCornerRadiusDp(it.roundToInt()) }
         )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSliderRow(
+            title = "Inner Padding",
+            valueLabel = "${mini.horizontalPaddingDp} dp",
+            value = mini.horizontalPaddingDp.toFloat(),
+            valueRange = 4f..20f,
+            onValueChange = { viewModel.setMiniPlayerHorizontalPaddingDp(it.roundToInt()) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSliderRow(
+            title = "Surface Opacity",
+            valueLabel = "${(mini.surfaceAlpha * 100).roundToInt()}%",
+            value = mini.surfaceAlpha,
+            valueRange = 0.30f..1.0f,
+            onValueChange = viewModel::setMiniPlayerSurfaceAlpha
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSliderRow(
+            title = "Shadow Elevation",
+            valueLabel = "${mini.elevationDp} dp",
+            value = mini.elevationDp.toFloat(),
+            valueRange = 0f..16f,
+            onValueChange = { viewModel.setMiniPlayerElevationDp(it.roundToInt()) }
+        )
     }
 
     Spacer(Modifier.height(22.dp))
@@ -1314,7 +2473,7 @@ private fun MiniPlayerCategoryPage(
         )
         IosSettingsDivider(insetStart = 16.dp)
         IosSettingsSwitchRow(
-            title = "Show Circular Progress Ring",
+            title = "Show Progress Indicator",
             checked = mini.showProgressIndicator,
             onCheckedChange = { viewModel.setMiniPlayerToggles(showProgress = it) }
         )
@@ -1323,6 +2482,13 @@ private fun MiniPlayerCategoryPage(
             title = "Show Previous Track Button",
             checked = mini.showPreviousButton,
             onCheckedChange = { viewModel.setMiniPlayerToggles(showPrevious = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Show Play / Pause Button",
+            subtitle = "If hidden, tapping the artwork toggles playback",
+            checked = mini.showPlayPauseButton,
+            onCheckedChange = { viewModel.setMiniPlayerToggles(showPlayPause = it) }
         )
         IosSettingsDivider(insetStart = 16.dp)
         IosSettingsSwitchRow(
@@ -1342,6 +2508,12 @@ private fun MiniPlayerCategoryPage(
             checked = mini.showShuffleButton,
             onCheckedChange = { viewModel.setMiniPlayerToggles(showShuffle = it) }
         )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Show Queue Button",
+            checked = mini.showQueueButton,
+            onCheckedChange = { viewModel.setMiniPlayerToggles(showQueue = it) }
+        )
     }
 }
 
@@ -1354,6 +2526,56 @@ private fun GesturesCategoryPage(
     viewModel: CustomizationViewModel
 ) {
     val g = state.customization.gestures
+
+    IosSettingsSection(
+        title = "Artwork Double-Tap Seeking",
+        footer = if (g.artworkDoubleTapSkipEnabled) {
+            "Double-tap the left side of album artwork to rewind ${g.artworkSkipDurationSeconds}s, or the right side to fast-forward ${g.artworkSkipDurationSeconds}s."
+        } else {
+            "Enable Double-Tap Artwork to Skip to configure skip duration and progressive skipping."
+        }
+    ) {
+        IosSettingsSwitchRow(
+            title = "Double-Tap Artwork to Skip",
+            subtitle = "Double-tap left or right side of album artwork to rewind or fast-forward",
+            checked = g.artworkDoubleTapSkipEnabled,
+            onCheckedChange = { viewModel.setGestureToggles(artworkDoubleTapSkipEnabled = it) }
+        )
+        if (g.artworkDoubleTapSkipEnabled) {
+            IosSettingsDivider(insetStart = 16.dp)
+            Column(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                IosSettingsSliderRow(
+                    title = "Skip Duration",
+                    valueLabel = "${g.artworkSkipDurationSeconds} seconds",
+                    value = g.artworkSkipDurationSeconds.toFloat(),
+                    valueRange = 5f..30f,
+                    onValueChange = { raw ->
+                        val snapped = GestureCustomizationConfig.normalizeSkipDurationSeconds(raw.roundToInt())
+                        if (snapped != g.artworkSkipDurationSeconds) {
+                            viewModel.setGestureToggles(artworkSkipDurationSeconds = snapped)
+                        }
+                    }
+                )
+                Text(
+                    text = "Choose how many seconds to skip when double-tapping the album artwork (5–30s in 5s steps).",
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
+                )
+            }
+            IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsSwitchRow(
+                title = "Progressive Skip",
+                subtitle = "Quickly repeat double-taps within 1 second to skip progressively longer intervals (1x, 2x, 3x…)",
+                checked = g.artworkProgressiveSkipEnabled,
+                onCheckedChange = { viewModel.setGestureToggles(artworkProgressiveSkipEnabled = it) }
+            )
+        }
+    }
+
+    Spacer(Modifier.height(22.dp))
 
     IosSettingsSection(
         title = "Player & Queue Touch Gestures",
@@ -1412,12 +2634,23 @@ private fun TypographyCategoryPage(
 ) {
     val typo = state.customization.typography
 
-    IosSettingsSection(title = "Application Font Family") {
+    IosSettingsSection(title = "Font Family") {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text("Sohne Breit", color = Lime, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+            Text("Aa Bb Cc · 0123456789", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text("The quick brown fox jumps over the lazy dog", color = TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Normal)
+        }
+        IosSettingsDivider(insetStart = 16.dp)
         AppFontChoice.entries.forEachIndexed { idx, choice ->
             if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
             IosSettingsRow(
                 title = choice.label,
-                value = if (typo.fontChoice == choice) "Active" else null,
+                value = if (typo.fontChoice == choice) "Selected" else null,
                 selected = typo.fontChoice == choice,
                 showChevron = false,
                 onClick = { viewModel.setFontChoice(choice) }
@@ -1455,17 +2688,23 @@ private fun TypographyCategoryPage(
 
     Spacer(Modifier.height(22.dp))
 
-    IosSettingsSection(title = "UI Spacing Density") {
-        UiDensityMode.entries.forEachIndexed { idx, mode ->
+    IosSettingsSection(title = "Display Density") {
+        DisplayDensityScale.entries.forEachIndexed { idx, scale ->
             if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
             IosSettingsRow(
-                title = mode.label,
-                value = if (typo.densityMode == mode) "Active" else null,
-                selected = typo.densityMode == mode,
+                title = scale.label,
+                value = if (typo.displayDensity == scale) "Selected" else null,
+                selected = typo.displayDensity == scale,
                 showChevron = false,
-                onClick = { viewModel.setDensityMode(mode) }
+                onClick = { viewModel.setDisplayDensity(scale) }
             )
         }
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Apply Scaling in Landscape",
+            checked = typo.enableLandscapeScaling,
+            onCheckedChange = viewModel::setLandscapeScaling
+        )
     }
 }
 
@@ -1478,52 +2717,74 @@ private fun LyricsCategoryPage(
     viewModel: CustomizationViewModel
 ) {
     val lyrics = state.customization.lyrics
-    val align = when (lyrics.alignment) {
-        LyricsTextAlignment.START -> TextAlign.Start
-        LyricsTextAlignment.CENTER -> TextAlign.Center
-        LyricsTextAlignment.END -> TextAlign.End
+    val playerBg = state.customization.player.backgroundStyle
+
+    IosSettingsSection(
+        title = "Live Lyrics Preview",
+        footer = "Interactive sample timeline using the real Sohne Breit lyrics renderer. Tap any line or pause/replay without affecting playback."
+    ) {
+        com.geekify.android.ui.player.LiveLyricsPreviewCard(
+            config = lyrics,
+            accentColor = Lime,
+            playerBackgroundStyle = playerBg
+        )
     }
 
-    IosSettingsSection(title = "Live Lyrics Preview") {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            horizontalAlignment = when (lyrics.alignment) {
-                LyricsTextAlignment.START -> Alignment.Start
-                LyricsTextAlignment.CENTER -> Alignment.CenterHorizontally
-                LyricsTextAlignment.END -> Alignment.End
-            }
-        ) {
-            Text(
-                text = "We're drifting through the neon sky",
-                color = Color.White.copy(alpha = 0.35f),
-                fontSize = (lyrics.fontSizeSp * 0.88f).sp,
-                textAlign = align
+    Spacer(Modifier.height(22.dp))
+
+    IosSettingsSection(
+        title = "Lyrics Animation Style",
+        footer = "Each preset provides distinct motion physics, glow, and word-highlighting behavior."
+    ) {
+        LyricsAnimationStyle.entries.forEachIndexed { idx, style ->
+            if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsRow(
+                title = style.label,
+                subtitle = style.subtitle,
+                value = if (lyrics.animationStyle == style) "Active" else null,
+                selected = lyrics.animationStyle == style,
+                showChevron = false,
+                onClick = { viewModel.setLyricsAnimationStyle(style) }
             )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = " الكهرباء · Electric dreams in stereo",
-                color = if (lyrics.activeColorFollowsAccent) Lime else Color.White,
-                fontSize = lyrics.fontSizeSp.sp,
-                lineHeight = (lyrics.fontSizeSp * lyrics.lineSpacingMultiplier).sp,
-                fontWeight = FontWeight.ExtraBold,
-                textAlign = align
-            )
-            if (lyrics.showRomanization) {
-                Text(
-                    text = "Al-kahraba · Phonetic romanization preview",
-                    color = Color.White.copy(alpha = 0.65f),
-                    fontSize = (lyrics.fontSizeSp * 0.64f).sp,
-                    textAlign = align
-                )
-            }
         }
     }
 
     Spacer(Modifier.height(22.dp))
 
-    IosSettingsSection(title = "Typography & Alignment") {
+    IosSettingsSection(title = "Alignment (Normal & Active Lines)") {
+        LyricsTextAlignment.entries.forEachIndexed { idx, alignment ->
+            if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsRow(
+                title = "Normal Lines: ${alignment.label}",
+                value = if (lyrics.alignment == alignment) "Active" else null,
+                selected = lyrics.alignment == alignment,
+                showChevron = false,
+                onClick = { viewModel.setLyricsAlignment(alignment) }
+            )
+        }
+        IosSettingsDivider(insetStart = 16.dp)
+        LyricsTextAlignment.entries.forEachIndexed { idx, alignment ->
+            if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsRow(
+                title = "Active Line: ${alignment.label}",
+                value = if (lyrics.activeAlignment == alignment) "Active" else null,
+                selected = lyrics.activeAlignment == alignment,
+                showChevron = false,
+                onClick = { viewModel.setLyricsActiveAlignment(alignment) }
+            )
+        }
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Respect Provider Positioning",
+            subtitle = "Align backing vocals and duet cues as positioned by the lyrics source",
+            checked = lyrics.respectProviderPositioning,
+            onCheckedChange = { viewModel.setLyricsToggles(respectProviderPositioning = it) }
+        )
+    }
+
+    Spacer(Modifier.height(22.dp))
+
+    IosSettingsSection(title = "Typography & Colors") {
         IosSettingsSliderRow(
             title = "Lyrics Font Size",
             valueLabel = "${lyrics.fontSizeSp.roundToInt()} sp",
@@ -1536,42 +2797,160 @@ private fun LyricsCategoryPage(
             title = "Line Spacing Multiplier",
             valueLabel = "${"%.2f".format(lyrics.lineSpacingMultiplier)}x",
             value = lyrics.lineSpacingMultiplier,
-            valueRange = 1.1f..1.8f,
+            valueRange = 1.1f..2.2f,
             onValueChange = viewModel::setLyricsLineSpacing
         )
         IosSettingsDivider(insetStart = 16.dp)
-        LyricsTextAlignment.entries.forEach { alignment ->
-            IosSettingsRow(
-                title = alignment.label,
-                value = if (lyrics.alignment == alignment) "Active" else null,
-                selected = lyrics.alignment == alignment,
-                showChevron = false,
-                onClick = { viewModel.setLyricsAlignment(alignment) }
+        IosSettingsSliderRow(
+            title = "Subtitle / Translation Font Size",
+            valueLabel = "${lyrics.subtitleFontSizeSp.roundToInt()} sp",
+            value = lyrics.subtitleFontSizeSp,
+            valueRange = 10f..28f,
+            onValueChange = viewModel::setLyricsSubtitleFontSizeSp
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Neutral White/Black Lyrics Color",
+            subtitle = "Use crisp neutral white text instead of themed accent tinting",
+            checked = lyrics.useNeutralColor,
+            onCheckedChange = { viewModel.setLyricsToggles(neutralColor = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Accent Color Active Line Highlight",
+            subtitle = "Tint the currently sung lyric line with your active theme accent color",
+            checked = lyrics.activeColorFollowsAccent,
+            enabled = !lyrics.useNeutralColor,
+            onCheckedChange = { viewModel.setLyricsToggles(accentColor = it) }
+        )
+    }
+
+    Spacer(Modifier.height(22.dp))
+
+    IosSettingsSection(
+        title = "Behavior, Sync & Visual Effects",
+        footer = "Global sync offset applies on top of each track's individual offset without overwriting it."
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Global Lyrics Offset", color = IosPalette.label, fontSize = 15.5.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    text = "${if (lyrics.globalOffsetMs >= 0) "+" else ""}%.2f s".format(lyrics.globalOffsetMs / 1000f),
+                    color = Lime,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { viewModel.setLyricsGlobalOffsetMs(lyrics.globalOffsetMs - 250L) }) {
+                    Text("-0.25s", color = Lime, fontSize = 12.sp)
+                }
+                TextButton(onClick = { viewModel.setLyricsGlobalOffsetMs(0L) }) {
+                    Text("Reset", color = TextSecondary, fontSize = 12.sp)
+                }
+                TextButton(onClick = { viewModel.setLyricsGlobalOffsetMs(lyrics.globalOffsetMs + 250L) }) {
+                    Text("+0.25s", color = Lime, fontSize = 12.sp)
+                }
+            }
+        }
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Automatic Lyrics Scrolling",
+            subtitle = "Keep the active lyric line smoothly centered during playback",
+            checked = lyrics.autoScroll,
+            onCheckedChange = { viewModel.setLyricsToggles(autoScroll = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Tap Line to Seek",
+            subtitle = "Jump playback directly to any tapped lyric timestamp",
+            checked = lyrics.tapToSeek,
+            onCheckedChange = { viewModel.setLyricsToggles(tapToSeek = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Prefer Word-Synchronized Lyrics",
+            subtitle = "Automatically select syllable/word-timed lyrics when available",
+            checked = lyrics.preferWordSynced,
+            onCheckedChange = { viewModel.setLyricsToggles(preferWordSynced = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Highlight by Exact Playback Timing",
+            subtitle = "Disable for a subtle 180ms visual anticipation lead",
+            checked = lyrics.activeByRealTiming,
+            onCheckedChange = { viewModel.setLyricsToggles(activeByRealTiming = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Show Live Lyric Strip on Player",
+            subtitle = "Display the currently sung line directly on the Now Playing screen",
+            checked = lyrics.showLyricsOnPlayer,
+            onCheckedChange = { viewModel.setLyricsToggles(showLyricsOnPlayer = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Open Fullscreen Lyrics by Default",
+            checked = lyrics.fullscreenDefault,
+            onCheckedChange = { viewModel.setLyricsToggles(fullscreenDefault = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Hide Status Bar in Fullscreen Lyrics",
+            checked = lyrics.hideStatusBarInFullscreen,
+            onCheckedChange = { viewModel.setLyricsToggles(hideStatusBarInFullscreen = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Progressive Blur on Inactive Lines",
+            subtitle = "Softly blur distant lines for focused depth of field (Android 12+)",
+            checked = lyrics.progressiveBlur,
+            onCheckedChange = { viewModel.setLyricsToggles(progressiveBlur = it) }
+        )
+        if (playerBg == PlayerBackgroundStyle.LIQUID_GLASS) {
+            IosSettingsDivider(insetStart = 16.dp)
+            IosSettingsSwitchRow(
+                title = "Plus Lighter Glow Blending",
+                subtitle = "Additive luminous glow over Liquid Glass player background",
+                checked = lyrics.plusLighterBlend,
+                onCheckedChange = { viewModel.setLyricsToggles(plusLighterBlend = it) }
             )
         }
     }
 
     Spacer(Modifier.height(22.dp))
 
-    IosSettingsSection(title = "Synchronization & Phonetics") {
+    IosSettingsSection(title = "Translation, Romanization & Karaoke") {
         IosSettingsSwitchRow(
-            title = "Accent Color Active Line Highlight",
-            subtitle = "Tint the currently sung lyric line with your active theme accent color",
-            checked = lyrics.activeColorFollowsAccent,
-            onCheckedChange = { viewModel.setLyricsToggles(accentColor = it) }
+            title = "Show Original Lyrics",
+            checked = lyrics.showOriginalLyrics,
+            onCheckedChange = { viewModel.setLyricsToggles(showOriginal = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Show Translated Lyrics",
+            subtitle = "Enable on-demand line-by-line translation in the lyrics view",
+            checked = lyrics.showTranslation,
+            onCheckedChange = { viewModel.setLyricsToggles(showTranslation = it) }
+        )
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsSwitchRow(
+            title = "Show Offline Phonetic Romanization",
+            subtitle = "Transliterate Korean, Japanese, Cyrillic & CJK scripts offline",
+            checked = lyrics.showRomanization,
+            onCheckedChange = { viewModel.setLyricsToggles(showRomanization = it) }
         )
         IosSettingsDivider(insetStart = 16.dp)
         IosSettingsSwitchRow(
             title = "Word-by-Word Karaoke Highlight",
             checked = lyrics.wordLevelHighlight,
             onCheckedChange = { viewModel.setLyricsToggles(wordHighlight = it) }
-        )
-        IosSettingsDivider(insetStart = 16.dp)
-        IosSettingsSwitchRow(
-            title = "Show Offline Phonetic Romanization",
-            subtitle = "Transliterate Hindi, Malayalam, Tamil, Telugu, Korean, Japanese & Arabic script",
-            checked = lyrics.showRomanization,
-            onCheckedChange = { viewModel.setLyricsToggles(showRomanization = it) }
         )
     }
 }

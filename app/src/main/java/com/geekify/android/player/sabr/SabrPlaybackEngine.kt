@@ -187,13 +187,13 @@ class SabrBufferedSource(
                             raf.seek(writtenEnd.get())
                             raf.write(data)
                             writtenEnd.addAndGet(data.size.toLong())
-                            (lock as Object).notifyAll()
+                            notifyLock()
                         }
                     }
                 }
                 synchronized(lock) {
                     completed.set(true)
-                    (lock as Object).notifyAll()
+                    notifyLock()
                 }
             } catch (ce: CancellationException) {
                 throw ce
@@ -201,7 +201,7 @@ class SabrBufferedSource(
                 synchronized(lock) {
                     failure = t
                     completed.set(true)
-                    (lock as Object).notifyAll()
+                    notifyLock()
                 }
             }
         }
@@ -217,7 +217,7 @@ class SabrBufferedSource(
                     throw IOException("Timed out waiting for SABR audio data at offset $position")
                 }
                 try {
-                    (lock as Object).wait(minOf(remaining, 250L))
+                    waitLock(minOf(remaining, 250L))
                 } catch (ie: InterruptedException) {
                     Thread.currentThread().interrupt()
                     throw InterruptedIOException("Interrupted waiting for SABR audio data at offset $position")
@@ -239,11 +239,18 @@ class SabrBufferedSource(
         producerJob?.cancel()
         scope.cancel()
         synchronized(lock) {
-            (lock as Object).notifyAll()
+            notifyLock()
             runCatching { raf.close() }
         }
         runCatching { tempFile.delete() }
     }
+
+    // Java monitor wait/notifyAll require casting kotlin.Any to java.lang.Object.
+    @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
+    private fun notifyLock() = (lock as Object).notifyAll()
+
+    @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
+    private fun waitLock(timeoutMs: Long) = (lock as Object).wait(timeoutMs)
 
     private companion object {
         const val READ_TIMEOUT_MS = 20_000L

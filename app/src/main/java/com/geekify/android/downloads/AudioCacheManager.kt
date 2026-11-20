@@ -191,7 +191,7 @@ class AudioCacheManager(
         tempFile: File,
         onProgress: suspend (Long, Long) -> Unit
     ): Long {
-        val chunkSize = (stream.rangeChunkSizeBytes ?: DEFAULT_RANGE_CHUNK_BYTES).toLong()
+        val chunkSize = stream.rangeChunkSizeBytes
             .coerceIn(256L * 1024L, 2L * 1024L * 1024L)
         var downloaded = 0L
         var total = stream.contentLength.takeIf { it > 0L } ?: -1L
@@ -221,7 +221,7 @@ class AudioCacheManager(
                         if (!res.isSuccessful) {
                             throw IOException("Download HTTP failed with status ${res.code}")
                         }
-                        val body = res.body ?: throw IOException("Empty download response body")
+                        val body = res.body
                         if (total <= 0L) {
                             val contentRange = res.header("Content-Range")
                             val totalFromRange = contentRange

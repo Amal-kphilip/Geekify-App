@@ -185,7 +185,7 @@ class CastProxyServer(private val http: OkHttpClient) : Closeable {
                     headersSb.append("Connection: close\r\n\r\n")
                     out.write(headersSb.toString().toByteArray(Charsets.US_ASCII))
                     if (!method.equals("HEAD", ignoreCase = true)) {
-                        upstream.body?.byteStream()?.use { input ->
+                        upstream.body.byteStream().use { input ->
                             val buf = ByteArray(16 * 1024)
                             while (true) {
                                 val read = input.read(buf)

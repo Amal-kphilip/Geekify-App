@@ -113,6 +113,8 @@ class MusicReactiveMeterProcessor : BaseAudioProcessor() {
         }
     }
 
+    // Required override of Media3 BaseAudioProcessor.onFlush() hook.
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun onFlush() {
         resetMeter()
     }

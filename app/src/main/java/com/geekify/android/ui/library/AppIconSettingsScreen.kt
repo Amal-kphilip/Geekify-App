@@ -23,7 +23,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.geekify.android.appicon.AppIconManager
 import com.geekify.android.ui.components.*
+import com.geekify.android.ui.theme.AppFont
 import com.geekify.android.ui.theme.GeekifyIcons
+import com.geekify.android.ui.theme.InkGlassBorder
+import com.geekify.android.ui.theme.Lime
+import com.geekify.android.ui.theme.OnAccent
 
 @Composable
 fun AppIconSettingsScreen(onBack: () -> Unit) {
@@ -49,14 +53,14 @@ fun AppIconSettingsScreen(onBack: () -> Unit) {
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(18.dp))
                         .background(
-                            if (selected) SettingsVisuals.blue.copy(alpha = 0.09f)
+                            if (selected) Lime.copy(alpha = 0.11f)
                             else Color.Transparent
                         )
                         .clickable {
                             AppIconManager.setIcon(context, option.id)
                             selectedId = option.id
                         }
-                        .padding(horizontal = 16.dp, vertical = 13.dp),
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Image(
@@ -64,12 +68,12 @@ fun AppIconSettingsScreen(onBack: () -> Unit) {
                         contentDescription = option.label,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
-                            .size(60.dp)
-                            .clip(RoundedCornerShape(16.dp))
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(15.dp))
                             .border(
-                                width = 0.5.dp,
-                                color = Color.White.copy(alpha = 0.14f),
-                                shape = RoundedCornerShape(16.dp)
+                                width = 0.75.dp,
+                                color = InkGlassBorder,
+                                shape = RoundedCornerShape(15.dp)
                             )
                     )
                     Spacer(Modifier.width(14.dp))
@@ -77,29 +81,31 @@ fun AppIconSettingsScreen(onBack: () -> Unit) {
                         Text(
                             text = option.label,
                             color = IosPalette.label,
+                            fontFamily = AppFont,
                             fontSize = 15.5.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
                             text = if (selected) "Active icon" else "Tap to apply",
-                            color = if (selected) SettingsVisuals.cyan else SettingsVisuals.muted,
-                            fontSize = 12.sp,
+                            color = if (selected) Lime else IosPalette.secondaryLabel,
+                            fontFamily = AppFont,
+                            fontSize = 12.5.sp,
                             modifier = Modifier.padding(top = 2.dp)
                         )
                     }
                     if (selected) {
                         Box(
                             modifier = Modifier
-                                .size(26.dp)
+                                .size(24.dp)
                                 .clip(CircleShape)
-                                .background(SettingsVisuals.blue),
+                                .background(Lime),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = GeekifyIcons.Check,
                                 contentDescription = "Selected",
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
+                                tint = OnAccent,
+                                modifier = Modifier.size(15.dp)
                             )
                         }
                     }

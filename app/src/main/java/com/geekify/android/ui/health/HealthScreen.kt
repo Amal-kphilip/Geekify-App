@@ -212,7 +212,7 @@ fun HealthScreen(
                                 text = url,
                                 color = IosPalette.secondaryLabel,
                                 fontSize = 11.5.sp,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = com.geekify.android.ui.theme.AppFont,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )

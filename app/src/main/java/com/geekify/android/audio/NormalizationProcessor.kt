@@ -111,6 +111,8 @@ class NormalizationProcessor : BaseAudioProcessor() {
         return adaptiveGain
     }
 
+    // Required override of Media3 BaseAudioProcessor.onFlush() hook.
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun onFlush() {
         if (!hasTrackLoudness) {
             adaptiveGain = 1f

@@ -186,6 +186,8 @@ class BiquadEqualizerProcessor : BaseAudioProcessor() {
         return if (x < 0f) -limited else limited
     }
 
+    // Required override of Media3 BaseAudioProcessor.onFlush() hook.
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun onFlush() {
         history.forEach { it.fill(0f) }
         limiterGain = 1f

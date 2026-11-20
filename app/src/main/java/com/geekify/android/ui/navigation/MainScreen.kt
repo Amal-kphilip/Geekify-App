@@ -9,7 +9,9 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -251,14 +253,25 @@ fun MainScreen(
     val floatingBarsHeight = with(LocalDensity.current) { floatingBarsHeightPx.toDp() }
     val scrollConnection = rememberFloatingTabBarScrollConnection(inlineBehavior = appSettingsState.navInlineBehavior)
 
-    // Settings has its own large, scrollable hierarchy and an in-content search field.
-    // Keep the shared dock compact only while this route is visible; restore the user's
-    // normal navigation behavior as soon as they leave Settings.
-    LaunchedEffect(currentRoute, scrollConnection) {
-        scrollConnection.setInlineLocked(currentRoute == Screen.Settings.route)
+    // Settings and customization sub-settings have large scrollable hierarchies and interactive
+    // controls (switches, sliders, pickers). Keep the shared dock locked compact (inline) across
+    // ALL settings/customization routes so the mini-player never unexpectedly expands inside
+    // sub-settings or interferes with customization interactions.
+    val isSettingsHierarchyRoute = currentRoute == Screen.Settings.route ||
+        currentRoute == Screen.Personalization.route ||
+        currentRoute == Screen.AudioSettings.route ||
+        currentRoute == Screen.AppIconSettings.route ||
+        currentRoute == Screen.EditProfile.route ||
+        currentRoute == Screen.AddAccount.route
+    LaunchedEffect(isSettingsHierarchyRoute, scrollConnection) {
+        scrollConnection.setInlineLocked(isSettingsHierarchyRoute)
     }
 
-    val orderedVisibleTabs = remember(appSettingsState.customization.navigation.visibleTabs) {
+    val orderedVisibleTabs = remember(
+        appSettingsState.customization.navigation.tabOrder,
+        appSettingsState.customization.navigation.hiddenTabs,
+        appSettingsState.customization.navigation.visibleTabs
+    ) {
         appSettingsState.customization.navigation.safeVisibleTabs
     }
     val enabledPrimaryRoutes = remember(orderedVisibleTabs) {
@@ -407,10 +420,17 @@ fun MainScreen(
                     modifier = Modifier.fillMaxSize(),
                     navController = navController,
                     startDestination = Screen.Home.route,
-                    enterTransition = { fadeIn(tween(240)) },
-                    exitTransition = { fadeOut(tween(160)) },
-                    popEnterTransition = { fadeIn(tween(240)) },
-                    popExitTransition = { fadeOut(tween(160)) }
+                    enterTransition = { GeekifyNavMotion.enterTransition() },
+                    exitTransition = { GeekifyNavMotion.exitTransition() },
+                    popEnterTransition = { GeekifyNavMotion.popEnterTransition() },
+                    popExitTransition = { GeekifyNavMotion.popExitTransition() },
+                    predictivePopEnterTransition = { swipeEdge ->
+                        GeekifyNavMotion.predictivePopEnterTransition(swipeEdge)
+                    },
+                    predictivePopExitTransition = { swipeEdge ->
+                        GeekifyNavMotion.predictivePopExitTransition(swipeEdge)
+                    },
+                    sizeTransform = null
                 ) {
                     composable(Screen.Home.route) {
                         val homeVm: HomeViewModel = koinViewModel()
@@ -630,7 +650,8 @@ fun MainScreen(
                 }
         }
 
-        // ---- Floating adaptive navigation bar + mini player (content scrolls underneath) ----
+        // ---- Floating / Docked adaptive navigation bar + mini player (content scrolls underneath) ----
+        val navFloating = appSettingsState.customization.navigation.floatingNavBar
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -641,7 +662,12 @@ fun MainScreen(
             Box(
                 modifier = Modifier
                     .navigationBarsPadding()
-                    .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 12.dp)
+                    .padding(
+                        start = if (navFloating) 16.dp else 0.dp,
+                        end = if (navFloating) 16.dp else 0.dp,
+                        top = if (navFloating) 20.dp else 8.dp,
+                        bottom = if (navFloating) 12.dp else 0.dp
+                    )
             ) {
                 AdaptiveBottomBar(
                     scrollConnection = scrollConnection,
@@ -654,6 +680,7 @@ fun MainScreen(
                         if (!playerState.isPlaying) miniPlayerDismissed = true
                     },
                     onOpenExpandedPlayer = { playerTransitionState.expand(reducedMotion = reducedMotion) },
+                    onOpenQueue = { showQueue = true },
                     onHome = { navigateToTab(Screen.Home.route) },
                     onSearch = { navigateToTab(Screen.Search.route) },
                     onLibrary = { navigateToTab(Screen.Library.route) },
@@ -673,7 +700,19 @@ fun MainScreen(
                 transitionState = playerTransitionState,
                 isQueueVisible = showQueue,
                 onDismiss = { playerTransitionState.collapse(reducedMotion = reducedMotion) },
-                onQueueClick = { showQueue = true }
+                onQueueClick = { showQueue = true },
+                onNavigateToArtist = { artistId ->
+                    navController.navigate(Screen.Artist.createRoute(artistId)) { launchSingleTop = true }
+                },
+                onNavigateToAlbum = { albumId ->
+                    navController.navigate(Screen.Collection.createRoute(albumId, CollectionKind.ALBUM.name)) { launchSingleTop = true }
+                },
+                onNavigateToEqualizer = {
+                    navController.navigate(Screen.AudioSettings.route) { launchSingleTop = true }
+                },
+                onNavigateToListenTogether = {
+                    navController.navigate(Screen.ListenTogether.route) { launchSingleTop = true }
+                }
             )
         }
 

@@ -9,7 +9,7 @@ import com.geekify.android.data.local.LyricsEntity
 import com.geekify.android.lyrics.*
 import com.geekify.android.ui.theme.ActiveTypographyState
 import com.geekify.android.ui.theme.AppFont
-import com.geekify.android.ui.theme.MontserratFontFamily
+import com.geekify.android.ui.theme.SohneBreitFontFamily
 import com.geekify.android.ui.theme.buildGeekifyTypography
 import com.geekify.android.ui.theme.resolveFontFamily
 import java.io.IOException
@@ -44,7 +44,7 @@ class CustomizationSystemTest {
         assertTrue(state.home.hiddenSections.isEmpty())
         assertEquals(PlayerLayoutStyle.VINYL_TONEARM, state.player.layoutStyle)
         assertEquals(MiniPlayerStyle.FLOATING_PILL, state.miniPlayer.style)
-        assertEquals(AppFontChoice.SYSTEM_SANS, state.typography.fontChoice)
+        assertEquals(AppFontChoice.SOHNE_BREIT, state.typography.fontChoice)
         assertEquals(LyricsTextAlignment.CENTER, state.lyrics.alignment)
         assertEquals(WidgetBackgroundStyle.DARK_GLASS, state.widgets.backgroundStyle)
     }
@@ -150,7 +150,7 @@ class CustomizationSystemTest {
             CustomizationPersistence.KEY_THEME_VARIANT to DarkThemeVariant.GRAPHITE.name,
             CustomizationPersistence.KEY_PLAYER_LAYOUT_STYLE to PlayerLayoutStyle.EXPRESSIVE.name,
             CustomizationPersistence.KEY_MINI_STYLE to MiniPlayerStyle.COMPACT_SLIM.name,
-            CustomizationPersistence.KEY_TYPO_FONT_CHOICE to AppFontChoice.MONOSPACE_TECH.name
+            CustomizationPersistence.KEY_TYPO_FONT_CHOICE to "LEGACY_MONOSPACE_TECH"
         )
 
         CustomizationPersistence.resetAll(prefs)
@@ -160,7 +160,7 @@ class CustomizationSystemTest {
         assertEquals(DarkThemeVariant.STANDARD_DARK, restored.theme.themeVariant)
         assertEquals(PlayerLayoutStyle.VINYL_TONEARM, restored.player.layoutStyle)
         assertEquals(MiniPlayerStyle.FLOATING_PILL, restored.miniPlayer.style)
-        assertEquals(AppFontChoice.SYSTEM_SANS, restored.typography.fontChoice)
+        assertEquals(AppFontChoice.SOHNE_BREIT, restored.typography.fontChoice)
     }
 
     // ========================================================================================
@@ -168,11 +168,15 @@ class CustomizationSystemTest {
     // ========================================================================================
 
     @Test
-    fun `every AppFontChoice resolves to its distinct font family and propagates to MaterialTypography`() {
-        assertEquals(FontFamily.SansSerif, AppFontChoice.SYSTEM_SANS.resolveFontFamily())
-        assertEquals(MontserratFontFamily, AppFontChoice.MONTSERRAT.resolveFontFamily())
-        assertEquals(FontFamily.Serif, AppFontChoice.SERIF_EDITORIAL.resolveFontFamily())
-        assertEquals(FontFamily.Monospace, AppFontChoice.MONOSPACE_TECH.resolveFontFamily())
+    fun `Sohne Breit is the exclusive global font family and propagates to MaterialTypography`() {
+        assertEquals(listOf(AppFontChoice.SOHNE_BREIT), AppFontChoice.entries)
+        assertEquals(SohneBreitFontFamily, AppFontChoice.SOHNE_BREIT.resolveFontFamily())
+
+        // Legacy saved font choices migrate cleanly to SOHNE_BREIT
+        val legacyRestored = CustomizationPersistence.fromPreferences(
+            mutablePreferencesOf(CustomizationPersistence.KEY_TYPO_FONT_CHOICE to "MONTSERRAT")
+        )
+        assertEquals(AppFontChoice.SOHNE_BREIT, legacyRestored.typography.fontChoice)
 
         for (choice in AppFontChoice.entries) {
             val expectedFamily = choice.resolveFontFamily()
@@ -550,5 +554,86 @@ class CustomizationSystemTest {
         val retried = repo.getOrFetchOutcome("local_track_1", "Retry Song", "Retry Artist", 180, forceRefresh = true)
         assertTrue(retried is LyricsLookupOutcome.Success)
         assertTrue((retried as LyricsLookupOutcome.Success).lyrics.isSynced)
+    }
+
+    // ========================================================================================
+    // 4. METROLIST-INSPIRED PLAYER, LYRICS, MINI-PLAYER & APPEARANCE PERSISTENCE TESTS
+    // ========================================================================================
+
+    @Test
+    fun `all PlayerBackgroundStyle, PlayerProgressStyle, MiniPlayerStyle and LyricsAnimationStyle persist cleanly`() {
+        for (bg in PlayerBackgroundStyle.entries) {
+            val restored = CustomizationPersistence.fromPreferences(
+                mutablePreferencesOf(CustomizationPersistence.KEY_PLAYER_BG_STYLE to bg.name)
+            )
+            assertEquals(bg, restored.player.backgroundStyle)
+        }
+        for (ps in PlayerProgressStyle.entries) {
+            val restored = CustomizationPersistence.fromPreferences(
+                mutablePreferencesOf(
+                    CustomizationPersistence.KEY_PLAYER_PROGRESS_STYLE to ps.name,
+                    CustomizationPersistence.KEY_PLAYER_PROGRESS_HEIGHT to 8f
+                )
+            )
+            assertEquals(ps, restored.player.progressStyle)
+            assertEquals(8f, restored.player.progressHeightDp, 0.001f)
+        }
+        for (ms in MiniPlayerStyle.entries) {
+            val restored = CustomizationPersistence.fromPreferences(
+                mutablePreferencesOf(CustomizationPersistence.KEY_MINI_STYLE to ms.name)
+            )
+            assertEquals(ms, restored.miniPlayer.style)
+        }
+        for (anim in LyricsAnimationStyle.entries) {
+            val restored = CustomizationPersistence.fromPreferences(
+                mutablePreferencesOf(CustomizationPersistence.KEY_LYRICS_ANIMATION_STYLE to anim.name)
+            )
+            assertEquals(anim, restored.lyrics.animationStyle)
+        }
+    }
+
+    @Test
+    fun `legacy preferences migrate cleanly to ThemeMode, DisplayDensityScale and activeAlignment`() {
+        val legacyPrefs = mutablePreferencesOf(
+            CustomizationPersistence.KEY_THEME_VARIANT to DarkThemeVariant.AMOLED_BLACK.name,
+            CustomizationPersistence.KEY_TYPO_DENSITY_MODE to UiDensityMode.SPACIOUS.name,
+            CustomizationPersistence.KEY_LYRICS_ALIGNMENT to LyricsTextAlignment.START.name
+        )
+        val migrated = CustomizationPersistence.fromPreferences(legacyPrefs)
+        assertEquals(ThemeMode.PURE_BLACK, migrated.theme.themeMode)
+        assertEquals(DisplayDensityScale.LARGE, migrated.typography.displayDensity)
+        assertEquals(LyricsTextAlignment.START, migrated.lyrics.alignment)
+        assertEquals(LyricsTextAlignment.START, migrated.lyrics.activeAlignment)
+    }
+
+    @Test
+    fun `new numeric settings clamp safely and resetCategory restores Metrolist-inspired defaults`() {
+        val prefs = mutablePreferencesOf(
+            CustomizationPersistence.KEY_THEME_MODE to ThemeMode.LIGHT.name,
+            CustomizationPersistence.KEY_PALETTE_STYLE to ThemePaletteStyle.EXPRESSIVE.name,
+            CustomizationPersistence.KEY_PLAYER_PROGRESS_HEIGHT to 42f,
+            CustomizationPersistence.KEY_MINI_ARTWORK_SIZE_DP to 99,
+            CustomizationPersistence.KEY_MINI_SURFACE_ALPHA to 0.05f,
+            CustomizationPersistence.KEY_LYRICS_GLOBAL_OFFSET_MS to 99_000L,
+            CustomizationPersistence.KEY_LYRICS_SUBTITLE_FONT_SIZE_SP to 60f,
+            CustomizationPersistence.KEY_TYPO_DISPLAY_DENSITY to DisplayDensityScale.ULTRA_COMPACT.name
+        )
+        val clamped = CustomizationPersistence.fromPreferences(prefs)
+        assertEquals(ThemeMode.LIGHT, clamped.theme.themeMode)
+        assertEquals(ThemePaletteStyle.EXPRESSIVE, clamped.theme.paletteStyle)
+        assertEquals(12f, clamped.player.progressHeightDp, 0.001f)
+        assertEquals(56, clamped.miniPlayer.artworkSizeDp)
+        assertEquals(0.30f, clamped.miniPlayer.surfaceAlpha, 0.001f)
+        assertEquals(5_000L, clamped.lyrics.globalOffsetMs)
+        assertEquals(28f, clamped.lyrics.subtitleFontSizeSp, 0.001f)
+        assertEquals(DisplayDensityScale.ULTRA_COMPACT, clamped.typography.displayDensity)
+
+        CustomizationPersistence.resetAll(prefs)
+        val afterReset = CustomizationPersistence.fromPreferences(prefs)
+        assertEquals(ThemeMode.DARK, afterReset.theme.themeMode)
+        assertEquals(ThemePaletteStyle.TONAL_SPOT, afterReset.theme.paletteStyle)
+        assertEquals(4f, afterReset.player.progressHeightDp, 0.001f)
+        assertEquals(0L, afterReset.lyrics.globalOffsetMs)
+        assertEquals(DisplayDensityScale.NATIVE, afterReset.typography.displayDensity)
     }
 }

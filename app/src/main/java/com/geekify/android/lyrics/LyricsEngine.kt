@@ -39,7 +39,9 @@ data class LyricsLine(
     val timeMs: Long,
     val endMs: Long = 0L,
     val text: String,
-    val words: List<LyricsWord> = emptyList()
+    val words: List<LyricsWord> = emptyList(),
+    val embeddedTranslation: String? = null,
+    val embeddedRomanization: String? = null
 )
 
 enum class LyricsSyncType {
@@ -346,9 +348,26 @@ object LrcParser {
             }
         }
 
-        val sortedSynced = synced.sortedBy { it.timeMs }.mapIndexed { idx, line ->
-            val nextTime = synced.getOrNull(idx + 1)?.timeMs ?: (line.timeMs + 4_000L)
-            if (line.endMs <= line.timeMs) line.copy(endMs = nextTime) else line
+        val sortedUnique = synced
+            .sortedBy { it.timeMs }
+            .fold(mutableListOf<LyricsLine>()) { acc, line ->
+                val normText = normalizeLineForDedupe(line.text)
+                val prev = acc.lastOrNull()
+                // Deduplicate ONLY genuine duplicates sharing the exact same timestamp AND normalized text.
+                // Intentionally repeated chorus lines at different timestamps are always preserved.
+                if (prev != null && prev.timeMs == line.timeMs && normalizeLineForDedupe(prev.text) == normText) {
+                    if (prev.words.isEmpty() && line.words.isNotEmpty()) {
+                        acc[acc.lastIndex] = line
+                    }
+                } else {
+                    acc.add(line)
+                }
+                acc
+            }
+
+        val sortedSynced = sortedUnique.mapIndexed { idx, line ->
+            val nextTime = sortedUnique.getOrNull(idx + 1)?.timeMs ?: (line.timeMs + 4_000L)
+            if (line.endMs <= line.timeMs) line.copy(endMs = nextTime.coerceAtLeast(line.timeMs)) else line
         }
 
         // Validate that synced lyrics actually have usable playback timing (not all 00:00.000)
@@ -379,6 +398,9 @@ object LrcParser {
             )
         }
     }
+
+    internal fun normalizeLineForDedupe(text: String): String =
+        text.trim().replace(Regex("""\s+"""), " ").lowercase()
 
     internal fun parseTimestampMs(minStr: String, secStr: String, fracStr: String): Long {
         val mins = minStr.toLongOrNull() ?: 0L
@@ -427,36 +449,84 @@ object TtmlParser {
     private val spanTagRegex = Regex("""<span\b([^>]*)>([\s\S]*?)</span>""", RegexOption.IGNORE_CASE)
     private val beginAttrRegex = Regex("""\bbegin\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
     private val endAttrRegex = Regex("""\bend\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
-    private val roleAttrRegex = Regex("""\bttm:role\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+    private val roleAttrRegex = Regex("""\b(?:[a-zA-Z0-9_-]+:)?role\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
     private val xmlTagStripRegex = Regex("""<[^>]+>""")
+    private val multiSpaceRegex = Regex("""\s+""")
+
+    private fun isTranslationRole(role: String?): Boolean {
+        val r = role?.trim()?.lowercase() ?: return false
+        return r == "x-translation" || r == "translation" || r.endsWith(":translation") || r.contains("x-translation")
+    }
+
+    private fun isRomanizationRole(role: String?): Boolean {
+        val r = role?.trim()?.lowercase() ?: return false
+        return r == "x-roman" || r == "x-romanization" || r == "romanization" || r.contains("x-roman")
+    }
 
     fun parse(ttml: String, provider: String, offsetMs: Long = 0L): ParsedLyrics? {
         if (ttml.isBlank() || !ttml.contains("<p", ignoreCase = true)) return null
         val lines = mutableListOf<LyricsLine>()
+        val translationsByTime = mutableMapOf<Long, String>()
+        val romanizationsByTime = mutableMapOf<Long, String>()
 
         for (pMatch in pTagRegex.findAll(ttml)) {
             val pAttrs = pMatch.groupValues[1]
             val pInner = pMatch.groupValues[2]
+            val pRole = roleAttrRegex.find(pAttrs)?.groupValues?.get(1)
             val pBeginMs = beginAttrRegex.find(pAttrs)?.groupValues?.get(1)?.let(::parseTtmlTimeMs)
             val pEndMs = endAttrRegex.find(pAttrs)?.groupValues?.get(1)?.let(::parseTtmlTimeMs) ?: 0L
 
+            // Paragraph-level translation / romanization roles must NEVER become original lyric lines
+            if (isTranslationRole(pRole)) {
+                val trText = decodeXmlEntities(pInner.replace(xmlTagStripRegex, "")).replace(multiSpaceRegex, " ").trim()
+                if (trText.isNotEmpty() && pBeginMs != null) {
+                    translationsByTime.putIfAbsent(pBeginMs, trText)
+                }
+                continue
+            }
+            if (isRomanizationRole(pRole)) {
+                val romText = decodeXmlEntities(pInner.replace(xmlTagStripRegex, "")).replace(multiSpaceRegex, " ").trim()
+                if (romText.isNotEmpty() && pBeginMs != null) {
+                    romanizationsByTime.putIfAbsent(pBeginMs, romText)
+                }
+                continue
+            }
+
             val words = mutableListOf<LyricsWord>()
+            val spanTranslations = mutableListOf<String>()
+            val spanRomanizations = mutableListOf<String>()
+
             for (spanMatch in spanTagRegex.findAll(pInner)) {
                 val sAttrs = spanMatch.groupValues[1]
-                val role = roleAttrRegex.find(sAttrs)?.groupValues?.get(1)?.lowercase()
-                if (role == "x-translation" || role == "x-roman") continue
+                val sRole = roleAttrRegex.find(sAttrs)?.groupValues?.get(1)
+                val sText = decodeXmlEntities(spanMatch.groupValues[2].replace(xmlTagStripRegex, ""))
+                    .replace(multiSpaceRegex, " ")
+                    .trim()
+                if (isTranslationRole(sRole)) {
+                    if (sText.isNotEmpty()) spanTranslations += sText
+                    continue
+                }
+                if (isRomanizationRole(sRole)) {
+                    if (sText.isNotEmpty()) spanRomanizations += sText
+                    continue
+                }
                 val sBegin = beginAttrRegex.find(sAttrs)?.groupValues?.get(1)?.let(::parseTtmlTimeMs) ?: continue
                 val sEnd = endAttrRegex.find(sAttrs)?.groupValues?.get(1)?.let(::parseTtmlTimeMs) ?: sBegin
-                val wText = decodeXmlEntities(spanMatch.groupValues[2].replace(xmlTagStripRegex, "")).trim()
-                if (wText.isNotEmpty()) {
-                    words += LyricsWord(startMs = sBegin, endMs = sEnd, text = wText)
+                if (sText.isNotEmpty()) {
+                    words += LyricsWord(startMs = sBegin, endMs = sEnd, text = sText)
                 }
+            }
+
+            // Strip translation/romanization spans BEFORE extracting fallback plain paragraph text
+            val cleanedInner = spanTagRegex.replace(pInner) { m ->
+                val sRole = roleAttrRegex.find(m.groupValues[1])?.groupValues?.get(1)
+                if (isTranslationRole(sRole) || isRomanizationRole(sRole)) "" else m.value
             }
 
             val lineText = if (words.isNotEmpty()) {
                 words.joinToString(" ") { it.text }.trim()
             } else {
-                decodeXmlEntities(pInner.replace(xmlTagStripRegex, "")).replace(Regex("""\s+"""), " ").trim()
+                decodeXmlEntities(cleanedInner.replace(xmlTagStripRegex, "")).replace(multiSpaceRegex, " ").trim()
             }
 
             if (lineText.isEmpty()) continue
@@ -465,21 +535,43 @@ object TtmlParser {
                 timeMs = resolvedStartMs,
                 endMs = if (pEndMs > resolvedStartMs) pEndMs else (words.lastOrNull()?.endMs ?: 0L),
                 text = lineText,
-                words = words
+                words = words,
+                embeddedTranslation = spanTranslations.joinToString(" ").trim().takeIf { it.isNotEmpty() },
+                embeddedRomanization = spanRomanizations.joinToString(" ").trim().takeIf { it.isNotEmpty() }
             )
         }
 
         if (lines.isEmpty()) return null
-        val sorted = lines.sortedBy { it.timeMs.coerceAtLeast(0L) }
-        val isSynced = sorted.size >= 2 && sorted.any { it.timeMs > 0L }
-        val hasWords = isSynced && sorted.any { it.words.isNotEmpty() }
+        val sortedUnique = lines
+            .sortedBy { it.timeMs.coerceAtLeast(0L) }
+            .fold(mutableListOf<LyricsLine>()) { acc, line ->
+                val normText = LrcParser.normalizeLineForDedupe(line.text)
+                val prev = acc.lastOrNull()
+                if (prev != null && prev.timeMs == line.timeMs && LrcParser.normalizeLineForDedupe(prev.text) == normText) {
+                    if (prev.words.isEmpty() && line.words.isNotEmpty()) {
+                        acc[acc.lastIndex] = line
+                    }
+                } else {
+                    acc.add(line)
+                }
+                acc
+            }
+            .map { line ->
+                line.copy(
+                    embeddedTranslation = line.embeddedTranslation ?: translationsByTime[line.timeMs],
+                    embeddedRomanization = line.embeddedRomanization ?: romanizationsByTime[line.timeMs]
+                )
+            }
+
+        val isSynced = sortedUnique.size >= 2 && sortedUnique.any { it.timeMs > 0L }
+        val hasWords = isSynced && sortedUnique.any { it.words.isNotEmpty() }
         val syncType = when {
             hasWords -> LyricsSyncType.WORD_SYNCED
             isSynced -> LyricsSyncType.LINE_SYNCED
             else -> LyricsSyncType.UNSYNCED
         }
         val parsed = ParsedLyrics(
-            lines = sorted,
+            lines = sortedUnique,
             isSynced = isSynced,
             provider = provider,
             offsetMs = offsetMs,

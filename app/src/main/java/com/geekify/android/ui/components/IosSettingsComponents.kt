@@ -45,64 +45,90 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.geekify.android.settings.LocalAppSettings
+import com.geekify.android.ui.theme.ActiveThemePalette
+import com.geekify.android.ui.theme.AppFont
 import com.geekify.android.ui.theme.GeekifyIcons
+import com.geekify.android.ui.theme.InkGlassBorder
+import com.geekify.android.ui.theme.Lime
+import com.geekify.android.ui.theme.OnAccent
 
 /**
- * Cupertino / iOS 26 Dark Grouped Settings palette and reusable building blocks.
+ * Centralized spacing, sizing, and shape tokens for Geekify's global Settings Design System.
+ */
+object SettingsDesignTokens {
+    val CardCornerRadius = 22.dp
+    val IconContainerSize = 42.dp
+    val IconContainerCornerRadius = 13.dp
+    val IconGlyphSize = 20.dp
+    val IconToContentGap = 14.dp
+    val RowHorizontalPadding = 16.dp
+    val RowVerticalPadding = 14.dp
+    val TrailingGap = 12.dp
+    val ChevronSize = 18.dp
+    val SectionSpacing = 22.dp
+    val DividerInsetWithIcon = RowHorizontalPadding + IconContainerSize + IconToContentGap
+}
+
+/**
+ * Reactive Light/Dark Settings palette backed by Geekify's centralized [ActiveThemePalette].
  */
 object IosPalette {
+    private val dark: Boolean get() = ActiveThemePalette.isDark
+
     val systemGroupedBackground: Color get() = com.geekify.android.ui.theme.InkBackground
     val secondarySystemGroupedBackground: Color get() = com.geekify.android.ui.theme.InkPanel
     val tertiarySystemGroupedBackground: Color get() = com.geekify.android.ui.theme.InkElevated
-    val systemFill = Color(0x5C787880)
-    val secondarySystemFill = Color(0x51787880)
-    val separator = Color(0x99545458)
+    val systemFill: Color get() = if (dark) Color(0x5C787880) else Color(0x28787880)
+    val secondarySystemFill: Color get() = if (dark) Color(0x51787880) else Color(0x1E787880)
+    val separator: Color get() = if (dark) Color(0x99545458) else Color(0x2E121118)
 
-    val label = Color(0xFFFFFFFF)
-    val secondaryLabel = Color(0x99EBEBF5)
-    val tertiaryLabel = Color(0x4DEBEBF5)
-    val quaternaryLabel = Color(0x2EEBEBF5)
+    val label: Color get() = com.geekify.android.ui.theme.TextPrimary
+    val secondaryLabel: Color get() = com.geekify.android.ui.theme.TextSecondary
+    val tertiaryLabel: Color get() = com.geekify.android.ui.theme.TextMuted
+    val quaternaryLabel: Color get() = if (dark) Color(0x2EEBEBF5) else Color(0x2E121118)
 
-    // Vibrant dark-mode system icon tile tints
+    // Vibrant system icon tile tints (white glyph inside always retains high contrast)
     val systemRed = Color(0xFFFF453A)
     val systemOrange = Color(0xFFFF9F0A)
-    val systemYellow = Color(0xFFFFD60A)
-    val systemGreen = Color(0xFF30D158)
-    val systemMint = Color(0xFF63E6E2)
-    val systemTeal = Color(0xFF40C8E0)
-    val systemCyan = Color(0xFF64D2FF)
+    val systemYellow = Color(0xFFD9A700)
+    val systemGreen = Color(0xFF28B84D)
+    val systemMint = Color(0xFF28B8B0)
+    val systemTeal = Color(0xFF2FA4C4)
+    val systemCyan = Color(0xFF2E9ED8)
     val systemBlue = Color(0xFF0A84FF)
     val systemIndigo = Color(0xFF5E5CE6)
-    val systemPurple = Color(0xFFBF5AF2)
+    val systemPurple = Color(0xFFAF52DE)
     val systemPink = Color(0xFFFF375F)
     val systemGray = Color(0xFF8E8E93)
 }
 
 /**
- * Visual tokens shared by Settings, Audio Effects and App Icon screens.
- * These intentionally mirror the Listening Stats dashboard surfaces without changing
- * the app-wide IosPalette used by unrelated screens.
+ * Reactive Light/Dark surface tokens shared by every Settings, Customization, Audio, and App Icon screen.
  */
 object SettingsVisuals {
-    val card = Color(0xFF191A1E)
-    val cardRaised = Color(0xFF23262D)
-    val cardBorder = Color(0xFF292D35)
-    val divider = Color(0xFF343842)
-    val muted = Color(0xFF858B96)
-    val blue = Color(0xFF3985FF)
-    val cyan = Color(0xFF36C5D8)
-    val green = Color(0xFF53D69A)
-    val heroStart = Color(0xFF202B3C)
-    val heroMiddle = Color(0xFF1B1D25)
+    private val dark: Boolean get() = ActiveThemePalette.isDark
+
+    val card: Color get() = if (dark) Color(0xFF191A1E) else Color(0xFFFFFFFF)
+    val cardRaised: Color get() = if (dark) Color(0xFF23262D) else Color(0xFFE9ECF4)
+    val cardBorder: Color get() = if (dark) Color(0xFF2B2F38) else Color(0x18121118)
+    val divider: Color get() = if (dark) Color(0xFF2E323C) else Color(0x18121118)
+    val switchOffTrack: Color get() = if (dark) Color(0xFF323640) else Color(0xFFD4D8E2)
+    val sliderInactiveTrack: Color get() = if (dark) Color(0xFF323640) else Color(0xFFD4D8E2)
+    val muted: Color get() = com.geekify.android.ui.theme.TextSecondary
+    val blue: Color get() = if (dark) Color(0xFF3985FF) else Color(0xFF1B6CE8)
+    val cyan: Color get() = if (dark) Color(0xFF36C5D8) else Color(0xFF0F92A8)
+    val green: Color get() = if (dark) Color(0xFF53D69A) else Color(0xFF1E9B63)
+    val heroStart: Color get() = if (dark) Color(0xFF202B3C) else Color(0xFFE6ECF7)
+    val heroMiddle: Color get() = if (dark) Color(0xFF1B1D25) else Color(0xFFF2F4FA)
 }
 
-val IosCardShape = RoundedCornerShape(22.dp)
-val IosIconTileShape = RoundedCornerShape(12.dp)
+val IosCardShape = RoundedCornerShape(SettingsDesignTokens.CardCornerRadius)
+val IosIconTileShape = RoundedCornerShape(SettingsDesignTokens.IconContainerCornerRadius)
 
 /**
- * Collapsing Large-Title Settings page scaffold.
- * Displays a translucent top navigation bar whose small centered title fades in once the
- * scrollable large title scrolls beneath the bar.
+ * Global Collapsing Large-Title Settings page scaffold.
+ * Automatically accounts for [LocalBottomInset] and system navigation bars so the floating
+ * mini-player and bottom dock never obscure settings cards or controls.
  */
 @Composable
 fun IosSettingsPageScaffold(
@@ -116,6 +142,9 @@ fun IosSettingsPageScaffold(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val density = LocalDensity.current
+    val globalBottomInset = LocalBottomInset.current
+    val effectiveBottomPadding = maxOf(bottomPadding, globalBottomInset + 40.dp)
+
     val collapseThresholdPx = with(density) { 42.dp.toPx() }
     val collapsedFraction by remember(scrollState, collapseThresholdPx) {
         derivedStateOf {
@@ -140,7 +169,7 @@ fun IosSettingsPageScaffold(
             .fillMaxSize()
             .background(if (asciiEnabled) Color.Transparent else IosPalette.systemGroupedBackground)
     ) {
-        // Scrollable body
+        // Scrollable body with guaranteed bottom clearance above floating player + nav bar
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -152,18 +181,20 @@ fun IosSettingsPageScaffold(
                     .widthIn(max = maxContentWidth)
                     .fillMaxWidth()
                     .statusBarsPadding()
+                    .navigationBarsPadding()
                     .padding(horizontal = 16.dp)
-                    .padding(top = 60.dp, bottom = bottomPadding)
+                    .padding(top = 60.dp, bottom = effectiveBottomPadding)
             ) {
                 Text(
                     text = title,
                     color = IosPalette.label,
-                    fontSize = 34.sp,
-                    lineHeight = 41.sp,
+                    fontFamily = AppFont,
+                    fontSize = 32.sp,
+                    lineHeight = 38.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = (-0.5).sp,
                     modifier = Modifier
-                        .padding(start = 4.dp, top = 4.dp, bottom = 14.dp)
+                        .padding(start = 4.dp, top = 4.dp, bottom = 16.dp)
                         .graphicsLayer { alpha = largeTitleAlpha }
                 )
 
@@ -178,7 +209,7 @@ fun IosSettingsPageScaffold(
                 .align(Alignment.TopCenter)
                 .background(
                     IosPalette.systemGroupedBackground.copy(
-                        alpha = (0.78f + 0.18f * collapsedFraction).coerceIn(0f, 0.96f)
+                        alpha = (0.82f + 0.16f * collapsedFraction).coerceIn(0f, 0.98f)
                     )
                 )
                 .statusBarsPadding()
@@ -196,7 +227,7 @@ fun IosSettingsPageScaffold(
                             .size(38.dp)
                             .clip(CircleShape)
                             .background(IosPalette.secondarySystemGroupedBackground)
-                            .border(0.5.dp, Color.White.copy(alpha = 0.10f), CircleShape)
+                            .border(0.75.dp, InkGlassBorder, CircleShape)
                             .bouncyClickable(pressedScale = 0.92f, onClick = onBack),
                         contentAlignment = Alignment.Center
                     ) {
@@ -212,7 +243,8 @@ fun IosSettingsPageScaffold(
                 Text(
                     text = title,
                     color = IosPalette.label,
-                    fontSize = 17.sp,
+                    fontFamily = AppFont,
+                    fontSize = 16.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -238,7 +270,7 @@ fun IosSettingsPageScaffold(
 }
 
 /**
- * Listening Stats-inspired section heading + rounded charcoal settings card + footer caption.
+ * Global Settings section heading + rounded elevated card + wrapping footer caption.
  */
 @Composable
 fun IosSettingsSection(
@@ -250,7 +282,7 @@ fun IosSettingsSection(
     Column(modifier = modifier.fillMaxWidth()) {
         if (!title.isNullOrBlank()) {
             Row(
-                modifier = Modifier.padding(start = 4.dp, end = 12.dp, bottom = 9.dp),
+                modifier = Modifier.padding(start = 4.dp, end = 12.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
@@ -258,25 +290,27 @@ fun IosSettingsSection(
                         .width(3.dp)
                         .height(14.dp)
                         .clip(CircleShape)
-                        .background(SettingsVisuals.cyan)
+                        .background(Lime)
                 )
                 Spacer(Modifier.width(9.dp))
                 Text(
                     text = title,
                     color = IosPalette.label,
-                    fontSize = 15.sp,
+                    fontFamily = AppFont,
+                    fontSize = 14.5.sp,
                     lineHeight = 19.sp,
                     fontWeight = FontWeight.SemiBold,
-                    letterSpacing = (-0.12).sp
+                    letterSpacing = (-0.1).sp
                 )
             }
         }
         Surface(
             color = SettingsVisuals.card,
             shape = IosCardShape,
+            shadowElevation = if (ActiveThemePalette.isDark) 0.dp else 1.5.dp,
             modifier = Modifier
                 .fillMaxWidth()
-                .border(0.6.dp, SettingsVisuals.cardBorder, IosCardShape)
+                .border(0.75.dp, SettingsVisuals.cardBorder, IosCardShape)
         ) {
             Column(modifier = Modifier.fillMaxWidth(), content = content)
         }
@@ -284,28 +318,30 @@ fun IosSettingsSection(
             Text(
                 text = footer,
                 color = SettingsVisuals.muted,
+                fontFamily = AppFont,
                 fontSize = 12.sp,
                 lineHeight = 17.sp,
-                modifier = Modifier.padding(start = 4.dp, end = 16.dp, top = 8.dp)
+                fontWeight = FontWeight.Normal,
+                modifier = Modifier.padding(start = 6.dp, end = 12.dp, top = 8.dp)
             )
         }
     }
 }
 
 /**
- * Hairline separator aligned with the text column after the 40.dp icon tile.
+ * Hairline separator aligned with the text column after the 42.dp icon tile.
  */
 @Composable
-fun IosSettingsDivider(insetStart: Dp = 68.dp) {
+fun IosSettingsDivider(insetStart: Dp = SettingsDesignTokens.DividerInsetWithIcon) {
     HorizontalDivider(
         modifier = Modifier.padding(start = insetStart),
-        thickness = 0.5.dp,
+        thickness = 0.6.dp,
         color = SettingsVisuals.divider
     )
 }
 
 /**
- * Rounded 40.dp settings icon tile with a 12.dp corner radius and white glyph.
+ * Consistent rounded 42.dp settings icon tile with 13.dp corner radius and crisp 20.dp glyph.
  */
 @Composable
 fun IosIconBadge(
@@ -315,7 +351,7 @@ fun IosIconBadge(
 ) {
     Box(
         modifier = modifier
-            .size(40.dp)
+            .size(SettingsDesignTokens.IconContainerSize)
             .clip(IosIconTileShape)
             .background(tint),
         contentAlignment = Alignment.Center
@@ -324,13 +360,19 @@ fun IosIconBadge(
             imageVector = icon,
             contentDescription = null,
             tint = Color.White,
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier.size(SettingsDesignTokens.IconGlyphSize)
         )
     }
 }
 
 /**
- * Stats-inspired Settings navigation / action row.
+ * Global responsive Settings navigation & selection row.
+ *
+ * Layout:
+ * - Left: Consistent 42.dp [IosIconBadge] (optional).
+ * - Center (flexible full width): Sohne Breit SemiBold title (wraps naturally, never truncated),
+ *   wrapping Regular description, and compact selected-value pill underneath (never squeezes title).
+ * - Right: Compact badge, selection checkmark (when `selected && !showChevron`), or navigation chevron.
  */
 @Composable
 fun IosSettingsRow(
@@ -346,50 +388,77 @@ fun IosSettingsRow(
     showChevron: Boolean = true,
     onClick: (() -> Unit)? = null
 ) {
-    val rowBg = if (selected) SettingsVisuals.blue.copy(alpha = 0.12f) else Color.Transparent
+    val rowBg = if (selected) Lime.copy(alpha = if (ActiveThemePalette.isDark) 0.11f else 0.12f) else Color.Transparent
+    val isRadioSelectionRow = !showChevron && selected
+
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = if (subtitle.isNullOrBlank()) 62.dp else 70.dp)
+            .heightIn(min = 58.dp)
             .background(rowBg)
             .then(
                 if (onClick != null) Modifier.clickable(onClick = onClick)
                 else Modifier
             )
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(
+                horizontal = SettingsDesignTokens.RowHorizontalPadding,
+                vertical = SettingsDesignTokens.RowVerticalPadding
+            ),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (icon != null) {
             IosIconBadge(icon = icon, tint = tileColor)
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(SettingsDesignTokens.IconToContentGap))
         }
 
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
             Text(
                 text = title,
                 color = if (destructive) IosPalette.systemRed else IosPalette.label,
-                fontSize = 16.sp,
-                lineHeight = 21.sp,
-                letterSpacing = (-0.2).sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                fontFamily = AppFont,
+                fontSize = 15.5.sp,
+                lineHeight = 20.5.sp,
+                letterSpacing = (-0.15).sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
             )
             if (!subtitle.isNullOrBlank()) {
                 Text(
                     text = subtitle,
                     color = IosPalette.secondaryLabel,
+                    fontFamily = AppFont,
                     fontSize = 12.5.sp,
-                    lineHeight = 17.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 1.dp)
+                    lineHeight = 17.5.sp,
+                    fontWeight = FontWeight.Normal
                 )
+            }
+            if (!value.isNullOrBlank() && !isRadioSelectionRow) {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 3.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (selected) Lime.copy(alpha = 0.18f)
+                            else SettingsVisuals.cardRaised
+                        )
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = value,
+                        color = if (selected) Lime else IosPalette.secondaryLabel,
+                        fontFamily = AppFont,
+                        fontSize = 11.5.sp,
+                        lineHeight = 15.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
         }
 
         if (!badgeText.isNullOrBlank()) {
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(SettingsDesignTokens.TrailingGap))
             Box(
                 modifier = Modifier
                     .defaultMinSize(minWidth = 22.dp, minHeight = 22.dp)
@@ -401,39 +470,44 @@ fun IosSettingsRow(
                 Text(
                     text = badgeText,
                     color = Color.White,
-                    fontSize = 12.sp,
+                    fontFamily = AppFont,
+                    fontSize = 11.5.sp,
                     fontWeight = FontWeight.SemiBold
                 )
             }
         }
 
-        if (!value.isNullOrBlank()) {
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = value,
-                color = IosPalette.secondaryLabel,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 120.dp)
-            )
-        }
-
-        if (showChevron && onClick != null) {
-            Spacer(Modifier.width(6.dp))
+        if (isRadioSelectionRow) {
+            Spacer(Modifier.width(SettingsDesignTokens.TrailingGap))
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .background(Lime),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = GeekifyIcons.Check,
+                    contentDescription = "Selected",
+                    tint = OnAccent,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+        } else if (showChevron && onClick != null) {
+            Spacer(Modifier.width(SettingsDesignTokens.TrailingGap))
             Icon(
                 imageVector = GeekifyIcons.ChevronRight,
                 contentDescription = null,
                 tint = IosPalette.tertiaryLabel,
-                modifier = Modifier.size(16.dp)
+                modifier = Modifier.size(SettingsDesignTokens.ChevronSize)
             )
         }
     }
 }
 
 /**
- * Standard iOS Settings toggle row using [IosSwitch].
+ * Global responsive Settings toggle row using [IosSwitch].
+ * Flexible center column ensures long titles and descriptions never collide with the trailing switch.
  */
 @Composable
 fun IosSettingsSwitchRow(
@@ -449,37 +523,45 @@ fun IosSettingsSwitchRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 64.dp)
+            .heightIn(min = 60.dp)
             .clickable(enabled = enabled) { onCheckedChange(!checked) }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(
+                horizontal = SettingsDesignTokens.RowHorizontalPadding,
+                vertical = SettingsDesignTokens.RowVerticalPadding
+            ),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (icon != null) {
             IosIconBadge(icon = icon, tint = tileColor)
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(SettingsDesignTokens.IconToContentGap))
         }
 
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
             Text(
                 text = title,
-                color = if (enabled) IosPalette.label else IosPalette.secondaryLabel,
-                fontSize = 16.sp,
-                lineHeight = 21.sp,
-                letterSpacing = (-0.2).sp,
+                color = if (enabled) IosPalette.label else IosPalette.tertiaryLabel,
+                fontFamily = AppFont,
+                fontSize = 15.5.sp,
+                lineHeight = 20.5.sp,
+                letterSpacing = (-0.15).sp,
                 fontWeight = FontWeight.Medium
             )
             if (!subtitle.isNullOrBlank()) {
                 Text(
                     text = subtitle,
-                    color = IosPalette.secondaryLabel,
+                    color = if (enabled) IosPalette.secondaryLabel else IosPalette.tertiaryLabel,
+                    fontFamily = AppFont,
                     fontSize = 12.5.sp,
-                    lineHeight = 17.sp,
-                    modifier = Modifier.padding(top = 1.dp)
+                    lineHeight = 17.5.sp,
+                    fontWeight = FontWeight.Normal
                 )
             }
         }
 
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(SettingsDesignTokens.TrailingGap))
         IosSwitch(
             checked = checked,
             onCheckedChange = onCheckedChange,
@@ -489,7 +571,7 @@ fun IosSettingsSwitchRow(
 }
 
 /**
- * Standard iOS Settings slider row using [IosSlider].
+ * Global responsive Settings slider row using [IosSlider].
  */
 @Composable
 fun IosSettingsSliderRow(
@@ -501,13 +583,16 @@ fun IosSettingsSliderRow(
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
     tileColor: Color = IosPalette.systemBlue,
-    activeColor: Color = SettingsVisuals.blue,
+    activeColor: Color = Lime,
     onValueLabelClick: (() -> Unit)? = null
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 13.dp)
+            .padding(
+                horizontal = SettingsDesignTokens.RowHorizontalPadding,
+                vertical = SettingsDesignTokens.RowVerticalPadding
+            )
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -515,32 +600,41 @@ fun IosSettingsSliderRow(
         ) {
             if (icon != null) {
                 IosIconBadge(icon = icon, tint = tileColor)
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(SettingsDesignTokens.IconToContentGap))
             }
             Text(
                 text = title,
                 color = IosPalette.label,
+                fontFamily = AppFont,
                 fontSize = 15.5.sp,
-                letterSpacing = (-0.2).sp,
+                lineHeight = 20.5.sp,
+                letterSpacing = (-0.15).sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f)
             )
-            Text(
-                text = valueLabel,
-                color = IosPalette.secondaryLabel,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = if (onValueLabelClick != null) {
-                    Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .clickable(onClick = onValueLabelClick)
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                } else {
-                    Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                }
-            )
+            Spacer(Modifier.width(SettingsDesignTokens.TrailingGap))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(SettingsVisuals.cardRaised)
+                    .then(
+                        if (onValueLabelClick != null) Modifier.clickable(onClick = onValueLabelClick)
+                        else Modifier
+                    )
+                    .padding(horizontal = 9.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = valueLabel,
+                    color = IosPalette.label,
+                    fontFamily = AppFont,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
         IosSlider(
             value = value,
             onValueChange = onValueChange,
@@ -551,7 +645,7 @@ fun IosSettingsSliderRow(
 }
 
 /**
- * Authentic iOS Switch (`51.dp x 31.dp` capsule track with `27.dp` shadowed white knob).
+ * Responsive Settings switch (`51.dp x 31.dp` capsule track with `27.dp` shadowed knob).
  */
 @Composable
 fun IosSwitch(
@@ -559,10 +653,10 @@ fun IosSwitch(
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    activeTrackColor: Color = SettingsVisuals.green
+    activeTrackColor: Color = Lime
 ) {
     val trackColor by animateColorAsState(
-        targetValue = if (checked) activeTrackColor else SettingsVisuals.cardRaised,
+        targetValue = if (checked) activeTrackColor else SettingsVisuals.switchOffTrack,
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "iosSwitchTrack"
     )
@@ -605,7 +699,7 @@ fun IosSwitch(
 }
 
 /**
- * Authentic iOS Slider (`4.dp` rounded track + `27.dp` white shadowed circular thumb that swells on drag).
+ * Responsive Settings slider (`4.dp` rounded track + `26.dp` white shadowed circular thumb).
  */
 @Composable
 fun IosSlider(
@@ -614,8 +708,8 @@ fun IosSlider(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     valueRange: ClosedFloatingPointRange<Float> = 0f..1f,
-    activeTrackColor: Color = SettingsVisuals.blue,
-    inactiveTrackColor: Color = SettingsVisuals.cardRaised,
+    activeTrackColor: Color = Lime,
+    inactiveTrackColor: Color = SettingsVisuals.sliderInactiveTrack,
     onValueChangeFinished: (() -> Unit)? = null
 ) {
     var widthPx by remember { mutableIntStateOf(0) }
@@ -704,7 +798,7 @@ fun IosSlider(
 
         // Soft drop shadow
         drawCircle(
-            color = Color.Black.copy(alpha = 0.30f),
+            color = Color.Black.copy(alpha = if (ActiveThemePalette.isDark) 0.30f else 0.16f),
             radius = thumbRadius + 1.dp.toPx(),
             center = Offset(thumbX, centerY + 1.5.dp.toPx())
         )
@@ -716,10 +810,10 @@ fun IosSlider(
         )
         // Hairline border
         drawCircle(
-            color = Color.Black.copy(alpha = 0.08f),
+            color = Color.Black.copy(alpha = 0.10f),
             radius = thumbRadius,
             center = Offset(thumbX, centerY),
-            style = Stroke(width = 0.5.dp.toPx())
+            style = Stroke(width = 0.6.dp.toPx())
         )
     }
 }

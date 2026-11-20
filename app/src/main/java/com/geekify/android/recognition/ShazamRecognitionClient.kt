@@ -203,7 +203,7 @@ class ShazamRecognitionClient(
 
                 override fun onResponse(call: Call, response: Response) {
                     response.use { res ->
-                        val text = runCatching { res.body?.string().orEmpty() }.getOrDefault("")
+                        val text = runCatching { res.body.string() }.getOrDefault("")
                         if (continuation.isActive) continuation.resume(res.code to text)
                     }
                 }

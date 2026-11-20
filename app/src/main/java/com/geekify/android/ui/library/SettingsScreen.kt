@@ -4,19 +4,23 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlin.coroutines.cancellation.CancellationException
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import com.geekify.android.ui.navigation.GeekifyNavMotion
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -180,8 +184,39 @@ fun SettingsScreen(
     var searchQuery by rememberSaveable { mutableStateOf("") }
     val rootScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
 
-    BackHandler(enabled = currentPage != SettingsSubPage.ROOT) {
-        currentPage = SettingsSubPage.ROOT
+    val backCancelScope = rememberCoroutineScope()
+    val predictiveBackAnim = remember { Animatable(0f) }
+    var predictiveBackEdge by remember { mutableIntStateOf(GeekifyNavMotion.SWIPE_EDGE_LEFT) }
+    var lastBackWasGesture by remember { mutableStateOf(false) }
+
+    PredictiveBackHandler(enabled = currentPage != SettingsSubPage.ROOT) { backEvents ->
+        try {
+            backEvents.collect { event ->
+                predictiveBackEdge = event.swipeEdge
+                predictiveBackAnim.snapTo(event.progress.coerceIn(0f, 1f))
+            }
+            lastBackWasGesture = true
+            predictiveBackAnim.snapTo(0f)
+            currentPage = SettingsSubPage.ROOT
+        } catch (_: CancellationException) {
+            lastBackWasGesture = false
+            backCancelScope.launch {
+                predictiveBackAnim.animateTo(
+                    targetValue = 0f,
+                    animationSpec = tween(
+                        durationMillis = GeekifyNavMotion.GESTURE_CANCEL_RETURN_DURATION_MS,
+                        easing = FastOutSlowInEasing
+                    )
+                )
+            }
+        }
+    }
+
+    LaunchedEffect(currentPage) {
+        if (currentPage != SettingsSubPage.ROOT) {
+            lastBackWasGesture = false
+            predictiveBackAnim.snapTo(0f)
+        }
     }
 
     val createBackupLauncher = rememberLauncherForActivityResult(
@@ -464,13 +499,10 @@ fun SettingsScreen(
             AnimatedContent(
                 targetState = currentPage,
                 transitionSpec = {
-                    if (targetState != SettingsSubPage.ROOT) {
-                        (slideInHorizontally(tween(260)) { it / 3 } + fadeIn(tween(220)))
-                            .togetherWith(slideOutHorizontally(tween(220)) { -it / 4 } + fadeOut(tween(160)))
-                    } else {
-                        (slideInHorizontally(tween(260)) { -it / 4 } + fadeIn(tween(220)))
-                            .togetherWith(slideOutHorizontally(tween(220)) { it / 3 } + fadeOut(tween(160)))
-                    }
+                    GeekifyNavMotion.subPageTransition(
+                        isForward = targetState != SettingsSubPage.ROOT,
+                        lastBackWasGesture = lastBackWasGesture
+                    )
                 },
                 label = "settingsSubPage"
             ) { page ->
@@ -501,13 +533,29 @@ fun SettingsScreen(
                     }
                 } else {
                     val subScroll = rememberSaveable(page.name, saver = ScrollState.Saver) { ScrollState(0) }
-                    IosSettingsPageScaffold(
-                        title = page.title,
-                        scrollState = subScroll,
-                        onBack = { currentPage = SettingsSubPage.ROOT },
-                        bottomPadding = bottomInset + 40.dp
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                val tf = GeekifyNavMotion.computePredictiveBackTransform(
+                                    progress = predictiveBackAnim.value,
+                                    density = density,
+                                    swipeEdge = predictiveBackEdge
+                                )
+                                translationX = tf.translationXPx
+                                scaleX = tf.scale
+                                scaleY = tf.scale
+                                alpha = tf.alpha
+                            }
                     ) {
-                        RenderSubPageContent(page)
+                        IosSettingsPageScaffold(
+                            title = page.title,
+                            scrollState = subScroll,
+                            onBack = { currentPage = SettingsSubPage.ROOT },
+                            bottomPadding = bottomInset + 40.dp
+                        ) {
+                            RenderSubPageContent(page)
+                        }
                     }
                 }
             }
@@ -1804,7 +1852,7 @@ private fun buildSearchRegistry(
         title = "Typography & UI Density",
         subtitle = "Global application font family, text scaling & spacing density",
         category = "Personalization Studio",
-        keywords = listOf("font", "typography", "montserrat", "serif", "monospace", "text scale", "font size", "density"),
+        keywords = listOf("font", "typography", "sohne", "sohne breit", "text scale", "font size", "density"),
         icon = GeekifyIcons.Translate,
         tint = IosPalette.systemOrange,
         onSelect = { onPersonalizationCategory(CustomizationCategory.TYPOGRAPHY_DENSITY) }

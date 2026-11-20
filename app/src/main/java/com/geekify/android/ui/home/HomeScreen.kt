@@ -260,7 +260,8 @@ fun HomeScreen(
                         contentDescription = "Search",
                         onClick = onSearchClick,
                         size = 50.dp,
-                        container = Color.White.copy(alpha = 0.14f)
+                        container = InkGlass,
+                        tint = TextPrimary
                     )
                     Spacer(Modifier.width(12.dp))
                     CircleIconButton(
@@ -268,7 +269,8 @@ fun HomeScreen(
                         contentDescription = "Liked songs",
                         onClick = onLikedClick,
                         size = 50.dp,
-                        container = Color.White.copy(alpha = 0.14f)
+                        container = InkGlass,
+                        tint = TextPrimary
                     )
                 }
 
@@ -463,7 +465,7 @@ fun HomeScreen(
                                                             .width(dotWidth)
                                                             .clip(CircleShape)
                                                             .background(
-                                                                if (isSelected) Lime else Color.White.copy(alpha = 0.22f)
+                                                                if (isSelected) Lime else TextMuted.copy(alpha = 0.35f)
                                                             )
                                                     )
                                                 }

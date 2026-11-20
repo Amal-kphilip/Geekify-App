@@ -338,3 +338,108 @@ internal fun computeSharedTransform(
         scaleY = uniformScale
     )
 }
+
+/**
+ * Dedicated, isolated transition state for the Now Playing <-> Lyrics shared-element morph.
+ *
+ * Normalized [progress]:
+ * - `0.0f` = Now Playing
+ * - `1.0f` = Full-viewport Lyrics
+ *
+ * Strictly isolated from [PlayerTransitionState] (Mini-Player <-> Now Playing) so the two
+ * transitions never independently animate the same artwork or title elements at the same time.
+ */
+@Stable
+class LyricsTransitionState(
+    private val scope: CoroutineScope
+) {
+    private val progressAnim = Animatable(
+        initialValue = 0f,
+        visibilityThreshold = 0.0005f
+    )
+
+    val progress: Float
+        get() = progressAnim.value.coerceIn(0f, 1f)
+
+    var targetOpen by mutableStateOf(false)
+        private set
+
+    var isDragging by mutableStateOf(false)
+        private set
+
+    val isVisible: Boolean by derivedStateOf {
+        progress > 0.001f || targetOpen || isDragging
+    }
+
+    val isSettledOpen: Boolean by derivedStateOf {
+        !isDragging && targetOpen && progress >= 0.994f
+    }
+
+    val isSettledClosed: Boolean by derivedStateOf {
+        !isDragging && !targetOpen && progress <= 0.002f
+    }
+
+    // Measured root-space layout bounds in the Lyrics compact header
+    var lyricsArtBounds by mutableStateOf(Rect.Zero)
+    var lyricsTextBounds by mutableStateOf(Rect.Zero)
+    var lyricsTitleBounds by mutableStateOf(Rect.Zero)
+    var lyricsArtistBounds by mutableStateOf(Rect.Zero)
+
+    private val openSpring = spring<Float>(
+        dampingRatio = 0.88f,
+        stiffness = 360f,
+        visibilityThreshold = 0.0005f
+    )
+
+    private val closeSpring = spring<Float>(
+        dampingRatio = 0.90f,
+        stiffness = 400f,
+        visibilityThreshold = 0.0005f
+    )
+
+    fun open(reducedMotion: Boolean = false) {
+        isDragging = false
+        targetOpen = true
+        scope.launch {
+            if (reducedMotion) {
+                progressAnim.snapTo(1f)
+            } else {
+                progressAnim.animateTo(1f, animationSpec = openSpring)
+            }
+        }
+    }
+
+    fun close(reducedMotion: Boolean = false) {
+        isDragging = false
+        targetOpen = false
+        scope.launch {
+            if (reducedMotion) {
+                progressAnim.snapTo(0f)
+            } else {
+                progressAnim.animateTo(0f, animationSpec = closeSpring)
+            }
+        }
+    }
+
+    fun onPredictiveBackDrag(backProgress: Float) {
+        isDragging = true
+        val mapped = (1f - backProgress.coerceIn(0f, 1f) * 0.72f).coerceIn(0.18f, 1f)
+        scope.launch {
+            progressAnim.snapTo(mapped)
+        }
+    }
+
+    fun snapClosed() {
+        isDragging = false
+        targetOpen = false
+        scope.launch {
+            progressAnim.snapTo(0f)
+        }
+    }
+}
+
+@Composable
+fun rememberLyricsTransitionState(): LyricsTransitionState {
+    val scope = rememberCoroutineScope()
+    return remember { LyricsTransitionState(scope = scope) }
+}

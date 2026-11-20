@@ -319,6 +319,14 @@ object GeekifyIcons {
         )
     }
 
+    val MoreVert: ImageVector by lazy {
+        filledVector(
+            name = "MoreVert",
+            evenOdd = true,
+            pathData = "M12 4.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm0 6a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm0 6a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z"
+        )
+    }
+
     val PlaylistAdd: ImageVector by lazy {
         strokedVector(
             name = "PlaylistAdd",

@@ -177,6 +177,7 @@ fun AdaptiveBottomBar(
     miniPlayerDismissed: Boolean,
     onDismissMiniPlayer: () -> Unit,
     onOpenExpandedPlayer: () -> Unit,
+    onOpenQueue: () -> Unit = {},
     onHome: () -> Unit,
     onSearch: () -> Unit,
     onLibrary: () -> Unit,
@@ -189,7 +190,7 @@ fun AdaptiveBottomBar(
     val navCust = LocalCustomizationState.current.navigation
 
     // Single authoritative ordered collection of enabled destinations
-    val orderedTabs: List<NavTabId> = remember(navCust.visibleTabs) {
+    val orderedTabs: List<NavTabId> = remember(navCust.tabOrder, navCust.hiddenTabs, navCust.visibleTabs) {
         navCust.safeVisibleTabs
     }
 
@@ -227,9 +228,16 @@ fun AdaptiveBottomBar(
         modifier = modifier.fillMaxWidth(),
         contentAlignment = Alignment.BottomCenter
     ) {
+        val compactFloatingWidth = when (orderedTabs.size) {
+            1 -> 132.dp
+            2 -> 228.dp
+            3 -> 320.dp
+            else -> 420.dp
+        }
+        val barMaxWidth = if (navCust.floatingNavBar) compactFloatingWidth else Dp.Unspecified
         Box(
             modifier = Modifier
-                .widthIn(max = 420.dp)
+                .then(if (navCust.floatingNavBar) Modifier.widthIn(max = barMaxWidth) else Modifier)
                 .fillMaxWidth()
                 .consumeTaps()
         ) {
@@ -335,7 +343,9 @@ fun AdaptiveBottomBar(
                                 isInline = false,
                                 transitionState = transitionState,
                                 onClick = onOpenExpandedPlayer,
-                                onDismiss = onDismissMiniPlayer
+                                onDismiss = onDismissMiniPlayer,
+                                onQueueClick = onOpenQueue,
+                                modifier = if (!navCust.floatingNavBar) Modifier.padding(horizontal = 12.dp) else Modifier
                             )
                         }
                         Box(
@@ -362,7 +372,8 @@ fun AdaptiveBottomBar(
                                 onCreate = onCreate,
                                 onSearch = onSearch,
                                 showLabels = navCust.showLabels,
-                                barHeight = barHeight
+                                barHeight = barHeight,
+                                floating = navCust.floatingNavBar
                             )
                         }
                     }
@@ -387,7 +398,8 @@ private fun MainTabCapsule(
     onSearch: () -> Unit,
     modifier: Modifier = Modifier,
     showLabels: Boolean = false,
-    barHeight: Dp = 64.dp
+    barHeight: Dp = 64.dp,
+    floating: Boolean = true
 ) {
     val activeTabs = orderedTabs.ifEmpty { listOf(NavTabId.HOME) }
 
@@ -402,11 +414,12 @@ private fun MainTabCapsule(
     val reduced = rememberReducedMotion()
     val pressed = remember { mutableStateOf(false) }
     val pressAnim by animateFloatAsState(if (pressed.value) 1f else 0f, label = "tabPress")
+    val barShape = if (floating) CircleShape else RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
 
     BoxWithConstraints(
         modifier = modifier
             .height(barHeight)
-            .liquidGlass(CircleShape, GlassStyle.Navigation, pressProgress = { pressAnim })
+            .liquidGlass(barShape, GlassStyle.Navigation, pressProgress = { pressAnim })
             .trackPress(pressed)
             .consumeTaps()
     ) {
@@ -430,6 +443,7 @@ private fun MainTabCapsule(
                 .padding(4.dp)
         ) {
             // Sliding glass indicator puck sized dynamically to 1 / tabCount of the bar
+            val isDarkTheme = com.geekify.android.ui.theme.ActiveThemePalette.isDark
             Box(
                 modifier = Modifier
                     .offset(x = indicatorX)
@@ -437,8 +451,15 @@ private fun MainTabCapsule(
                     .fillMaxHeight()
                     .graphicsLayer { alpha = indicatorAlpha }
                     .clip(RoundedCornerShape(28.dp))
-                    .background(Color(0xFF2E2E2E).copy(alpha = 0.75f))
-                    .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(28.dp))
+                    .background(
+                        if (isDarkTheme) Color(0xFF2E2E2E).copy(alpha = 0.75f)
+                        else Color(0xFF14131A).copy(alpha = 0.11f)
+                    )
+                    .border(
+                        1.dp,
+                        if (isDarkTheme) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.08f),
+                        RoundedCornerShape(28.dp)
+                    )
             )
 
             Row(
@@ -511,7 +532,7 @@ private fun TabItem(
     onClick: () -> Unit
 ) {
     val fg by animateColorAsState(
-        targetValue = if (selected) Lime else Color.White.copy(alpha = 0.85f),
+        targetValue = if (selected) Lime else com.geekify.android.ui.theme.TextPrimary.copy(alpha = 0.80f),
         animationSpec = tween(220),
         label = "tabFg"
     )

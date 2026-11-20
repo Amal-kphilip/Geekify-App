@@ -44,7 +44,18 @@ data class GlassConfig(
     val depthEffect: Boolean = false,
     val tintAlpha: Float = 0.12f,
     val miniPlayerGlass: Boolean = true,
-    val navBarGlass: Boolean = true
+    val navBarGlass: Boolean = true,
+    val tintMode: com.geekify.android.customization.GlassTintMode = com.geekify.android.customization.GlassTintMode.THEME,
+    val customTintArgb: Long = 0xFF171717,
+    val brightness: Float = 0f,
+    val cornerRadiusDp: Float = 26f,
+    val borderEnabled: Boolean = true,
+    val borderColorArgb: Long = 0xFFFFFFFF,
+    val borderOpacity: Float = 0.22f,
+    val borderThicknessDp: Float = 1.0f,
+    val shadowElevationDp: Float = 8f,
+    val noiseGrainAlpha: Float = 0f,
+    val qualityLevel: com.geekify.android.customization.GlassQualityLevel = com.geekify.android.customization.GlassQualityLevel.BALANCED
 )
 
 @Immutable
@@ -103,6 +114,17 @@ class AppSettingsRepository constructor(
         val KEY_GLASS_TINT_ALPHA = floatPreferencesKey("settings_glass_tint_alpha")
         val KEY_GLASS_MINI_PLAYER = booleanPreferencesKey("settings_glass_mini_player")
         val KEY_GLASS_NAV_BAR = booleanPreferencesKey("settings_glass_nav_bar")
+        val KEY_GLASS_TINT_MODE = stringPreferencesKey("settings_glass_tint_mode")
+        val KEY_GLASS_CUSTOM_TINT_ARGB = longPreferencesKey("settings_glass_custom_tint_argb")
+        val KEY_GLASS_BRIGHTNESS = floatPreferencesKey("settings_glass_brightness")
+        val KEY_GLASS_CORNER_RADIUS_DP = floatPreferencesKey("settings_glass_corner_radius_dp")
+        val KEY_GLASS_BORDER_ENABLED = booleanPreferencesKey("settings_glass_border_enabled")
+        val KEY_GLASS_BORDER_COLOR_ARGB = longPreferencesKey("settings_glass_border_color_argb")
+        val KEY_GLASS_BORDER_OPACITY = floatPreferencesKey("settings_glass_border_opacity")
+        val KEY_GLASS_BORDER_THICKNESS_DP = floatPreferencesKey("settings_glass_border_thickness_dp")
+        val KEY_GLASS_SHADOW_DP = floatPreferencesKey("settings_glass_shadow_dp")
+        val KEY_GLASS_NOISE_ALPHA = floatPreferencesKey("settings_glass_noise_alpha")
+        val KEY_GLASS_QUALITY = stringPreferencesKey("settings_glass_quality")
 
         val KEY_ASCII_ENABLED = booleanPreferencesKey("settings_ascii_enabled")
         val KEY_ASCII_ANIMAL_ID = stringPreferencesKey("settings_ascii_animal_id")
@@ -156,9 +178,24 @@ class AppSettingsRepository constructor(
                     lensHeightDp = (prefs[KEY_GLASS_LENS_HEIGHT_DP] ?: 14f).coerceIn(0f, 32f),
                     chromaticAberration = prefs[KEY_GLASS_CHROMATIC] ?: false,
                     depthEffect = prefs[KEY_GLASS_DEPTH] ?: false,
-                    tintAlpha = (prefs[KEY_GLASS_TINT_ALPHA] ?: 0.12f).coerceIn(0f, 0.60f),
+                    tintAlpha = (prefs[KEY_GLASS_TINT_ALPHA] ?: 0.12f).coerceIn(0f, 0.75f),
                     miniPlayerGlass = prefs[KEY_GLASS_MINI_PLAYER] ?: true,
-                    navBarGlass = prefs[KEY_GLASS_NAV_BAR] ?: true
+                    navBarGlass = prefs[KEY_GLASS_NAV_BAR] ?: true,
+                    tintMode = prefs[KEY_GLASS_TINT_MODE]?.let {
+                        runCatching { com.geekify.android.customization.GlassTintMode.valueOf(it) }.getOrNull()
+                    } ?: com.geekify.android.customization.GlassTintMode.THEME,
+                    customTintArgb = prefs[KEY_GLASS_CUSTOM_TINT_ARGB] ?: 0xFF171717,
+                    brightness = (prefs[KEY_GLASS_BRIGHTNESS] ?: 0f).coerceIn(-0.35f, 0.35f),
+                    cornerRadiusDp = (prefs[KEY_GLASS_CORNER_RADIUS_DP] ?: 26f).coerceIn(8f, 36f),
+                    borderEnabled = prefs[KEY_GLASS_BORDER_ENABLED] ?: true,
+                    borderColorArgb = prefs[KEY_GLASS_BORDER_COLOR_ARGB] ?: 0xFFFFFFFF,
+                    borderOpacity = (prefs[KEY_GLASS_BORDER_OPACITY] ?: 0.22f).coerceIn(0f, 0.85f),
+                    borderThicknessDp = (prefs[KEY_GLASS_BORDER_THICKNESS_DP] ?: 1.0f).coerceIn(0.5f, 3.0f),
+                    shadowElevationDp = (prefs[KEY_GLASS_SHADOW_DP] ?: 8f).coerceIn(0f, 24f),
+                    noiseGrainAlpha = (prefs[KEY_GLASS_NOISE_ALPHA] ?: 0f).coerceIn(0f, 0.25f),
+                    qualityLevel = prefs[KEY_GLASS_QUALITY]?.let {
+                        runCatching { com.geekify.android.customization.GlassQualityLevel.valueOf(it) }.getOrNull()
+                    } ?: com.geekify.android.customization.GlassQualityLevel.BALANCED
                 ),
                 ascii = AsciiBackgroundConfig(
                     enabled = prefs[KEY_ASCII_ENABLED] ?: true,

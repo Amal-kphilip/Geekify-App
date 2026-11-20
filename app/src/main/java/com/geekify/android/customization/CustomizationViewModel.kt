@@ -44,10 +44,23 @@ class CustomizationViewModel(
     }
 
     // ---- 1. Theme & Colors ----
+    fun setThemeMode(mode: ThemeMode) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_THEME_MODE] = mode.name
+            }
+        }
+    }
+
     fun setThemeVariant(variant: DarkThemeVariant) {
         viewModelScope.launch {
             settingsRepository.editCustomization {
                 it[CustomizationPersistence.KEY_THEME_VARIANT] = variant.name
+                if (variant == DarkThemeVariant.AMOLED_BLACK) {
+                    it[CustomizationPersistence.KEY_THEME_MODE] = ThemeMode.PURE_BLACK.name
+                } else {
+                    it[CustomizationPersistence.KEY_THEME_MODE] = ThemeMode.DARK.name
+                }
             }
         }
     }
@@ -56,6 +69,30 @@ class CustomizationViewModel(
         viewModelScope.launch {
             settingsRepository.editCustomization {
                 it[CustomizationPersistence.KEY_PALETTE_PRESET] = preset.name
+            }
+        }
+    }
+
+    fun setPaletteStyle(style: ThemePaletteStyle) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_PALETTE_STYLE] = style.name
+            }
+        }
+    }
+
+    fun setMaterialYouEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_MATERIAL_YOU] = enabled
+            }
+        }
+    }
+
+    fun setUiEnhancements(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_UI_ENHANCEMENTS] = enabled
             }
         }
     }
@@ -177,6 +214,37 @@ class CustomizationViewModel(
         viewModelScope.launch { settingsRepository.setGlassNavBar(enabled) }
     }
 
+    fun setGlassAppearance(
+        tintMode: GlassTintMode? = null,
+        customTintArgb: Long? = null,
+        brightness: Float? = null,
+        cornerRadiusDp: Float? = null,
+        borderEnabled: Boolean? = null,
+        borderColorArgb: Long? = null,
+        borderOpacity: Float? = null,
+        borderThicknessDp: Float? = null,
+        shadowElevationDp: Float? = null,
+        noiseGrainAlpha: Float? = null,
+        qualityLevel: GlassQualityLevel? = null
+    ) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization { prefs ->
+                prefs[CustomizationPersistence.KEY_GLASS_PRESET] = GlassPreset.CUSTOM.name
+                tintMode?.let { prefs[AppSettingsRepository.KEY_GLASS_TINT_MODE] = it.name }
+                customTintArgb?.let { prefs[AppSettingsRepository.KEY_GLASS_CUSTOM_TINT_ARGB] = it }
+                brightness?.let { prefs[AppSettingsRepository.KEY_GLASS_BRIGHTNESS] = it.coerceIn(-0.35f, 0.35f) }
+                cornerRadiusDp?.let { prefs[AppSettingsRepository.KEY_GLASS_CORNER_RADIUS_DP] = it.coerceIn(8f, 36f) }
+                borderEnabled?.let { prefs[AppSettingsRepository.KEY_GLASS_BORDER_ENABLED] = it }
+                borderColorArgb?.let { prefs[AppSettingsRepository.KEY_GLASS_BORDER_COLOR_ARGB] = it }
+                borderOpacity?.let { prefs[AppSettingsRepository.KEY_GLASS_BORDER_OPACITY] = it.coerceIn(0f, 0.85f) }
+                borderThicknessDp?.let { prefs[AppSettingsRepository.KEY_GLASS_BORDER_THICKNESS_DP] = it.coerceIn(0.5f, 3.0f) }
+                shadowElevationDp?.let { prefs[AppSettingsRepository.KEY_GLASS_SHADOW_DP] = it.coerceIn(0f, 24f) }
+                noiseGrainAlpha?.let { prefs[AppSettingsRepository.KEY_GLASS_NOISE_ALPHA] = it.coerceIn(0f, 0.25f) }
+                qualityLevel?.let { prefs[AppSettingsRepository.KEY_GLASS_QUALITY] = it.name }
+            }
+        }
+    }
+
     // ---- 3. ASCII Background ----
     fun setAsciiEnabled(enabled: Boolean) {
         viewModelScope.launch { settingsRepository.setAsciiEnabled(enabled) }
@@ -250,6 +318,15 @@ class CustomizationViewModel(
         }
     }
 
+    fun resetHomeSectionOrder() {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_HOME_SECTION_ORDER] =
+                    HomeSectionId.DEFAULT_ORDER.joinToString(",") { s -> s.name }
+            }
+        }
+    }
+
     fun setHomeLayoutMode(mode: HomeLayoutMode) {
         viewModelScope.launch {
             settingsRepository.editCustomization {
@@ -309,14 +386,24 @@ class CustomizationViewModel(
     // ---- 5. Navigation ----
     fun toggleNavTabVisible(tab: NavTabId, visible: Boolean) {
         viewModelScope.launch {
-            val current = appSettings.value.customization.navigation.visibleTabs.toMutableList()
+            val nav = appSettings.value.customization.navigation
+            val order = nav.normalizedTabOrder
+            val hidden = nav.hiddenTabs.toMutableSet()
             if (visible) {
-                if (tab !in current) current.add(tab)
+                hidden.remove(tab)
             } else {
-                current.remove(tab)
+                hidden.add(tab)
+                // Always keep at least one primary destination (Home or Library) enabled
+                val remaining = order.filter { it !in hidden }
+                if (remaining.none { it == NavTabId.HOME || it == NavTabId.LIBRARY }) {
+                    hidden.remove(tab)
+                    return@launch
+                }
             }
-            val safe = NavigationCustomizationConfig(visibleTabs = current).safeVisibleTabs
+            val safe = NavigationCustomizationConfig(tabOrder = order, hiddenTabs = hidden).safeVisibleTabs
             settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_NAV_TAB_ORDER] = order.joinToString(",") { t -> t.name }
+                it[CustomizationPersistence.KEY_NAV_HIDDEN_TABS] = hidden.joinToString(",") { t -> t.name }
                 it[CustomizationPersistence.KEY_NAV_VISIBLE_TABS] = safe.joinToString(",") { t -> t.name }
             }
         }
@@ -324,15 +411,30 @@ class CustomizationViewModel(
 
     fun moveNavTab(tab: NavTabId, direction: Int) {
         viewModelScope.launch {
-            val current = appSettings.value.customization.navigation.safeVisibleTabs.toMutableList()
-            val idx = current.indexOf(tab)
+            val nav = appSettings.value.customization.navigation
+            val order = nav.normalizedTabOrder.toMutableList()
+            val idx = order.indexOf(tab)
             if (idx < 0) return@launch
-            val targetIdx = (idx + direction).coerceIn(0, current.lastIndex)
+            val targetIdx = (idx + direction).coerceIn(0, order.lastIndex)
             if (idx == targetIdx) return@launch
-            current.removeAt(idx)
-            current.add(targetIdx, tab)
+            order.removeAt(idx)
+            order.add(targetIdx, tab)
+            val safe = NavigationCustomizationConfig(tabOrder = order, hiddenTabs = nav.hiddenTabs).safeVisibleTabs
             settingsRepository.editCustomization {
-                it[CustomizationPersistence.KEY_NAV_VISIBLE_TABS] = current.joinToString(",") { t -> t.name }
+                it[CustomizationPersistence.KEY_NAV_TAB_ORDER] = order.joinToString(",") { t -> t.name }
+                it[CustomizationPersistence.KEY_NAV_VISIBLE_TABS] = safe.joinToString(",") { t -> t.name }
+            }
+        }
+    }
+
+    fun resetNavTabOrder() {
+        viewModelScope.launch {
+            val nav = appSettings.value.customization.navigation
+            val order = NavTabId.DEFAULT_TABS
+            val safe = NavigationCustomizationConfig(tabOrder = order, hiddenTabs = nav.hiddenTabs).safeVisibleTabs
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_NAV_TAB_ORDER] = order.joinToString(",") { t -> t.name }
+                it[CustomizationPersistence.KEY_NAV_VISIBLE_TABS] = safe.joinToString(",") { t -> t.name }
             }
         }
     }
@@ -349,6 +451,22 @@ class CustomizationViewModel(
         viewModelScope.launch {
             settingsRepository.editCustomization {
                 it[CustomizationPersistence.KEY_NAV_SHOW_LABELS] = show
+            }
+        }
+    }
+
+    fun setNavFloating(floating: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_NAV_FLOATING] = floating
+            }
+        }
+    }
+
+    fun setNavFloatingTopBar(floating: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_NAV_FLOATING_TOP_BAR] = floating
             }
         }
     }
@@ -386,6 +504,36 @@ class CustomizationViewModel(
         }
     }
 
+    fun setPlayerArtworkCropMode(mode: PlayerArtworkCropMode) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_PLAYER_ARTWORK_CROP_MODE] = mode.name
+            }
+        }
+    }
+
+    fun setPlayerArtworkPresentation(presentation: PlayerArtworkPresentation) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_PLAYER_ARTWORK_PRESENTATION] = presentation.name
+            }
+        }
+    }
+
+    fun setPlayerArtworkOptions(
+        transitions: Boolean? = null,
+        animatedArtwork: Boolean? = null,
+        disableOnMobileData: Boolean? = null
+    ) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization { prefs ->
+                transitions?.let { prefs[CustomizationPersistence.KEY_PLAYER_ARTWORK_TRANSITIONS] = it }
+                animatedArtwork?.let { prefs[CustomizationPersistence.KEY_PLAYER_ANIMATED_ARTWORK] = it }
+                disableOnMobileData?.let { prefs[CustomizationPersistence.KEY_PLAYER_DISABLE_ANIM_ARTWORK_CELLULAR] = it }
+            }
+        }
+    }
+
     fun setPlayerBackgroundStyle(style: PlayerBackgroundStyle) {
         viewModelScope.launch {
             settingsRepository.editCustomization {
@@ -398,6 +546,112 @@ class CustomizationViewModel(
         viewModelScope.launch {
             settingsRepository.editCustomization {
                 it[CustomizationPersistence.KEY_PLAYER_PROGRESS_STYLE] = style.name
+                it[CustomizationPersistence.KEY_SEEKBAR_STYLE] = style.name
+            }
+        }
+    }
+
+    fun setPlayerProgressHeightDp(dp: Float) {
+        viewModelScope.launch {
+            val clamped = dp.coerceIn(2f, 12f)
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_PLAYER_PROGRESS_HEIGHT] = clamped
+                it[CustomizationPersistence.KEY_SEEKBAR_THICKNESS_DP] = clamped
+            }
+        }
+    }
+
+    fun setSeekbarThumbStyle(style: SeekbarThumbStyle) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_SEEKBAR_THUMB_STYLE] = style.name
+            }
+        }
+    }
+
+    fun setSeekbarGradientPreset(preset: SeekbarGradientPreset) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_SEEKBAR_GRADIENT_PRESET] = preset.name
+            }
+        }
+    }
+
+    fun setSeekbarNumeric(
+        thumbSizeDp: Float? = null,
+        thicknessDp: Float? = null,
+        cornerRadiusDp: Float? = null,
+        inactiveAlpha: Float? = null,
+        waveAmplitudeDp: Float? = null,
+        waveFrequency: Float? = null,
+        animationIntensity: Float? = null,
+        glowIntensity: Float? = null,
+        waveSpeed: Float? = null,
+        timeLabelScale: Float? = null,
+        touchTargetHeightDp: Float? = null
+    ) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization { prefs ->
+                thumbSizeDp?.let { prefs[CustomizationPersistence.KEY_SEEKBAR_THUMB_SIZE_DP] = it.coerceIn(6f, 24f) }
+                thicknessDp?.let {
+                    val v = it.coerceIn(2f, 12f)
+                    prefs[CustomizationPersistence.KEY_SEEKBAR_THICKNESS_DP] = v
+                    prefs[CustomizationPersistence.KEY_PLAYER_PROGRESS_HEIGHT] = v
+                }
+                cornerRadiusDp?.let { prefs[CustomizationPersistence.KEY_SEEKBAR_CORNER_RADIUS_DP] = it.coerceIn(0f, 12f) }
+                inactiveAlpha?.let { prefs[CustomizationPersistence.KEY_SEEKBAR_INACTIVE_ALPHA] = it.coerceIn(0.08f, 0.60f) }
+                waveAmplitudeDp?.let { prefs[CustomizationPersistence.KEY_SEEKBAR_WAVE_AMP] = it.coerceIn(1f, 10f) }
+                waveFrequency?.let { prefs[CustomizationPersistence.KEY_SEEKBAR_WAVE_FREQ] = it.coerceIn(0.5f, 2.0f) }
+                animationIntensity?.let { prefs[CustomizationPersistence.KEY_SEEKBAR_ANIM_INTENSITY] = it.coerceIn(0.3f, 1.8f) }
+                glowIntensity?.let { prefs[CustomizationPersistence.KEY_SEEKBAR_GLOW_INTENSITY] = it.coerceIn(0.1f, 1.0f) }
+                waveSpeed?.let { prefs[CustomizationPersistence.KEY_SEEKBAR_WAVE_SPEED] = it.coerceIn(0.4f, 2.2f) }
+                timeLabelScale?.let { prefs[CustomizationPersistence.KEY_SEEKBAR_TIME_SCALE] = it.coerceIn(0.85f, 1.25f) }
+                touchTargetHeightDp?.let { prefs[CustomizationPersistence.KEY_SEEKBAR_TOUCH_HEIGHT] = it.coerceIn(28f, 56f) }
+            }
+        }
+    }
+
+    fun setSeekbarColors(
+        useCustomActive: Boolean? = null,
+        customActiveArgb: Long? = null,
+        useCustomThumb: Boolean? = null,
+        customThumbArgb: Long? = null
+    ) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization { prefs ->
+                useCustomActive?.let { prefs[CustomizationPersistence.KEY_SEEKBAR_USE_CUSTOM_ACTIVE] = it }
+                customActiveArgb?.let {
+                    prefs[CustomizationPersistence.KEY_SEEKBAR_USE_CUSTOM_ACTIVE] = true
+                    prefs[CustomizationPersistence.KEY_SEEKBAR_CUSTOM_ACTIVE_ARGB] = it
+                }
+                useCustomThumb?.let { prefs[CustomizationPersistence.KEY_SEEKBAR_USE_CUSTOM_THUMB] = it }
+                customThumbArgb?.let {
+                    prefs[CustomizationPersistence.KEY_SEEKBAR_USE_CUSTOM_THUMB] = true
+                    prefs[CustomizationPersistence.KEY_SEEKBAR_CUSTOM_THUMB_ARGB] = it
+                }
+            }
+        }
+    }
+
+    fun setSeekbarToggles(
+        gradientEnabled: Boolean? = null,
+        animationsEnabled: Boolean? = null,
+        waveAnimationEnabled: Boolean? = null,
+        hapticFeedback: Boolean? = null,
+        showElapsedTime: Boolean? = null,
+        showRemainingTime: Boolean? = null
+    ) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization { prefs ->
+                gradientEnabled?.let { prefs[CustomizationPersistence.KEY_SEEKBAR_GRADIENT_ENABLED] = it }
+                animationsEnabled?.let { prefs[CustomizationPersistence.KEY_SEEKBAR_ANIM_ENABLED] = it }
+                waveAnimationEnabled?.let { prefs[CustomizationPersistence.KEY_SEEKBAR_WAVE_ANIM] = it }
+                hapticFeedback?.let { prefs[CustomizationPersistence.KEY_SEEKBAR_HAPTICS] = it }
+                showElapsedTime?.let { prefs[CustomizationPersistence.KEY_SEEKBAR_SHOW_ELAPSED] = it }
+                showRemainingTime?.let {
+                    prefs[CustomizationPersistence.KEY_SEEKBAR_SHOW_REMAINING] = it
+                    prefs[CustomizationPersistence.KEY_PLAYER_SHOW_REMAINING] = it
+                }
             }
         }
     }
@@ -419,7 +673,10 @@ class CustomizationViewModel(
         showShuffle: Boolean? = null,
         showRepeat: Boolean? = null,
         showQueue: Boolean? = null,
-        compactControls: Boolean? = null
+        compactControls: Boolean? = null,
+        immersivePlayer: Boolean? = null,
+        showAlbumMetadata: Boolean? = null,
+        showRemainingTime: Boolean? = null
     ) {
         viewModelScope.launch {
             settingsRepository.editCustomization { prefs ->
@@ -432,6 +689,9 @@ class CustomizationViewModel(
                 showRepeat?.let { prefs[CustomizationPersistence.KEY_PLAYER_SHOW_REPEAT] = it }
                 showQueue?.let { prefs[CustomizationPersistence.KEY_PLAYER_SHOW_QUEUE] = it }
                 compactControls?.let { prefs[CustomizationPersistence.KEY_PLAYER_COMPACT_CONTROLS] = it }
+                immersivePlayer?.let { prefs[CustomizationPersistence.KEY_PLAYER_IMMERSIVE] = it }
+                showAlbumMetadata?.let { prefs[CustomizationPersistence.KEY_PLAYER_SHOW_ALBUM_META] = it }
+                showRemainingTime?.let { prefs[CustomizationPersistence.KEY_PLAYER_SHOW_REMAINING] = it }
             }
         }
     }
@@ -445,10 +705,26 @@ class CustomizationViewModel(
         }
     }
 
+    fun setMiniPlayerBackgroundStyle(style: MiniPlayerBackgroundStyle) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_MINI_BG_STYLE] = style.name
+            }
+        }
+    }
+
     fun setMiniPlayerArtworkShape(shape: MiniPlayerArtworkShape) {
         viewModelScope.launch {
             settingsRepository.editCustomization {
                 it[CustomizationPersistence.KEY_MINI_ARTWORK_SHAPE] = shape.name
+            }
+        }
+    }
+
+    fun setMiniPlayerArtworkSizeDp(dp: Int) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_MINI_ARTWORK_SIZE_DP] = dp.coerceIn(32, 56)
             }
         }
     }
@@ -469,22 +745,60 @@ class CustomizationViewModel(
         }
     }
 
+    fun setMiniPlayerHorizontalPaddingDp(dp: Int) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_MINI_H_PADDING_DP] = dp.coerceIn(4, 20)
+            }
+        }
+    }
+
+    fun setMiniPlayerSurfaceAlpha(alpha: Float) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_MINI_SURFACE_ALPHA] = alpha.coerceIn(0.30f, 1.0f)
+            }
+        }
+    }
+
+    fun setMiniPlayerElevationDp(dp: Int) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_MINI_ELEVATION_DP] = dp.coerceIn(0, 16)
+            }
+        }
+    }
+
     fun setMiniPlayerToggles(
         showArtwork: Boolean? = null,
         showPrevious: Boolean? = null,
+        showPlayPause: Boolean? = null,
         showNext: Boolean? = null,
         showLike: Boolean? = null,
         showShuffle: Boolean? = null,
-        showProgress: Boolean? = null
+        showQueue: Boolean? = null,
+        showProgress: Boolean? = null,
+        glassEffect: Boolean? = null,
+        expressiveCookieArtwork: Boolean? = null,
+        expressiveShapeMotion: Boolean? = null,
+        expressiveProgressRing: Boolean? = null,
+        expressiveArtworkPlaybackTap: Boolean? = null
     ) {
         viewModelScope.launch {
             settingsRepository.editCustomization { prefs ->
                 showArtwork?.let { prefs[CustomizationPersistence.KEY_MINI_SHOW_ARTWORK] = it }
                 showPrevious?.let { prefs[CustomizationPersistence.KEY_MINI_SHOW_PREV] = it }
+                showPlayPause?.let { prefs[CustomizationPersistence.KEY_MINI_SHOW_PLAY_PAUSE] = it }
                 showNext?.let { prefs[CustomizationPersistence.KEY_MINI_SHOW_NEXT] = it }
                 showLike?.let { prefs[CustomizationPersistence.KEY_MINI_SHOW_LIKE] = it }
                 showShuffle?.let { prefs[CustomizationPersistence.KEY_MINI_SHOW_SHUFFLE] = it }
+                showQueue?.let { prefs[CustomizationPersistence.KEY_MINI_SHOW_QUEUE] = it }
                 showProgress?.let { prefs[CustomizationPersistence.KEY_MINI_SHOW_PROGRESS] = it }
+                glassEffect?.let { prefs[CustomizationPersistence.KEY_MINI_GLASS_EFFECT] = it }
+                expressiveCookieArtwork?.let { prefs[CustomizationPersistence.KEY_MINI_EXPRESSIVE_COOKIE] = it }
+                expressiveShapeMotion?.let { prefs[CustomizationPersistence.KEY_MINI_EXPRESSIVE_MOTION] = it }
+                expressiveProgressRing?.let { prefs[CustomizationPersistence.KEY_MINI_EXPRESSIVE_RING] = it }
+                expressiveArtworkPlaybackTap?.let { prefs[CustomizationPersistence.KEY_MINI_EXPRESSIVE_ART_PLAY] = it }
             }
         }
     }
@@ -496,7 +810,10 @@ class CustomizationViewModel(
         swipeToDismissMini: Boolean? = null,
         swipeToRemoveQueue: Boolean? = null,
         haptics: Boolean? = null,
-        sensitivity: Float? = null
+        sensitivity: Float? = null,
+        artworkDoubleTapSkipEnabled: Boolean? = null,
+        artworkSkipDurationSeconds: Int? = null,
+        artworkProgressiveSkipEnabled: Boolean? = null
     ) {
         viewModelScope.launch {
             settingsRepository.editCustomization { prefs ->
@@ -506,6 +823,12 @@ class CustomizationViewModel(
                 swipeToRemoveQueue?.let { prefs[CustomizationPersistence.KEY_GESTURE_REMOVE_QUEUE] = it }
                 haptics?.let { prefs[CustomizationPersistence.KEY_GESTURE_HAPTICS] = it }
                 sensitivity?.let { prefs[CustomizationPersistence.KEY_GESTURE_SENSITIVITY] = it.coerceIn(0.6f, 1.5f) }
+                artworkDoubleTapSkipEnabled?.let { prefs[CustomizationPersistence.KEY_GESTURE_ARTWORK_DOUBLE_TAP_SKIP] = it }
+                artworkSkipDurationSeconds?.let {
+                    prefs[CustomizationPersistence.KEY_GESTURE_ARTWORK_SKIP_DURATION_SEC] =
+                        GestureCustomizationConfig.normalizeSkipDurationSeconds(it)
+                }
+                artworkProgressiveSkipEnabled?.let { prefs[CustomizationPersistence.KEY_GESTURE_ARTWORK_PROGRESSIVE_SKIP] = it }
             }
         }
     }
@@ -547,6 +870,29 @@ class CustomizationViewModel(
         viewModelScope.launch {
             settingsRepository.editCustomization {
                 it[CustomizationPersistence.KEY_TYPO_DENSITY_MODE] = mode.name
+                it[CustomizationPersistence.KEY_TYPO_DISPLAY_DENSITY] = DisplayDensityScale.fromLegacy(mode).name
+            }
+        }
+    }
+
+    fun setDisplayDensity(scale: DisplayDensityScale) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_TYPO_DISPLAY_DENSITY] = scale.name
+                val legacy = when {
+                    scale.scaleFactor < 0.95f -> UiDensityMode.COMPACT
+                    scale.scaleFactor > 1.06f -> UiDensityMode.SPACIOUS
+                    else -> UiDensityMode.COMFORTABLE
+                }
+                it[CustomizationPersistence.KEY_TYPO_DENSITY_MODE] = legacy.name
+            }
+        }
+    }
+
+    fun setLandscapeScaling(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_TYPO_LANDSCAPE_SCALING] = enabled
             }
         }
     }
@@ -563,7 +909,15 @@ class CustomizationViewModel(
     fun setLyricsLineSpacing(multiplier: Float) {
         viewModelScope.launch {
             settingsRepository.editCustomization {
-                it[CustomizationPersistence.KEY_LYRICS_LINE_SPACING] = multiplier.coerceIn(1.1f, 1.8f)
+                it[CustomizationPersistence.KEY_LYRICS_LINE_SPACING] = multiplier.coerceIn(1.1f, 2.2f)
+            }
+        }
+    }
+
+    fun setLyricsSubtitleFontSizeSp(sizeSp: Float) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_LYRICS_SUBTITLE_FONT_SIZE_SP] = sizeSp.coerceIn(10f, 28f)
             }
         }
     }
@@ -576,18 +930,66 @@ class CustomizationViewModel(
         }
     }
 
+    fun setLyricsActiveAlignment(alignment: LyricsTextAlignment) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_LYRICS_ACTIVE_ALIGNMENT] = alignment.name
+            }
+        }
+    }
+
+    fun setLyricsAnimationStyle(style: LyricsAnimationStyle) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_LYRICS_ANIMATION_STYLE] = style.name
+            }
+        }
+    }
+
+    fun setLyricsGlobalOffsetMs(offsetMs: Long) {
+        viewModelScope.launch {
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_LYRICS_GLOBAL_OFFSET_MS] = offsetMs.coerceIn(-5_000L, 5_000L)
+            }
+        }
+    }
+
     fun setLyricsToggles(
+        showOriginal: Boolean? = null,
         showRomanization: Boolean? = null,
         showTranslation: Boolean? = null,
         wordHighlight: Boolean? = null,
-        accentColor: Boolean? = null
+        accentColor: Boolean? = null,
+        neutralColor: Boolean? = null,
+        respectProviderPositioning: Boolean? = null,
+        autoScroll: Boolean? = null,
+        tapToSeek: Boolean? = null,
+        preferWordSynced: Boolean? = null,
+        activeByRealTiming: Boolean? = null,
+        showLyricsOnPlayer: Boolean? = null,
+        hideStatusBarInFullscreen: Boolean? = null,
+        progressiveBlur: Boolean? = null,
+        plusLighterBlend: Boolean? = null,
+        fullscreenDefault: Boolean? = null
     ) {
         viewModelScope.launch {
             settingsRepository.editCustomization { prefs ->
+                showOriginal?.let { prefs[CustomizationPersistence.KEY_LYRICS_SHOW_ORIGINAL] = it }
                 showRomanization?.let { prefs[CustomizationPersistence.KEY_LYRICS_SHOW_ROMANIZATION] = it }
                 showTranslation?.let { prefs[CustomizationPersistence.KEY_LYRICS_SHOW_TRANSLATION] = it }
                 wordHighlight?.let { prefs[CustomizationPersistence.KEY_LYRICS_WORD_HIGHLIGHT] = it }
                 accentColor?.let { prefs[CustomizationPersistence.KEY_LYRICS_ACCENT_COLOR] = it }
+                neutralColor?.let { prefs[CustomizationPersistence.KEY_LYRICS_NEUTRAL_COLOR] = it }
+                respectProviderPositioning?.let { prefs[CustomizationPersistence.KEY_LYRICS_RESPECT_PROVIDER_POS] = it }
+                autoScroll?.let { prefs[CustomizationPersistence.KEY_LYRICS_AUTO_SCROLL] = it }
+                tapToSeek?.let { prefs[CustomizationPersistence.KEY_LYRICS_TAP_TO_SEEK] = it }
+                preferWordSynced?.let { prefs[CustomizationPersistence.KEY_LYRICS_PREFER_WORD_SYNC] = it }
+                activeByRealTiming?.let { prefs[CustomizationPersistence.KEY_LYRICS_REAL_TIMING] = it }
+                showLyricsOnPlayer?.let { prefs[CustomizationPersistence.KEY_LYRICS_SHOW_ON_PLAYER] = it }
+                hideStatusBarInFullscreen?.let { prefs[CustomizationPersistence.KEY_LYRICS_HIDE_STATUS_BAR] = it }
+                progressiveBlur?.let { prefs[CustomizationPersistence.KEY_LYRICS_PROGRESSIVE_BLUR] = it }
+                plusLighterBlend?.let { prefs[CustomizationPersistence.KEY_LYRICS_PLUS_LIGHTER] = it }
+                fullscreenDefault?.let { prefs[CustomizationPersistence.KEY_LYRICS_FULLSCREEN_DEFAULT] = it }
             }
         }
     }

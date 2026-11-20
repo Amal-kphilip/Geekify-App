@@ -261,21 +261,43 @@ fun Modifier.liquidGlass(
         GlassRole.Preview, GlassRole.Overlay, GlassRole.Panel -> glassConfig.enabled
     }
 
-    val isThrottled = isBatterySaverOrThrottled()
+    val isDarkTheme = com.geekify.android.ui.theme.ActiveThemePalette.isDark
+    val resolvedTintColor = when (glassConfig.tintMode) {
+        com.geekify.android.customization.GlassTintMode.THEME ->
+            if (isDarkTheme) style.tint else Color(0xFFF6F7FC)
+        com.geekify.android.customization.GlassTintMode.ACCENT ->
+            com.geekify.android.ui.theme.Lime
+        com.geekify.android.customization.GlassTintMode.CUSTOM ->
+            Color(glassConfig.customTintArgb)
+    }
+    val resolvedBorderColor = Color(glassConfig.borderColorArgb)
+    val resolvedBorderAlpha = if (glassConfig.borderEnabled) glassConfig.borderOpacity.coerceIn(0f, 0.85f) else 0f
+    val resolvedBorderThicknessDp = glassConfig.borderThicknessDp.coerceIn(0.5f, 3.0f).dp
+    val resolvedBrightness = glassConfig.brightness.coerceIn(-0.35f, 0.35f)
+    val resolvedNoiseAlpha = glassConfig.noiseGrainAlpha.coerceIn(0f, 0.25f)
+
+    val isThrottled = isBatterySaverOrThrottled() ||
+        glassConfig.qualityLevel == com.geekify.android.customization.GlassQualityLevel.BATTERY_SAVER
     val baseStyle = if (isFloatingOrNav) {
         style.copy(
             blur = glassConfig.blurDp.dp,
+            tint = resolvedTintColor,
             saturation = glassConfig.saturation,
             lensAmount = glassConfig.lensAmountDp.dp,
             lensHeight = glassConfig.lensHeightDp.dp,
             chromaticAberration = glassConfig.chromaticAberration,
             depthEffect = glassConfig.depthEffect,
-            tintAlpha = glassConfig.tintAlpha
+            tintAlpha = glassConfig.tintAlpha.coerceIn(0f, 0.75f),
+            rimAlpha = resolvedBorderAlpha,
+            shadowRadius = glassConfig.shadowElevationDp.coerceIn(0f, 24f).dp
         )
     } else {
         style.copy(
+            tint = resolvedTintColor,
             chromaticAberration = glassConfig.chromaticAberration,
-            depthEffect = glassConfig.depthEffect
+            depthEffect = glassConfig.depthEffect,
+            rimAlpha = resolvedBorderAlpha,
+            shadowRadius = glassConfig.shadowElevationDp.coerceIn(0f, 24f).dp
         )
     }
     // Under battery saver or high thermal pressure, degrade expensive secondary GPU passes
@@ -324,32 +346,59 @@ fun Modifier.liquidGlass(
                 }
             }
             .clip(shape)
-            .background(effectiveStyle.tint.copy(alpha = if (!componentGlassEnabled) 0.88f else if (backdrop == null) 0.35f else (effectiveStyle.tintAlpha + 0.20f).coerceIn(0.15f, 0.40f)))
+            .background(effectiveStyle.tint.copy(alpha = if (!componentGlassEnabled) 0.90f else if (backdrop == null) (effectiveStyle.tintAlpha + 0.30f).coerceIn(0.18f, 0.85f) else (effectiveStyle.tintAlpha + 0.18f).coerceIn(0.14f, 0.80f)))
             .drawWithContent {
                 val press = pressProgress().coerceIn(0f, 1f)
                 if (dim > 0f) drawRect(Color.Black.copy(alpha = dim))
                 if (effectiveStyle.frost > 0f) drawRect(Color.White.copy(alpha = effectiveStyle.frost))
+                if (resolvedBrightness > 0.005f) {
+                    drawRect(Color.White.copy(alpha = resolvedBrightness))
+                } else if (resolvedBrightness < -0.005f) {
+                    drawRect(Color.Black.copy(alpha = -resolvedBrightness))
+                }
+                if (resolvedNoiseAlpha > 0.005f) {
+                    // Subtle deterministic acrylic grain overlay
+                    val step = 6.dp.toPx().coerceAtLeast(4f)
+                    var y = 0f
+                    var row = 0
+                    while (y < size.height) {
+                        var x = (row % 2) * (step * 0.5f)
+                        while (x < size.width) {
+                            val lightDot = ((row * 31 + x.toInt()) % 3) == 0
+                            drawCircle(
+                                color = (if (lightDot) Color.White else Color.Black).copy(alpha = resolvedNoiseAlpha * 0.45f),
+                                radius = 0.75f,
+                                center = Offset(x, y)
+                            )
+                            x += step
+                        }
+                        y += step
+                        row++
+                    }
+                }
                 drawRect(
                     Brush.verticalGradient(
-                        0f to Color.White.copy(alpha = 0.10f),
+                        0f to Color.White.copy(alpha = if (isDarkTheme) 0.10f else 0.18f),
                         0.45f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = 0.10f)
+                        1f to Color.Black.copy(alpha = if (isDarkTheme) 0.10f else 0.05f)
                     )
                 )
                 if (press > 0f) drawRect(Color.White.copy(alpha = 0.05f * press))
                 drawContent()
 
-                // Rim light
-                val outline = shape.createOutline(size, layoutDirection, this)
-                val rim = Brush.linearGradient(
-                    0f to Color.White.copy(alpha = effectiveStyle.rimAlpha + 0.18f * press),
-                    0.35f to Color.White.copy(alpha = 0.07f),
-                    0.70f to Color.White.copy(alpha = 0.05f),
-                    1f to Color.White.copy(alpha = effectiveStyle.rimAlpha * 0.55f),
-                    start = Offset.Zero,
-                    end = Offset(size.width, size.height)
-                )
-                drawOutline(outline, rim, style = Stroke(width = 2.4.dp.toPx()))
+                // Customizable Acrylic / Glass border rim
+                if (resolvedBorderAlpha > 0.005f) {
+                    val outline = shape.createOutline(size, layoutDirection, this)
+                    val rim = Brush.linearGradient(
+                        0f to resolvedBorderColor.copy(alpha = (resolvedBorderAlpha + 0.18f * press).coerceIn(0f, 1f)),
+                        0.35f to resolvedBorderColor.copy(alpha = resolvedBorderAlpha * 0.28f),
+                        0.70f to resolvedBorderColor.copy(alpha = resolvedBorderAlpha * 0.20f),
+                        1f to resolvedBorderColor.copy(alpha = resolvedBorderAlpha * 0.65f),
+                        start = Offset.Zero,
+                        end = Offset(size.width, size.height)
+                    )
+                    drawOutline(outline, rim, style = Stroke(width = resolvedBorderThicknessDp.toPx()))
+                }
             }
     }
 
@@ -388,35 +437,67 @@ fun Modifier.liquidGlass(
         }
     }
 
-    val highlightBlock: () -> Highlight? = remember(effectiveStyle.rimAlpha, pressProgress) {
+    val highlightBlock: () -> Highlight? = remember(effectiveStyle.rimAlpha, resolvedBorderColor, resolvedBorderThicknessDp, pressProgress) {
         {
-            val press = pressProgress().coerceIn(0f, 1f)
-            Highlight(
-                width = EdgeHighlightWidth,
-                style = HighlightStyle.Default(
-                    color = Color.White.copy(alpha = (effectiveStyle.rimAlpha * 0.6f + 0.18f * press).coerceIn(0f, 1f)),
-                    angle = HighlightAngleFrozen
+            if (effectiveStyle.rimAlpha <= 0.005f) {
+                null
+            } else {
+                val press = pressProgress().coerceIn(0f, 1f)
+                Highlight(
+                    width = resolvedBorderThicknessDp,
+                    style = HighlightStyle.Default(
+                        color = resolvedBorderColor.copy(alpha = (effectiveStyle.rimAlpha * 0.75f + 0.18f * press).coerceIn(0f, 1f)),
+                        angle = HighlightAngleFrozen
+                    )
                 )
-            )
+            }
         }
     }
 
     val shadowBlock: () -> Shadow? = remember(effectiveStyle.shadowRadius, effectiveStyle.shadowAlpha) {
         {
-            Shadow(
-                radius = effectiveStyle.shadowRadius,
-                color = Color.Black.copy(alpha = effectiveStyle.shadowAlpha)
-            )
+            if (effectiveStyle.shadowRadius <= 0.5.dp) {
+                null
+            } else {
+                Shadow(
+                    radius = effectiveStyle.shadowRadius,
+                    color = Color.Black.copy(alpha = effectiveStyle.shadowAlpha)
+                )
+            }
         }
     }
 
-    val surfaceBlock: DrawScope.() -> Unit = remember(effectiveStyle, dim, pressProgress) {
+    val surfaceBlock: DrawScope.() -> Unit = remember(effectiveStyle, dim, resolvedBrightness, resolvedNoiseAlpha, pressProgress) {
         {
             val press = pressProgress().coerceIn(0f, 1f)
             if (dim > 0f) drawRect(Color.Black.copy(alpha = dim))
             if (effectiveStyle.frost > 0f) drawRect(Color.White.copy(alpha = effectiveStyle.frost))
             if (effectiveStyle.tintAlpha > 0f) {
                 drawRect(effectiveStyle.tint.copy(alpha = effectiveStyle.tintAlpha))
+            }
+            if (resolvedBrightness > 0.005f) {
+                drawRect(Color.White.copy(alpha = resolvedBrightness))
+            } else if (resolvedBrightness < -0.005f) {
+                drawRect(Color.Black.copy(alpha = -resolvedBrightness))
+            }
+            if (resolvedNoiseAlpha > 0.005f) {
+                val step = 6.dp.toPx().coerceAtLeast(4f)
+                var y = 0f
+                var row = 0
+                while (y < size.height) {
+                    var x = (row % 2) * (step * 0.5f)
+                    while (x < size.width) {
+                        val lightDot = ((row * 31 + x.toInt()) % 3) == 0
+                        drawCircle(
+                            color = (if (lightDot) Color.White else Color.Black).copy(alpha = resolvedNoiseAlpha * 0.45f),
+                            radius = 0.75f,
+                            center = Offset(x, y)
+                        )
+                        x += step
+                    }
+                    y += step
+                    row++
+                }
             }
             if (press > 0f) drawRect(Color.White.copy(alpha = 0.05f * press))
         }
