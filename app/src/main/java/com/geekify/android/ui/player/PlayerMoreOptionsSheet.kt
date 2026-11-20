@@ -101,12 +101,17 @@ fun PlayerMoreOptionsSheet(
     val isDisliked by viewModel.isCurrentDisliked.collectAsStateWithLifecycle()
     val playlists by libraryViewModel.playlists.collectAsState()
     val downloadManager: SongDownloadManager = koinInject()
+    val feedbackRepository: com.geekify.android.domain.recommend.RecommendationFeedbackRepository = koinInject()
     val allDownloads by downloadManager.downloads.collectAsState(initial = emptyList())
 
     val track = state.current ?: run {
         onDismiss()
         return
     }
+    val activeTrackFeedback by remember(track.videoId) {
+        feedbackRepository.observeTrackFeedbackAction(track.videoId)
+    }.collectAsState(initial = null)
+    var feedbackSubmissionInFlight by remember(track.videoId) { mutableStateOf(false) }
     val currentDownload = remember(allDownloads, track.videoId) {
         allDownloads.firstOrNull { it.videoId == track.videoId }
     }
@@ -338,10 +343,78 @@ fun PlayerMoreOptionsSheet(
 
                         // 5. Offline & Feedback Section
                         item {
+                            val isMoreLikeSelected = activeTrackFeedback == com.geekify.android.data.local.FeedbackAction.MORE_LIKE_THIS
+                            val isLessLikeSelected = activeTrackFeedback == com.geekify.android.data.local.FeedbackAction.LESS_LIKE_THIS
                             GeekifySectionCard(
                                 header = "OFFLINE & PREFERENCES",
                                 accentColor = accentColor,
                                 actions = buildList {
+                                    add(
+                                        MenuActionItem(
+                                            icon = GeekifyIcons.AutoAwesome,
+                                            title = "More Like This",
+                                            description = if (isMoreLikeSelected) {
+                                                "Boosting similar artists & style in your recommendations"
+                                            } else {
+                                                "Tune recommendations toward this track's style"
+                                            },
+                                            tint = if (isMoreLikeSelected) accentColor else null,
+                                            badgeText = if (isMoreLikeSelected) "Active" else null,
+                                            onClick = {
+                                                if (feedbackSubmissionInFlight) return@MenuActionItem
+                                                feedbackSubmissionInFlight = true
+                                                scope.launch {
+                                                    try {
+                                                        val updated = feedbackRepository.toggleTrackFeedback(
+                                                            track = track,
+                                                            action = com.geekify.android.data.local.FeedbackAction.MORE_LIKE_THIS
+                                                        )
+                                                        val msg = if (updated != null) {
+                                                            "Got it — recommending more like \"${track.title}\""
+                                                        } else {
+                                                            "Removed \"More Like This\" preference"
+                                                        }
+                                                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                                    } finally {
+                                                        feedbackSubmissionInFlight = false
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    )
+                                    add(
+                                        MenuActionItem(
+                                            icon = GeekifyIcons.Sliders,
+                                            title = "Less Like This",
+                                            description = if (isLessLikeSelected) {
+                                                "Showing fewer tracks like this in your recommendations"
+                                            } else {
+                                                "Reduce similar recommendations without blocking this language"
+                                            },
+                                            tint = if (isLessLikeSelected) Color(0xFFF87171) else null,
+                                            badgeText = if (isLessLikeSelected) "Active" else null,
+                                            onClick = {
+                                                if (feedbackSubmissionInFlight) return@MenuActionItem
+                                                feedbackSubmissionInFlight = true
+                                                scope.launch {
+                                                    try {
+                                                        val updated = feedbackRepository.toggleTrackFeedback(
+                                                            track = track,
+                                                            action = com.geekify.android.data.local.FeedbackAction.LESS_LIKE_THIS
+                                                        )
+                                                        val msg = if (updated != null) {
+                                                            "Got it — showing less like \"${track.title}\""
+                                                        } else {
+                                                            "Removed \"Less Like This\" preference"
+                                                        }
+                                                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                                    } finally {
+                                                        feedbackSubmissionInFlight = false
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    )
                                     add(
                                         MenuActionItem(
                                             icon = if (isDownloaded) GeekifyIcons.CloudDone else GeekifyIcons.Download,

@@ -1,7 +1,8 @@
 package com.geekify.android.ui.downloads
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,6 +60,7 @@ fun DownloadsScreen(
     onBack: () -> Unit,
     onPlayTrack: (Track) -> Unit,
     onPlayAllOffline: (List<Track>) -> Unit,
+    onTrackActions: (Track) -> Unit = {},
     bottomPadding: androidx.compose.ui.unit.Dp = 96.dp,
     viewModel: DownloadsViewModel = koinViewModel()
 ) {
@@ -226,6 +228,7 @@ fun DownloadsScreen(
                     DownloadItemRow(
                         item = item,
                         onPlay = { onPlayTrack(item.toTrack()) },
+                        onLongClick = { onTrackActions(item.toTrack()) },
                         onPause = null,
                         onResume = null,
                         onRetry = null,
@@ -280,10 +283,12 @@ private fun SectionLabel(text: String) {
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DownloadItemRow(
     item: DownloadEntity,
     onPlay: (() -> Unit)?,
+    onLongClick: (() -> Unit)? = null,
     onPause: (() -> Unit)?,
     onResume: (() -> Unit)?,
     onRetry: (() -> Unit)?,
@@ -295,7 +300,16 @@ private fun DownloadItemRow(
         color = Color.White.copy(alpha = 0.07f),
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (onPlay != null) Modifier.clickable(onClick = onPlay) else Modifier)
+            .then(
+                if (onPlay != null || onLongClick != null) {
+                    Modifier.combinedClickable(
+                        onClick = { onPlay?.invoke() },
+                        onLongClick = onLongClick
+                    )
+                } else {
+                    Modifier
+                }
+            )
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

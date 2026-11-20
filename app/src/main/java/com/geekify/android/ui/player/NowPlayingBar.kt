@@ -184,8 +184,7 @@ fun NowPlayingBar(
     val contentOnBg = when {
         miniCust.backgroundStyle == MiniPlayerBackgroundStyle.AMOLED_BLACK ||
             miniCust.backgroundStyle == MiniPlayerBackgroundStyle.BLURRED_ARTWORK ||
-            miniCust.backgroundStyle == MiniPlayerBackgroundStyle.DYNAMIC_GRADIENT ||
-            miniCust.backgroundStyle == MiniPlayerBackgroundStyle.SOLID_DARK -> Color.White
+            miniCust.backgroundStyle == MiniPlayerBackgroundStyle.DYNAMIC_GRADIENT -> Color.White
         else -> TextPrimary
     }
     val secondaryOnBg = if (contentOnBg == Color.White) Color.White.copy(alpha = 0.72f) else TextSecondary
@@ -213,7 +212,12 @@ fun NowPlayingBar(
                     Modifier
                         .clip(shape)
                         .background(containerBgColor)
-                        .border(1.dp, Color.White.copy(alpha = if (isExpressive) 0.16f else 0.12f), shape)
+                        .border(
+                            1.dp,
+                            if (contentOnBg == Color.White) Color.White.copy(alpha = if (isExpressive) 0.16f else 0.12f)
+                            else NavPillBorder,
+                            shape
+                        )
                 }
             )
             .trackPress(pressed)
@@ -648,6 +652,7 @@ fun NowPlayingBar(
                 isBuffering = state.isBuffering,
                 playbackSpeed = audioSettings.speed,
                 seekbarConfig = seekbarCust,
+                inactiveBaseColor = contentOnBg,
                 isInline = isInline,
                 fullBleed = isVintage,
                 modifier = Modifier
@@ -735,6 +740,7 @@ private fun MiniProgressLine(
     playbackSpeed: Float,
     seekbarConfig: com.geekify.android.customization.SeekbarCustomizationConfig,
     isInline: Boolean,
+    inactiveBaseColor: Color = TextPrimary,
     fullBleed: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -747,7 +753,7 @@ private fun MiniProgressLine(
         playbackSpeed = playbackSpeed
     )
     val progress = calculateProgressFraction(authoritativeMs, pos.durationMs)
-    val palette = resolveSeekbarPalette(seekbarConfig, Lime, Lilac, Color.White)
+    val palette = resolveSeekbarPalette(seekbarConfig, Lime, Lilac, inactiveBaseColor)
     Box(
         modifier = modifier
             .padding(
@@ -789,7 +795,8 @@ fun LikeButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     size: Dp = 28.dp,
-    activeColor: Color = Lime
+    activeColor: Color = Lime,
+    inactiveColor: Color = Color.White.copy(alpha = 0.85f)
 ) {
     val scale by animateFloatAsState(
         targetValue = if (liked) 1f else 0.92f,
@@ -801,7 +808,7 @@ fun LikeButton(
             Icon(
                 imageVector = if (isLiked) GeekifyIcons.Favorite else GeekifyIcons.FavoriteBorder,
                 contentDescription = if (isLiked) "Remove from Liked Songs" else "Add to Liked Songs",
-                tint = if (isLiked) activeColor else Color.White.copy(alpha = 0.85f),
+                tint = if (isLiked) activeColor else inactiveColor,
                 modifier = Modifier
                     .size(size)
                     .graphicsLayer {

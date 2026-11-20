@@ -69,7 +69,8 @@ fun HealthScreen(
         title = "Extractor Health",
         scrollState = scrollState,
         onBack = onBack,
-        bottomPadding = bottomInset + 36.dp
+        bottomPadding = bottomInset + 36.dp,
+        minimalStyle = true
     ) {
         // Hero Status Card
         Surface(

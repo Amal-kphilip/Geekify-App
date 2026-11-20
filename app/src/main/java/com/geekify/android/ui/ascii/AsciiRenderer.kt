@@ -59,6 +59,118 @@ private val CYCLE_R = floatArrayOf(6f, 36f, 24f, 42f)
 private val CYCLE_G = floatArrayOf(7f, 22f, 52f, 20f)
 private val CYCLE_B = floatArrayOf(12f, 48f, 86f, 38f)
 
+private val CYCLE_LIGHT_R = floatArrayOf(244f, 250f, 236f, 246f)
+private val CYCLE_LIGHT_G = floatArrayOf(245f, 241f, 244f, 239f)
+private val CYCLE_LIGHT_B = floatArrayOf(250f, 236f, 252f, 248f)
+
+/**
+ * Immutable, thread-safe snapshot of the active application theme passed from Compose
+ * into the background ASCII simulation loop without ever reading Compose state off-thread.
+ */
+data class AsciiThemePalette(
+    val isLight: Boolean,
+    val bgR: Float,
+    val bgG: Float,
+    val bgB: Float
+) {
+    companion object {
+        val DefaultDark = AsciiThemePalette(isLight = false, bgR = 6f, bgG = 7f, bgB = 12f)
+        val PureBlack = AsciiThemePalette(isLight = false, bgR = 0f, bgG = 0f, bgB = 0f)
+        val DefaultLight = AsciiThemePalette(isLight = true, bgR = 244f, bgG = 245f, bgB = 250f)
+    }
+}
+
+/**
+ * Reversible, hue-and-saturation-preserving luminance adaptation for rendering ASCII artwork on
+ * light backgrounds.
+ *
+ * - Colors that already meet readable contrast (>= 2.8:1) against `(bgR, bgG, bgB)` are returned
+ *   completely unchanged, preserving creature and scene identities (cyan, green, purple, red, etc.).
+ * - Pure white, near-white, pale grey, and high-luminance highlights that would vanish on a light
+ *   canvas are darkened along their original hue (or refined cool slate for achromatic highlights)
+ *   to achieve clear visibility without mutating any source palette.
+ */
+internal fun adaptRgbForLightBackground(
+    r: Float,
+    g: Float,
+    b: Float,
+    bgR: Float,
+    bgG: Float,
+    bgB: Float,
+    out: FloatArray
+) {
+    val sr = clampF(r, 0f, 255f)
+    val sg = clampF(g, 0f, 255f)
+    val sb = clampF(b, 0f, 255f)
+
+    val fgLum = relativeLuminance255(sr, sg, sb)
+    val bgLum = relativeLuminance255(clampF(bgR, 0f, 255f), clampF(bgG, 0f, 255f), clampF(bgB, 0f, 255f))
+    val contrast = (max(fgLum, bgLum) + 0.05f) / (min(fgLum, bgLum) + 0.05f)
+    if (contrast >= 2.8f) {
+        out[0] = sr
+        out[1] = sg
+        out[2] = sb
+        return
+    }
+
+    // Convert to HSL preserving exact hue
+    val rn = sr / 255f
+    val gn = sg / 255f
+    val bn = sb / 255f
+    val cMax = max(rn, max(gn, bn))
+    val cMin = min(rn, min(gn, bn))
+    val delta = cMax - cMin
+    val l = (cMax + cMin) * 0.5f
+    val s = if (delta < 1e-4f) 0f else delta / (1f - abs(2f * l - 1f)).coerceAtLeast(1e-4f)
+    val h = when {
+        delta < 1e-4f -> 0f
+        cMax == rn -> ((gn - bn) / delta + (if (gn < bn) 6f else 0f)) / 6f
+        cMax == gn -> ((bn - rn) / delta + 2f) / 6f
+        else -> ((rn - gn) / delta + 4f) / 6f
+    }
+
+    if (s < 0.08f) {
+        // Pure white / near-white / light grey: map smoothly into readable slate while preserving
+        // relative highlight hierarchy (pure white -> slightly brighter slate than mid-grey)
+        val targetL = clampF(0.46f - (l - 0.55f).coerceIn(0f, 0.45f) * 0.28f, 0.30f, 0.46f)
+        out[0] = targetL * 238f
+        out[1] = targetL * 244f
+        out[2] = targetL * 255f
+        return
+    }
+
+    // Chromatic bright color (e.g. bright yellow, pale cyan, bright pink): preserve hue, keep
+    // vivid saturation, and lower lightness just enough for crisp legibility on light bg
+    val targetS = clampF(max(s, 0.58f), 0f, 0.92f)
+    val targetL = clampF(min(l, 0.44f), 0.24f, 0.44f)
+    hslToRgb255(h, targetS, targetL, out)
+}
+
+private fun relativeLuminance255(r: Float, g: Float, b: Float): Float {
+    fun lin(v: Float): Float {
+        val c = v / 255f
+        return if (c <= 0.03928f) c / 12.92f else Math.pow(((c + 0.055f) / 1.055f).toDouble(), 2.4).toFloat()
+    }
+    return 0.2126f * lin(r) + 0.7152f * lin(g) + 0.0722f * lin(b)
+}
+
+private fun hslToRgb255(h: Float, s: Float, l: Float, out: FloatArray) {
+    val c = (1f - abs(2f * l - 1f)) * s
+    val x = c * (1f - abs((h * 6f) % 2f - 1f))
+    val m = l - c * 0.5f
+    val (r1, g1, b1) = when ((h * 6f).toInt().coerceIn(0, 5)) {
+        0 -> Triple(c, x, 0f)
+        1 -> Triple(x, c, 0f)
+        2 -> Triple(0f, c, x)
+        3 -> Triple(0f, x, c)
+        4 -> Triple(x, 0f, c)
+        else -> Triple(c, 0f, x)
+    }
+    out[0] = clampF((r1 + m) * 255f, 0f, 255f)
+    out[1] = clampF((g1 + m) * 255f, 0f, 255f)
+    out[2] = clampF((b1 + m) * 255f, 0f, 255f)
+}
+
 fun lineGlyph(angle: Float): Char {
     var a = angle % PI.toFloat()
     if (a < 0f) a += PI.toFloat()
@@ -190,10 +302,15 @@ class AsciiRenderer(val tuning: AsciiTuning) {
 
     val pen = Pen(this)
 
+    var themePalette: AsciiThemePalette = AsciiThemePalette.DefaultDark
     var activeBg = floatArrayOf(6f, 7f, 12f)
     var trailColor = floatArrayOf(96f, 156f, 255f)
     var hueMat = FloatArray(9)
     var hueOn: Boolean = false
+
+    fun applyTheme(palette: AsciiThemePalette) {
+        themePalette = palette
+    }
 
     var energy = FloatArray(0)
     var energyTmp = FloatArray(0)
@@ -224,14 +341,21 @@ class AsciiRenderer(val tuning: AsciiTuning) {
     }
 
     private val turnTmp = FloatArray(3)
+    private val adaptTmp = FloatArray(3)
 
     fun fade(r: Float, g: Float, b: Float, f: Float): Int {
         val br = activeBg[0]
         val bg = activeBg[1]
         val bb = activeBg[2]
-        val safeR = if (r.isNaN()) 0f else r
-        val safeG = if (g.isNaN()) 0f else g
-        val safeB = if (b.isNaN()) 0f else b
+        var safeR = if (r.isNaN()) 0f else r
+        var safeG = if (g.isNaN()) 0f else g
+        var safeB = if (b.isNaN()) 0f else b
+        if (themePalette.isLight) {
+            adaptRgbForLightBackground(safeR, safeG, safeB, br, bg, bb, adaptTmp)
+            safeR = adaptTmp[0]
+            safeG = adaptTmp[1]
+            safeB = adaptTmp[2]
+        }
         val safeF = clampF(f, 0f, 1f)
         val cr = clampF(safeR + (br - safeR) * safeF, 0f, 255f).safeRoundToInt()
         val cg = clampF(safeG + (bg - safeG) * safeF, 0f, 255f).safeRoundToInt()
@@ -298,13 +422,16 @@ class AsciiRenderer(val tuning: AsciiTuning) {
             val i1 = (i0 + 1) % 4
             val f = idx - floor(idx)
             val s = f * f * (3f - 2f * f)
-            activeBg[0] = lerpF(CYCLE_R[i0], CYCLE_R[i1], s)
-            activeBg[1] = lerpF(CYCLE_G[i0], CYCLE_G[i1], s)
-            activeBg[2] = lerpF(CYCLE_B[i0], CYCLE_B[i1], s)
+            val cr = if (themePalette.isLight) CYCLE_LIGHT_R else CYCLE_R
+            val cg = if (themePalette.isLight) CYCLE_LIGHT_G else CYCLE_G
+            val cb = if (themePalette.isLight) CYCLE_LIGHT_B else CYCLE_B
+            activeBg[0] = lerpF(cr[i0], cr[i1], s)
+            activeBg[1] = lerpF(cg[i0], cg[i1], s)
+            activeBg[2] = lerpF(cb[i0], cb[i1], s)
         } else {
-            activeBg[0] = 6f
-            activeBg[1] = 7f
-            activeBg[2] = 12f
+            activeBg[0] = themePalette.bgR
+            activeBg[1] = themePalette.bgG
+            activeBg[2] = themePalette.bgB
         }
 
         diffuse(dt)

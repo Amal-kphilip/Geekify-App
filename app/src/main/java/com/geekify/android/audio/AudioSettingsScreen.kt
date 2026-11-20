@@ -44,7 +44,8 @@ fun AudioSettingsScreen(
         title = "Equalizer & effects",
         scrollState = scrollState,
         onBack = onBack,
-        bottomPadding = bottomInset + 36.dp
+        bottomPadding = bottomInset + 36.dp,
+        minimalStyle = true
     ) {
         when (val state = ui) {
             UiState.Loading -> Box(
@@ -206,41 +207,6 @@ private fun Content(s: AudioSettings, vm: AudioSettingsViewModel) {
             activeColor = IosPalette.systemPurple,
             onValueLabelClick = if (abs(s.pitch - 1f) > 0.01f) ({ vm.setPitch(1f) }) else null,
             onValueChange = vm::setPitch
-        )
-    }
-
-    Spacer(Modifier.height(24.dp))
-
-    // ---- Smart playback ----
-    IosSettingsSection(title = "Smart playback") {
-        IosSettingsSwitchRow(
-            icon = GeekifyIcons.FastForward,
-            tileColor = IosPalette.systemCyan,
-            title = "Skip Silence",
-            subtitle = "Automatically jump over quiet gaps in tracks",
-            checked = s.skipSilence,
-            onCheckedChange = vm::setSkipSilence
-        )
-        IosSettingsDivider()
-        IosSettingsSwitchRow(
-            icon = GeekifyIcons.VolumeUp,
-            tileColor = IosPalette.systemBlue,
-            title = "Normalize Volume",
-            subtitle = "Even out loud and quiet songs without clipping",
-            checked = s.normalize,
-            onCheckedChange = vm::setNormalize
-        )
-        IosSettingsDivider()
-        IosSettingsSliderRow(
-            icon = GeekifyIcons.GraphicEq,
-            tileColor = IosPalette.systemIndigo,
-            title = "Intelligent Crossfade",
-            valueLabel = if (s.crossfadeSeconds == 0) "Off" else "${s.crossfadeSeconds}s",
-            value = s.crossfadeSeconds.toFloat(),
-            valueRange = 0f..12f,
-            activeColor = IosPalette.systemIndigo,
-            onValueLabelClick = if (s.crossfadeSeconds > 0) ({ vm.setCrossfadeSeconds(0) }) else null,
-            onValueChange = { vm.setCrossfadeSeconds(kotlin.math.round(it).toInt()) }
         )
     }
 

@@ -168,8 +168,16 @@ class CustomizationSystemTest {
     // ========================================================================================
 
     @Test
-    fun `Sohne Breit is the exclusive global font family and propagates to MaterialTypography`() {
-        assertEquals(listOf(AppFontChoice.SOHNE_BREIT), AppFontChoice.entries)
+    fun `Sohne Breit is the default global font family and font choices propagate to MaterialTypography`() {
+        assertEquals(
+            listOf(
+                AppFontChoice.SOHNE_BREIT,
+                AppFontChoice.SYSTEM_DEFAULT,
+                AppFontChoice.DOWNLOADED,
+                AppFontChoice.IMPORTED
+            ),
+            AppFontChoice.entries
+        )
         assertEquals(SohneBreitFontFamily, AppFontChoice.SOHNE_BREIT.resolveFontFamily())
 
         // Legacy saved font choices migrate cleanly to SOHNE_BREIT
@@ -179,15 +187,14 @@ class CustomizationSystemTest {
         assertEquals(AppFontChoice.SOHNE_BREIT, legacyRestored.typography.fontChoice)
 
         for (choice in AppFontChoice.entries) {
-            val expectedFamily = choice.resolveFontFamily()
-            ActiveTypographyState.apply(
-                TypographyDensityConfig(
-                    fontChoice = choice,
-                    fontScale = 1.15f,
-                    titleScale = 1.10f,
-                    subtitleScale = 0.95f
-                )
+            val config = TypographyDensityConfig(
+                fontChoice = choice,
+                fontScale = 1.15f,
+                titleScale = 1.10f,
+                subtitleScale = 0.95f
             )
+            ActiveTypographyState.apply(config)
+            val expectedFamily = com.geekify.android.ui.theme.GeekifyFontManager.resolveFontFamily(config)
             assertEquals(expectedFamily, AppFont)
             assertEquals(1.15f, ActiveTypographyState.fontScale, 0.001f)
 
@@ -635,5 +642,22 @@ class CustomizationSystemTest {
         assertEquals(4f, afterReset.player.progressHeightDp, 0.001f)
         assertEquals(0L, afterReset.lyrics.globalOffsetMs)
         assertEquals(DisplayDensityScale.NATIVE, afterReset.typography.displayDensity)
+    }
+
+    @Test
+    fun `seekbar showRemainingTime and player showRemainingTime persist independently`() {
+        val prefs = mutablePreferencesOf(
+            CustomizationPersistence.KEY_SEEKBAR_SHOW_REMAINING to false,
+            CustomizationPersistence.KEY_PLAYER_SHOW_REMAINING to true
+        )
+        val stateA = CustomizationPersistence.fromPreferences(prefs)
+        assertFalse(stateA.seekbar.showRemainingTime)
+        assertTrue(stateA.player.showRemainingTime)
+
+        prefs[CustomizationPersistence.KEY_SEEKBAR_SHOW_REMAINING] = true
+        prefs[CustomizationPersistence.KEY_PLAYER_SHOW_REMAINING] = false
+        val stateB = CustomizationPersistence.fromPreferences(prefs)
+        assertTrue(stateB.seekbar.showRemainingTime)
+        assertFalse(stateB.player.showRemainingTime)
     }
 }

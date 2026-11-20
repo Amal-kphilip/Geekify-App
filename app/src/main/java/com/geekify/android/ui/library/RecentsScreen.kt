@@ -22,7 +22,12 @@ import com.geekify.android.ui.theme.*
 import kotlinx.coroutines.flow.Flow
 
 @Composable
-fun RecentsScreen(viewModel: RecentsViewModel, onBack: () -> Unit, onPlay: (Track, List<Track>) -> Unit) {
+fun RecentsScreen(
+    viewModel: RecentsViewModel,
+    onBack: () -> Unit,
+    onPlay: (Track, List<Track>) -> Unit,
+    onTrackActions: (Track) -> Unit = {}
+) {
     val tracks by viewModel.recent.collectAsState(initial = emptyList())
     AuroraBackground {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -41,7 +46,11 @@ fun RecentsScreen(viewModel: RecentsViewModel, onBack: () -> Unit, onPlay: (Trac
                 }
             } else LazyColumn(contentPadding = PaddingValues(bottom = 24.dp + LocalBottomInset.current)) {
                 items(tracks, key = { it.videoId }) { track ->
-                    TrackRow(track = track, onClick = { onPlay(track, tracks) })
+                    TrackRow(
+                        track = track,
+                        onClick = { onPlay(track, tracks) },
+                        onLongClick = { onTrackActions(track) }
+                    )
                 }
             }
         }

@@ -58,7 +58,7 @@ import org.koin.androidx.compose.koinViewModel
 fun CustomizationSettingsScreen(
     onBack: () -> Unit,
     onOpenAppIconPicker: () -> Unit = {},
-    onOpenEqualizer: () -> Unit = {},
+    @Suppress("UNUSED_PARAMETER") onOpenEqualizer: () -> Unit = {},
     initialCategory: CustomizationCategory? = null,
     viewModel: CustomizationViewModel = koinViewModel()
 ) {
@@ -67,20 +67,30 @@ fun CustomizationSettingsScreen(
     val toastMessage by viewModel.toastMessage.collectAsState()
     val bottomInset = LocalBottomInset.current
 
+    val isDirectCategoryLaunch = initialCategory != null
     var activeCategory by rememberSaveable(initialCategory) { mutableStateOf(initialCategory) }
+    var showFontsManager by rememberSaveable { mutableStateOf(false) }
     var showResetAllDialog by rememberSaveable { mutableStateOf(false) }
     val rootScroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
 
-    // Responsive gesture-driven predictive back for settings subpages, aligned with GeekifyNavMotion:
-    // - Tracks live swipe progress & edge so the subpage follows the user's finger immediately
-    // - Completes with an instant snappy handoff (no delayed secondary slide animation)
-    // - Cancels smoothly back to 0f with zero snap or flicker
+    val hasInScreenBack = showFontsManager || (!isDirectCategoryLaunch && activeCategory != null)
+    val handleCategoryBack: () -> Unit = {
+        if (isDirectCategoryLaunch) {
+            onBack()
+        } else {
+            activeCategory = null
+        }
+    }
+
+    // Responsive gesture-driven predictive back for nested in-screen subpages, aligned with GeekifyNavMotion:
+    // - Direct category shortcuts launched from Settings let NavController handle Back directly -> Settings.
+    // - Nested categories opened from the Appearance hub or Fonts Manager pop cleanly within this screen.
     val backCancelScope = rememberCoroutineScope()
     val predictiveBackAnim = remember { Animatable(0f) }
     var predictiveBackEdge by remember { mutableIntStateOf(GeekifyNavMotion.SWIPE_EDGE_LEFT) }
     var lastBackWasGesture by remember { mutableStateOf(false) }
 
-    PredictiveBackHandler(enabled = activeCategory != null && !showResetAllDialog) { backEvents ->
+    PredictiveBackHandler(enabled = hasInScreenBack && !showResetAllDialog) { backEvents ->
         try {
             backEvents.collect { event ->
                 predictiveBackEdge = event.swipeEdge
@@ -88,7 +98,11 @@ fun CustomizationSettingsScreen(
             }
             lastBackWasGesture = true
             predictiveBackAnim.snapTo(0f)
-            activeCategory = null
+            if (showFontsManager) {
+                showFontsManager = false
+            } else if (!isDirectCategoryLaunch) {
+                activeCategory = null
+            }
         } catch (_: CancellationException) {
             lastBackWasGesture = false
             backCancelScope.launch {
@@ -103,8 +117,11 @@ fun CustomizationSettingsScreen(
         }
     }
 
-    LaunchedEffect(activeCategory) {
-        if (activeCategory != null) {
+    LaunchedEffect(activeCategory, showFontsManager) {
+        if (activeCategory != CustomizationCategory.TYPOGRAPHY_DENSITY && showFontsManager) {
+            showFontsManager = false
+        }
+        if (activeCategory != null || showFontsManager) {
             lastBackWasGesture = false
             predictiveBackAnim.snapTo(0f)
         }
@@ -125,7 +142,7 @@ fun CustomizationSettingsScreen(
             textContentColor = TextSecondary,
             title = {
                 Text(
-                    "Reset All Personalization?",
+                    "Reset All Appearance Settings?",
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp
                 )
@@ -154,21 +171,24 @@ fun CustomizationSettingsScreen(
     }
 
     AnimatedContent(
-        targetState = activeCategory,
+        targetState = Pair(activeCategory, showFontsManager),
         transitionSpec = {
+            val initialDepth = (if (initialState.first != null) 1 else 0) + (if (initialState.second) 1 else 0)
+            val targetDepth = (if (targetState.first != null) 1 else 0) + (if (targetState.second) 1 else 0)
             GeekifyNavMotion.subPageTransition(
-                isForward = targetState != null,
+                isForward = targetDepth >= initialDepth,
                 lastBackWasGesture = lastBackWasGesture
             )
         },
         label = "customizationCategoryNav"
-    ) { category ->
+    ) { (category, fontsManagerOpen) ->
         if (category == null) {
             IosSettingsPageScaffold(
-                title = "Personalization Studio",
+                title = "Appearance",
                 scrollState = rootScroll,
                 onBack = onBack,
-                bottomPadding = bottomInset + 40.dp
+                bottomPadding = bottomInset + 40.dp,
+                minimalStyle = true
             ) {
                 AnimatedVisibility(visible = toastMessage != null) {
                     toastMessage?.let { msg ->
@@ -211,42 +231,8 @@ fun CustomizationSettingsScreen(
                 Spacer(Modifier.height(22.dp))
 
                 IosSettingsSection(
-                    title = "Layout, Navigation & Structure",
-                    footer = "Control home shelves, card dimensions, bottom navigation tabs, and typography scale."
-                ) {
-                    IosSettingsRow(
-                        title = CustomizationCategory.HOME_SCREEN.title,
-                        subtitle = CustomizationCategory.HOME_SCREEN.subtitle,
-                        value = state.customization.home.layoutMode.label,
-                        icon = GeekifyIcons.Home,
-                        tileColor = IosPalette.systemBlue,
-                        onClick = { activeCategory = CustomizationCategory.HOME_SCREEN }
-                    )
-                    IosSettingsDivider()
-                    IosSettingsRow(
-                        title = CustomizationCategory.NAVIGATION.title,
-                        subtitle = CustomizationCategory.NAVIGATION.subtitle,
-                        value = "${state.customization.navigation.safeVisibleTabs.size} tabs",
-                        icon = GeekifyIcons.Navigation,
-                        tileColor = IosPalette.systemTeal,
-                        onClick = { activeCategory = CustomizationCategory.NAVIGATION }
-                    )
-                    IosSettingsDivider()
-                    IosSettingsRow(
-                        title = CustomizationCategory.TYPOGRAPHY_DENSITY.title,
-                        subtitle = CustomizationCategory.TYPOGRAPHY_DENSITY.subtitle,
-                        value = state.customization.typography.fontChoice.label,
-                        icon = GeekifyIcons.Translate,
-                        tileColor = IosPalette.systemOrange,
-                        onClick = { activeCategory = CustomizationCategory.TYPOGRAPHY_DENSITY }
-                    )
-                }
-
-                Spacer(Modifier.height(22.dp))
-
-                IosSettingsSection(
-                    title = "Player, Lyrics & Interaction",
-                    footer = "Switch between 6 player layouts, configure the mini-player pill, gestures, and synchronized lyrics."
+                    title = "Player & Interaction",
+                    footer = "Switch between 6 player layouts, configure the mini-player pill, and customize gestures."
                 ) {
                     IosSettingsRow(
                         title = CustomizationCategory.PLAYER_APPEARANCE.title,
@@ -267,15 +253,6 @@ fun CustomizationSettingsScreen(
                     )
                     IosSettingsDivider()
                     IosSettingsRow(
-                        title = CustomizationCategory.LYRICS_APPEARANCE.title,
-                        subtitle = CustomizationCategory.LYRICS_APPEARANCE.subtitle,
-                        value = "${state.customization.lyrics.fontSizeSp.roundToInt()} sp",
-                        icon = GeekifyIcons.Lyrics,
-                        tileColor = IosPalette.systemMint,
-                        onClick = { activeCategory = CustomizationCategory.LYRICS_APPEARANCE }
-                    )
-                    IosSettingsDivider()
-                    IosSettingsRow(
                         title = CustomizationCategory.GESTURES.title,
                         subtitle = CustomizationCategory.GESTURES.subtitle,
                         value = if (state.customization.gestures.swipeArtworkToSkip) "Active" else "Custom",
@@ -288,18 +265,9 @@ fun CustomizationSettingsScreen(
                 Spacer(Modifier.height(22.dp))
 
                 IosSettingsSection(
-                    title = "Audio, Widgets & Launcher",
-                    footer = "Fine-tune crossfade, silence skipping, home screen widgets, and launcher icon."
+                    title = "Widgets & Launcher",
+                    footer = "Configure home screen widgets and launcher icon."
                 ) {
-                    IosSettingsRow(
-                        title = CustomizationCategory.PLAYBACK_PREFERENCES.title,
-                        subtitle = CustomizationCategory.PLAYBACK_PREFERENCES.subtitle,
-                        value = state.audioQuality.label,
-                        icon = GeekifyIcons.GraphicEq,
-                        tileColor = IosPalette.systemRed,
-                        onClick = { activeCategory = CustomizationCategory.PLAYBACK_PREFERENCES }
-                    )
-                    IosSettingsDivider()
                     IosSettingsRow(
                         title = CustomizationCategory.WIDGETS.title,
                         subtitle = CustomizationCategory.WIDGETS.subtitle,
@@ -322,10 +290,10 @@ fun CustomizationSettingsScreen(
 
                 IosSettingsSection(
                     title = "Reset & Defaults",
-                    footer = "Restore all visual, layout, and player personalization settings to their original Geekify defaults."
+                    footer = "Restore all visual, layout, and player appearance settings to their original Geekify defaults."
                 ) {
                     IosSettingsRow(
-                        title = "Reset All Personalization",
+                        title = "Reset All Appearance Settings",
                         subtitle = "Restore default theme, glass, layout, player, and typography",
                         icon = GeekifyIcons.RestartAlt,
                         tileColor = IosPalette.systemRed,
@@ -334,6 +302,29 @@ fun CustomizationSettingsScreen(
                         onClick = { showResetAllDialog = true }
                     )
                 }
+            }
+        } else if (category == CustomizationCategory.TYPOGRAPHY_DENSITY && fontsManagerOpen) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val tf = GeekifyNavMotion.computePredictiveBackTransform(
+                            progress = predictiveBackAnim.value,
+                            density = density,
+                            swipeEdge = predictiveBackEdge
+                        )
+                        translationX = tf.translationXPx
+                        scaleX = tf.scale
+                        scaleY = tf.scale
+                        alpha = tf.alpha
+                    }
+            ) {
+                FontsManagerScreen(
+                    state = state,
+                    viewModel = viewModel,
+                    onBack = { showFontsManager = false },
+                    bottomPadding = bottomInset + 40.dp
+                )
             }
         } else {
             val detailScroll = rememberSaveable(
@@ -359,8 +350,9 @@ fun CustomizationSettingsScreen(
             IosSettingsPageScaffold(
                 title = category.title,
                 scrollState = detailScroll,
-                onBack = { activeCategory = null },
-                bottomPadding = bottomInset + 40.dp
+                onBack = handleCategoryBack,
+                bottomPadding = bottomInset + 40.dp,
+                minimalStyle = true
             ) {
                 AnimatedVisibility(visible = toastMessage != null) {
                     toastMessage?.let { msg ->
@@ -377,13 +369,16 @@ fun CustomizationSettingsScreen(
                     CustomizationCategory.PLAYER_APPEARANCE -> PlayerAppearanceCategoryPage(state, viewModel)
                     CustomizationCategory.MINI_PLAYER -> MiniPlayerCategoryPage(state, viewModel)
                     CustomizationCategory.GESTURES -> GesturesCategoryPage(state, viewModel)
-                    CustomizationCategory.TYPOGRAPHY_DENSITY -> TypographyCategoryPage(state, viewModel)
+                    CustomizationCategory.TYPOGRAPHY_DENSITY -> TypographyCategoryPage(
+                        state = state,
+                        viewModel = viewModel,
+                        onOpenFontsManager = { showFontsManager = true }
+                    )
                     CustomizationCategory.LYRICS_APPEARANCE -> LyricsCategoryPage(state, viewModel)
                     CustomizationCategory.PLAYBACK_PREFERENCES -> PlaybackPreferencesCategoryPage(
                         state = state,
                         audio = audioState,
-                        viewModel = viewModel,
-                        onOpenEqualizer = onOpenEqualizer
+                        viewModel = viewModel
                     )
                     CustomizationCategory.WIDGETS -> WidgetsCategoryPage(state, viewModel)
                     CustomizationCategory.APP_ICONS -> {
@@ -481,7 +476,7 @@ private fun LiveStudioHeroCard(state: AppSettingsState) {
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "LIVE PERSONALIZATION PREVIEW",
+                        text = "LIVE APPEARANCE PREVIEW",
                         color = Lime,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
@@ -2630,7 +2625,8 @@ private fun GesturesCategoryPage(
 @Composable
 private fun TypographyCategoryPage(
     state: AppSettingsState,
-    viewModel: CustomizationViewModel
+    viewModel: CustomizationViewModel,
+    onOpenFontsManager: () -> Unit
 ) {
     val typo = state.customization.typography
 
@@ -2641,21 +2637,38 @@ private fun TypographyCategoryPage(
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text("Sohne Breit", color = Lime, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
-            Text("Aa Bb Cc · 0123456789", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            Text("The quick brown fox jumps over the lazy dog", color = TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Normal)
-        }
-        IosSettingsDivider(insetStart = 16.dp)
-        AppFontChoice.entries.forEachIndexed { idx, choice ->
-            if (idx > 0) IosSettingsDivider(insetStart = 16.dp)
-            IosSettingsRow(
-                title = choice.label,
-                value = if (typo.fontChoice == choice) "Selected" else null,
-                selected = typo.fontChoice == choice,
-                showChevron = false,
-                onClick = { viewModel.setFontChoice(choice) }
+            Text(
+                text = typo.resolvedDisplayName,
+                color = Lime,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.ExtraBold,
+                fontFamily = AppFont
+            )
+            Text(
+                text = "Aa Bb Cc · 0123456789",
+                color = TextPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = AppFont
+            )
+            Text(
+                text = "The quick brown fox jumps over the lazy dog.",
+                color = TextSecondary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Normal,
+                fontFamily = AppFont
             )
         }
+        IosSettingsDivider(insetStart = 16.dp)
+        IosSettingsRow(
+            title = "Fonts",
+            subtitle = "Import TTF/OTF, download fonts, or reset",
+            value = typo.resolvedDisplayName,
+            icon = GeekifyIcons.Translate,
+            tileColor = IosPalette.systemOrange,
+            showChevron = true,
+            onClick = onOpenFontsManager
+        )
     }
 
     Spacer(Modifier.height(22.dp))
@@ -2962,8 +2975,7 @@ private fun LyricsCategoryPage(
 private fun PlaybackPreferencesCategoryPage(
     state: AppSettingsState,
     audio: AudioSettings,
-    viewModel: CustomizationViewModel,
-    onOpenEqualizer: () -> Unit
+    viewModel: CustomizationViewModel
 ) {
     IosSettingsSection(title = "Streaming Audio Quality") {
         AudioQualityPreference.entries.forEachIndexed { idx, q ->
@@ -3012,15 +3024,6 @@ private fun PlaybackPreferencesCategoryPage(
             subtitle = "Enhance low-end 60 Hz and 230 Hz biquad filter response",
             checked = audio.eqEnabled && audio.preset == "Bass boost",
             onCheckedChange = viewModel::setBassBoostEnabled
-        )
-        IosSettingsDivider(insetStart = 16.dp)
-        IosSettingsRow(
-            title = "Open 5-Band Equalizer & Pitch Studio",
-            subtitle = "Custom frequency bands, tempo speed & pitch shifting",
-            value = if (audio.eqEnabled) audio.preset else "Flat",
-            icon = GeekifyIcons.GraphicEq,
-            tileColor = IosPalette.systemGreen,
-            onClick = onOpenEqualizer
         )
     }
 

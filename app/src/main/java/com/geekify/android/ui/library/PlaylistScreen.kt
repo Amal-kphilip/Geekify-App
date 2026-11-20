@@ -37,6 +37,7 @@ fun PlaylistScreen(
     viewModel: LibraryViewModel,
     onBack: () -> Unit,
     onPlayTrack: (Track, List<Track>) -> Unit,
+    onTrackActions: (Track) -> Unit = {},
     onShufflePlay: ((List<Track>) -> Unit)? = null
 ) {
     val tracks by viewModel.playlistTracks(playlistId).collectAsStateWithLifecycle(initialValue = emptyList())
@@ -98,6 +99,7 @@ fun PlaylistScreen(
                 TrackRow(
                     track = track,
                     onClick = { onPlayTrack(track, tracks) },
+                    onLongClick = { onTrackActions(track) },
                     onMoreClick = { viewModel.removeFromPlaylist(playlistId, track.videoId) }
                 )
             }

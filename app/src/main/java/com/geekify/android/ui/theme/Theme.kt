@@ -66,6 +66,20 @@ val SohneBreitFontFamily = FontFamily(
     Font(R.font.sohne_breit_black_italic, FontWeight.Black, FontStyle.Italic)
 )
 
+@OptIn(androidx.compose.ui.text.ExperimentalTextApi::class)
+val GoogleSansFontFamily: FontFamily by lazy {
+    FontFamily(
+        Font(R.font.google_sans_variable, FontWeight.ExtraLight, FontStyle.Normal, variationSettings = androidx.compose.ui.text.font.FontVariation.Settings(androidx.compose.ui.text.font.FontVariation.weight(200))),
+        Font(R.font.google_sans_variable, FontWeight.Light, FontStyle.Normal, variationSettings = androidx.compose.ui.text.font.FontVariation.Settings(androidx.compose.ui.text.font.FontVariation.weight(300))),
+        Font(R.font.google_sans_variable, FontWeight.Normal, FontStyle.Normal, variationSettings = androidx.compose.ui.text.font.FontVariation.Settings(androidx.compose.ui.text.font.FontVariation.weight(400))),
+        Font(R.font.google_sans_variable, FontWeight.Medium, FontStyle.Normal, variationSettings = androidx.compose.ui.text.font.FontVariation.Settings(androidx.compose.ui.text.font.FontVariation.weight(500))),
+        Font(R.font.google_sans_variable, FontWeight.SemiBold, FontStyle.Normal, variationSettings = androidx.compose.ui.text.font.FontVariation.Settings(androidx.compose.ui.text.font.FontVariation.weight(600))),
+        Font(R.font.google_sans_variable, FontWeight.Bold, FontStyle.Normal, variationSettings = androidx.compose.ui.text.font.FontVariation.Settings(androidx.compose.ui.text.font.FontVariation.weight(700))),
+        Font(R.font.google_sans_variable, FontWeight.ExtraBold, FontStyle.Normal, variationSettings = androidx.compose.ui.text.font.FontVariation.Settings(androidx.compose.ui.text.font.FontVariation.weight(800))),
+        Font(R.font.google_sans_variable, FontWeight.Black, FontStyle.Normal, variationSettings = androidx.compose.ui.text.font.FontVariation.Settings(androidx.compose.ui.text.font.FontVariation.weight(900)))
+    )
+}
+
 object ActiveTypographyState {
     var fontFamily: FontFamily by mutableStateOf(SohneBreitFontFamily)
         private set
@@ -76,8 +90,8 @@ object ActiveTypographyState {
     var subtitleScale: Float by mutableStateOf(1.0f)
         private set
 
-    fun apply(config: TypographyDensityConfig) {
-        val resolved = config.fontChoice.resolveFontFamily()
+    fun apply(config: TypographyDensityConfig, context: android.content.Context? = null) {
+        val resolved = GeekifyFontManager.resolveFontFamily(config, context)
         if (fontFamily != resolved) fontFamily = resolved
         val clampedFont = config.fontScale.coerceIn(0.85f, 1.25f)
         if (fontScale != clampedFont) fontScale = clampedFont
@@ -88,12 +102,14 @@ object ActiveTypographyState {
     }
 }
 
-/** Reactive global font family — Sohne Breit exclusively throughout Geekify. */
+/** Reactive global font family — dynamically resolved from TypographyDensityConfig. */
 val AppFont: FontFamily
     get() = ActiveTypographyState.fontFamily
 
 fun AppFontChoice.resolveFontFamily(): FontFamily = when (this) {
     AppFontChoice.SOHNE_BREIT -> SohneBreitFontFamily
+    AppFontChoice.SYSTEM_DEFAULT -> FontFamily.Default
+    AppFontChoice.DOWNLOADED, AppFontChoice.IMPORTED -> ActiveTypographyState.fontFamily
 }
 
 private val DefaultMaterialTypography = Typography()
@@ -195,10 +211,14 @@ fun GeekifyTheme(
         overridePanel = resolvedPanel,
         overrideElevated = resolvedElevated
     )
-    ActiveTypographyState.apply(typoConfig)
+    ActiveTypographyState.apply(typoConfig, context)
 
-    val activeFontFamily = remember(typoConfig.fontChoice) {
-        typoConfig.fontChoice.resolveFontFamily()
+    val activeFontFamily = remember(
+        typoConfig.fontChoice,
+        typoConfig.activeFontId,
+        typoConfig.activeFontPath
+    ) {
+        GeekifyFontManager.resolveFontFamily(typoConfig, context)
     }
     val fontScale = typoConfig.fontScale.coerceIn(0.85f, 1.25f)
     val titleScale = typoConfig.titleScale.coerceIn(0.85f, 1.25f)
@@ -213,8 +233,13 @@ fun GeekifyTheme(
                 background = resolvedBg,
                 surface = resolvedPanel,
                 surfaceVariant = resolvedElevated,
+                surfaceContainer = resolvedPanel,
+                surfaceContainerHigh = resolvedElevated,
+                surfaceContainerLow = resolvedBg,
+                outline = Color(0x33FFFFFF),
+                outlineVariant = Color(0x1FFFFFFF),
                 onPrimary = ActiveThemePalette.onAccent,
-                onSecondary = ActiveThemePalette.onAccent,
+                onSecondary = resolveOnAccentColor(resolvedSecondary),
                 onTertiary = ActiveThemePalette.onAccent,
                 onBackground = ActiveThemePalette.textPrimary,
                 onSurface = ActiveThemePalette.textPrimary,
@@ -230,13 +255,18 @@ fun GeekifyTheme(
                 background = resolvedBg,
                 surface = resolvedPanel,
                 surfaceVariant = resolvedElevated,
+                surfaceContainer = resolvedPanel,
+                surfaceContainerHigh = resolvedElevated,
+                surfaceContainerLow = resolvedBg,
+                outline = Color(0x3D121118),
+                outlineVariant = Color(0x1F121118),
                 onPrimary = ActiveThemePalette.onAccent,
-                onSecondary = ActiveThemePalette.onAccent,
+                onSecondary = resolveOnAccentColor(resolvedSecondary),
                 onTertiary = ActiveThemePalette.onAccent,
                 onBackground = ActiveThemePalette.textPrimary,
                 onSurface = ActiveThemePalette.textPrimary,
                 onSurfaceVariant = ActiveThemePalette.textSecondary,
-                error = ErrorRed,
+                error = Color(0xFFDC2626),
                 onError = Color.White
             )
         }

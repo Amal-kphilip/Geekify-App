@@ -66,7 +66,8 @@ half4 main(float2 fragCoord) {
     if (uGrid > 0.01) {
         if (localX < 1.0 || localY < 1.0) {
             half ga = clamp(0.055 * uGrid, 0.0, 0.35);
-            color = mix(color, half3(1.0, 1.0, 1.0), ga);
+            half3 gridTarget = (bg.r + bg.g + bg.b > 1.5) ? half3(0.0, 0.0, 0.0) : half3(1.0, 1.0, 1.0);
+            color = mix(color, gridTarget, ga);
         }
     }
 

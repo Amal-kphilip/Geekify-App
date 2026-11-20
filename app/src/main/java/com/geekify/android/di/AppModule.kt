@@ -255,7 +255,7 @@ val repositoryModule = module {
 
 val viewModelModule = module {
     viewModel { PlayerViewModel(get(), get(), get(), get()) }
-    viewModel { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    viewModel { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     viewModel { SearchViewModel(get(), get(), get(), get(), get(), get(), get(), get(DefaultDispatcherQualifier), get(IoDispatcherQualifier)) }
     viewModel { LibraryViewModel(get(), get(), get()) }
     viewModel { DetailsViewModel(get(), get()) }
@@ -271,7 +271,7 @@ val viewModelModule = module {
     viewModel { DebugSearchViewModel(get()) }
     viewModel { RecognitionViewModel(get()) }
     viewModel { DownloadsViewModel(get(), get()) }
-    viewModel { CustomizationViewModel(androidContext(), get(), get()) }
+    viewModel { CustomizationViewModel(androidContext(), get(), get(), get()) }
 }
 
 val allAppModules = listOf(

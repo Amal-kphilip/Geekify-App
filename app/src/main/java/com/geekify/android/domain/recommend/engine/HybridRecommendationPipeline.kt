@@ -95,6 +95,46 @@ class HybridRecommendationPipeline constructor(
             return runCatching { EmbeddingFeatureSource.valueOf(prefix) }
                 .getOrDefault(EmbeddingFeatureSource.METADATA_STRUCTURAL_PROJECTION)
         }
+
+        /**
+         * Computes the explicit user-feedback ranking delta from persisted `MORE_LIKE_THIS` and
+         * `LESS_LIKE_THIS` preferences.
+         *
+         * - Positive feedback boosts the track, its artist, and tracks sharing its primary genre/mood.
+         * - Negative feedback strongly demotes the exact track and moderately demotes the same artist,
+         *   without penalizing unrelated music merely for sharing the same language or broad genre.
+         */
+        fun computeFeedbackScoreDelta(
+            candidateVideoId: String,
+            candidateArtistNormalized: String,
+            candidatePrimaryGenre: MusicGenre?,
+            candidatePrimaryMood: MusicMood?,
+            moreLikeTrackIds: Set<String>,
+            lessLikeTrackIds: Set<String>,
+            moreLikeArtists: Set<String>,
+            lessLikeArtists: Set<String>,
+            positiveGenres: Set<MusicGenre>,
+            positiveMoods: Set<MusicMood>
+        ): Double {
+            var delta = 0.0
+            if (candidateVideoId in moreLikeTrackIds) delta += 0.25
+            if (candidateVideoId in lessLikeTrackIds) delta -= 0.85
+
+            if (candidateArtistNormalized.isNotBlank()) {
+                if (candidateArtistNormalized in moreLikeArtists) delta += 0.32
+                if (candidateArtistNormalized in lessLikeArtists && candidateArtistNormalized !in moreLikeArtists) {
+                    delta -= 0.38
+                }
+            }
+
+            if (candidatePrimaryGenre != null && candidatePrimaryGenre in positiveGenres) {
+                delta += 0.10
+            }
+            if (candidatePrimaryMood != null && candidatePrimaryMood in positiveMoods) {
+                delta += 0.08
+            }
+            return delta.coerceIn(-1.0, 0.75)
+        }
     }
 
     private data class ResolvedTrackFeatureBundle(
@@ -377,19 +417,72 @@ class HybridRecommendationPipeline constructor(
         val isFallbackModel = activeModelMetadata.isFallback || !activeModelMetadata.isTrained
         val userTowerVector = neuralEngine.computeUserTowerEmbedding(rawUserCompositeVector)
 
-        // 4. Query user explicit recommendation feedback (hidden tracks, blocked artists, boosts)
+        // 4. Query user explicit recommendation feedback (hidden tracks, blocked artists, More/Less Like This)
+        val activeFeedback = feedbackDao?.getActiveFeedbackOnce().orEmpty()
         val hiddenTrackIds = feedbackDao?.getHiddenTrackIdsOnce()?.toSet().orEmpty()
-        val blockedArtists = feedbackDao?.getBlockedArtistsOnce()?.toSet().orEmpty()
+        val blockedArtists = feedbackDao?.getBlockedArtistsOnce()?.map { it.lowercase(Locale.ROOT).trim() }?.toSet().orEmpty()
+
+        val moreLikeTrackIds = activeFeedback
+            .filter {
+                it.targetType == com.geekify.android.data.local.FeedbackTargetType.TRACK.name &&
+                    it.action == com.geekify.android.data.local.FeedbackAction.MORE_LIKE_THIS.name
+            }
+            .map { it.targetId }
+            .toSet()
+        val lessLikeTrackIds = activeFeedback
+            .filter {
+                it.targetType == com.geekify.android.data.local.FeedbackTargetType.TRACK.name &&
+                    it.action == com.geekify.android.data.local.FeedbackAction.LESS_LIKE_THIS.name
+            }
+            .map { it.targetId }
+            .toSet()
+        val moreLikeArtists = activeFeedback
+            .filter {
+                it.targetType == com.geekify.android.data.local.FeedbackTargetType.ARTIST.name &&
+                    it.action == com.geekify.android.data.local.FeedbackAction.MORE_LIKE_THIS.name
+            }
+            .map { it.targetId.lowercase(Locale.ROOT).trim() }
+            .toMutableSet()
+        val lessLikeArtists = activeFeedback
+            .filter {
+                it.targetType == com.geekify.android.data.local.FeedbackTargetType.ARTIST.name &&
+                    it.action == com.geekify.android.data.local.FeedbackAction.LESS_LIKE_THIS.name
+            }
+            .map { it.targetId.lowercase(Locale.ROOT).trim() }
+            .toMutableSet()
+
+        // Derive artist & genre/mood cues from tracks the user explicitly marked More/Less Like This
+        val positiveFeedbackGenres = mutableSetOf<MusicGenre>()
+        val positiveFeedbackMoods = mutableSetOf<MusicMood>()
+        for (vid in moreLikeTrackIds) {
+            val t = allKnownTracksById[vid] ?: allCandidatesById[vid] ?: continue
+            val a = t.artist.lowercase(Locale.ROOT).trim()
+            if (a.isNotBlank() && a != "unknown") moreLikeArtists += a
+            val cls = classificationService.classify(t.title, t.artist, t.album, t.durationSeconds)
+            cls.primaryGenre?.let { positiveFeedbackGenres += it }
+            cls.primaryMood?.let { positiveFeedbackMoods += it }
+        }
+        for (vid in lessLikeTrackIds) {
+            val t = allKnownTracksById[vid] ?: allCandidatesById[vid] ?: continue
+            val a = t.artist.lowercase(Locale.ROOT).trim()
+            if (a.isNotBlank() && a != "unknown" && a !in moreLikeArtists) lessLikeArtists += a
+        }
+        val hasExplicitRankingFeedback = moreLikeTrackIds.isNotEmpty() ||
+            lessLikeTrackIds.isNotEmpty() ||
+            moreLikeArtists.isNotEmpty() ||
+            lessLikeArtists.isNotEmpty()
 
         val discoveryExclude = (likedTracks + recentTracks + playlistTracks).map { it.videoId }.toMutableSet().apply {
             addAll(frequentSignals.map { it.videoId })
             addAll(hiddenTrackIds)
+            addAll(lessLikeTrackIds)
         }
         val heavilySkippedIds = sessionSignals
             .filter { it.skipRate >= 0.6 && it.completionRate < 0.35 }
             .map { it.videoId }
             .toSet()
-        val strictExclude = recentTracks.take(5).map { it.videoId }.toSet() + heavilySkippedIds + hiddenTrackIds
+        val strictExclude = recentTracks.take(5).map { it.videoId }.toSet() +
+            heavilySkippedIds + hiddenTrackIds + lessLikeTrackIds
 
         val (baseMixResults, _) = Recommender.buildMixes(
             liked = likedSignals,
@@ -424,8 +517,8 @@ class HybridRecommendationPipeline constructor(
         val sessionByVideoId = sessionSignals.associateBy { it.videoId }
         val totalArtistAff = artistAffinity.values.sum().takeIf { it > 0.0 } ?: 1.0
         val currentContext = contextEngine.inferContextFromHour(hourOfDay)
-        val userPositiveIds = (likedTracks.map { it.videoId } + frequentSignals.map { it.videoId }).toSet()
-        val userTopArtists = artistAffinity.entries.sortedByDescending { it.value }.take(15).map { it.key }.toSet()
+        val userPositiveIds = (likedTracks.map { it.videoId } + frequentSignals.map { it.videoId } + moreLikeTrackIds).toSet()
+        val userTopArtists = (artistAffinity.entries.sortedByDescending { it.value }.take(15).map { it.key } + moreLikeArtists).toSet()
 
         val diagnostics = mutableMapOf<String, CandidateScoreDiagnostics>()
         val candidateClassifications = mutableMapOf<String, TrackClassification>()
@@ -494,7 +587,7 @@ class HybridRecommendationPipeline constructor(
             )
             val neuralProb = neuralEngine.predictOutcomeProbability(features)
 
-            val finalScore = when (treatmentGroup) {
+            val baseScore = when (treatmentGroup) {
                 ExperimentTreatmentGroup.CONTROL -> {
                     0.50 * (artAff + langAff) + 0.30 * compRate + 0.20 * ctxMult - 0.40 * expPenalty
                 }
@@ -508,6 +601,19 @@ class HybridRecommendationPipeline constructor(
                     0.55 * neuralProb + 0.20 * twoTowerSim + 0.15 * (audioSim + lyricsSim) * 0.5 + 0.10 * collabScore
                 }
             }
+            val feedbackDelta = computeFeedbackScoreDelta(
+                candidateVideoId = vid,
+                candidateArtistNormalized = aKey,
+                candidatePrimaryGenre = cls.primaryGenre,
+                candidatePrimaryMood = cls.primaryMood,
+                moreLikeTrackIds = moreLikeTrackIds,
+                lessLikeTrackIds = lessLikeTrackIds,
+                moreLikeArtists = moreLikeArtists,
+                lessLikeArtists = lessLikeArtists,
+                positiveGenres = positiveFeedbackGenres,
+                positiveMoods = positiveFeedbackMoods
+            )
+            val finalScore = baseScore + feedbackDelta
 
             diagnostics[vid] = CandidateScoreDiagnostics(
                 videoId = vid,
@@ -562,8 +668,8 @@ class HybridRecommendationPipeline constructor(
         val mixResultSources = baseMixResults.associate { it.id to it.sources }.toMutableMap()
         val mixes = baseMixResults.mapNotNull { mr ->
             val rawDiscovery = mr.videoIds.mapNotNull { allCandidatesById[it] ?: allKnownTracksById[it] }
-            // Re-rank discovery tracks using treatment-aware hybrid score when not in pure Control
-            val discoveryTracks = if (treatmentGroup == ExperimentTreatmentGroup.CONTROL) {
+            // Re-rank discovery tracks using hybrid score when not in pure Control OR when user gave explicit feedback
+            val discoveryTracks = if (treatmentGroup == ExperimentTreatmentGroup.CONTROL && !hasExplicitRankingFeedback) {
                 rawDiscovery
             } else {
                 rawDiscovery.sortedByDescending { t -> diagnostics[t.videoId]?.finalScore ?: 0.0 }
@@ -598,10 +704,18 @@ class HybridRecommendationPipeline constructor(
                 else -> discoveryTracks
             }
             if (tracks.isNotEmpty()) {
+                val resolvedSubtitle = if (mr.id == "for-you") {
+                    val trackLanguages = tracks.map { t ->
+                        Recommender.resolveLanguage(t.videoId, t.title, t.artist, languageOverrides)
+                    }
+                    Recommender.resolveForYouSubtitle(trackLanguages)
+                } else {
+                    mr.subtitle
+                }
                 Mix(
                     id = mr.id,
                     title = mr.title,
-                    subtitle = mr.subtitle,
+                    subtitle = resolvedSubtitle,
                     tracks = tracks
                 )
             } else null

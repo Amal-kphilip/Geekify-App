@@ -459,7 +459,10 @@ data class GestureCustomizationConfig(
 }
 
 enum class AppFontChoice(val label: String) {
-    SOHNE_BREIT("Sohne Breit")
+    SOHNE_BREIT("Sohne Breit"),
+    SYSTEM_DEFAULT("System Default"),
+    DOWNLOADED("Downloaded Font"),
+    IMPORTED("Imported Font")
 }
 
 enum class UiDensityMode(val label: String, val spacingMultiplier: Float) {
@@ -492,13 +495,24 @@ enum class DisplayDensityScale(val label: String, val scaleFactor: Float) {
 @Immutable
 data class TypographyDensityConfig(
     val fontChoice: AppFontChoice = AppFontChoice.SOHNE_BREIT,
+    val activeFontId: String = "",
+    val activeFontName: String = "Sohne Breit",
+    val activeFontPath: String = "",
     val fontScale: Float = 1.0f,
     val titleScale: Float = 1.0f,
     val subtitleScale: Float = 1.0f,
     val densityMode: UiDensityMode = UiDensityMode.COMFORTABLE,
     val displayDensity: DisplayDensityScale = DisplayDensityScale.NATIVE,
     val enableLandscapeScaling: Boolean = true
-)
+) {
+    val resolvedDisplayName: String
+        get() = when (fontChoice) {
+            AppFontChoice.SOHNE_BREIT -> "Sohne Breit"
+            AppFontChoice.SYSTEM_DEFAULT -> "System Default"
+            AppFontChoice.DOWNLOADED, AppFontChoice.IMPORTED ->
+                activeFontName.takeIf { it.isNotBlank() } ?: fontChoice.label
+        }
+}
 
 enum class LyricsTextAlignment(val label: String) {
     START("Left Aligned"),

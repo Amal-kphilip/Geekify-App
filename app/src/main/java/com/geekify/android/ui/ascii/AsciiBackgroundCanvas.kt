@@ -272,8 +272,35 @@ fun AsciiBackgroundCanvas(
     val pointerQueue = remember { ConcurrentLinkedQueue<AsciiPointerEvent>() }
     val sizeRef = remember { AtomicReference<Triple<Float, Float, Float>?>(null) }
     val configRef = remember { AtomicReference(config) }
+
+    // Capture the active theme background as an immutable snapshot on the Compose thread
+    // so the background simulation thread never reads Compose state directly and never
+    // recreates the renderer when switching Light / Dark / AMOLED.
+    val isDarkTheme = com.geekify.android.ui.theme.ActiveThemePalette.isDark
+    val activeInkBg = com.geekify.android.ui.theme.InkBackground
+    val resolvedAsciiTheme = remember(isDarkTheme, activeInkBg) {
+        if (!isDarkTheme) {
+            AsciiThemePalette(
+                isLight = true,
+                bgR = (activeInkBg.red * 255f).coerceIn(0f, 255f),
+                bgG = (activeInkBg.green * 255f).coerceIn(0f, 255f),
+                bgB = (activeInkBg.blue * 255f).coerceIn(0f, 255f)
+            )
+        } else if (activeInkBg == androidx.compose.ui.graphics.Color.Black) {
+            AsciiThemePalette.PureBlack
+        } else {
+            AsciiThemePalette(
+                isLight = false,
+                bgR = (activeInkBg.red * 255f).coerceIn(0f, 255f),
+                bgG = (activeInkBg.green * 255f).coerceIn(0f, 255f),
+                bgB = (activeInkBg.blue * 255f).coerceIn(0f, 255f)
+            )
+        }
+    }
+    val themePaletteRef = remember { AtomicReference(resolvedAsciiTheme) }
     SideEffect {
         configRef.set(config)
+        themePaletteRef.set(resolvedAsciiTheme)
     }
 
     val frameRing = remember { AsciiFrameRing(3) }
@@ -344,15 +371,29 @@ fun AsciiBackgroundCanvas(
                         }
                     }
 
-                    // 2. Thread-safe tuning and animal synchronization
+                    // 2. Thread-safe tuning, theme, and animal synchronization
                     val currentCfg = configRef.get()
+                    val currentTheme = themePaletteRef.get()
                     val targetAnimalId = (if (com.geekify.android.BuildConfig.DEBUG) AsciiCalibration.forcedAnimal else null) ?: currentCfg.animalId
                     val spec = AsciiCatalog.byId(targetAnimalId)
                     engine.tuning.syncFrom(currentCfg, spec)
                     engine.ensureAnimal(targetAnimalId)
-                    engine.renderer.trailColor[0] = spec.trailDarkR.toFloat()
-                    engine.renderer.trailColor[1] = spec.trailDarkG.toFloat()
-                    engine.renderer.trailColor[2] = spec.trailDarkB.toFloat()
+                    engine.renderer.applyTheme(currentTheme)
+                    if (currentTheme.isLight) {
+                        adaptRgbForLightBackground(
+                            r = spec.trailDarkR.toFloat(),
+                            g = spec.trailDarkG.toFloat(),
+                            b = spec.trailDarkB.toFloat(),
+                            bgR = currentTheme.bgR,
+                            bgG = currentTheme.bgG,
+                            bgB = currentTheme.bgB,
+                            out = engine.renderer.trailColor
+                        )
+                    } else {
+                        engine.renderer.trailColor[0] = spec.trailDarkR.toFloat()
+                        engine.renderer.trailColor[1] = spec.trailDarkG.toFloat()
+                        engine.renderer.trailColor[2] = spec.trailDarkB.toFloat()
+                    }
 
                     // 3. Thread-safe sizing with debouncing and adaptive quality extraCw
                     val dims = sizeRef.get()

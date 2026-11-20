@@ -59,6 +59,12 @@ interface RecommendationFeedbackDao {
     @Query("SELECT * FROM user_recommendation_feedback WHERE undo = 0 ORDER BY createdAtMs DESC")
     fun observeActiveFeedback(): Flow<List<UserRecommendationFeedbackEntity>>
 
+    @Query("SELECT * FROM user_recommendation_feedback WHERE undo = 0 ORDER BY createdAtMs DESC")
+    suspend fun getActiveFeedbackOnce(): List<UserRecommendationFeedbackEntity>
+
+    @Query("SELECT * FROM user_recommendation_feedback WHERE targetType = 'TRACK' AND targetId = :videoId AND undo = 0 LIMIT 1")
+    fun observeTrackFeedback(videoId: String): Flow<UserRecommendationFeedbackEntity?>
+
     @Query("SELECT targetId FROM user_recommendation_feedback WHERE targetType = 'TRACK' AND (action = 'HIDE_TRACK' OR action = 'NOT_INTERESTED') AND undo = 0")
     fun observeHiddenTrackIds(): Flow<List<String>>
 

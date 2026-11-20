@@ -9,6 +9,21 @@ import androidx.compose.ui.graphics.luminance
 import com.geekify.android.customization.ThemeCustomizationConfig
 
 /**
+ * Single authoritative accent-foreground contrast resolver used across Material 3,
+ * [ActiveThemePalette], buttons, chips, navigation, player controls, and settings.
+ * Computes WCAG 2.x relative contrast against dark ink vs. pure white and picks the winner.
+ */
+fun resolveOnAccentColor(accent: Color): Color {
+    val accentLum = accent.luminance()
+    val darkInk = Color(0xFF14110A)
+    val darkLum = darkInk.luminance()
+    val whiteLum = 1.0f
+    val contrastWithDark = (maxOf(accentLum, darkLum) + 0.05f) / (minOf(accentLum, darkLum) + 0.05f)
+    val contrastWithWhite = (maxOf(accentLum, whiteLum) + 0.05f) / (minOf(accentLum, whiteLum) + 0.05f)
+    return if (contrastWithDark >= contrastWithWhite) darkInk else Color.White
+}
+
+/**
  * Reactive theme palette updated in real time by [GeekifyTheme] from [ThemeCustomizationConfig],
  * Material You dynamic colors, and ThemeMode (Auto / Light / Dark / Pure Black).
  * Backing top-level color getters with Compose state ensures every screen in the app updates
@@ -45,7 +60,7 @@ object ActiveThemePalette {
         val nextElevated = overrideElevated ?: if (dark) config.resolvedElevated else Color(0xFFE9E9F2)
         val nextAccent = overridePrimary ?: config.resolvedPrimary
         val nextSecondary = overrideSecondary ?: config.resolvedSecondary
-        val nextOnAccent = if (nextAccent.luminance() > 0.55f) Color(0xFF14110A) else Color(0xFFFFFFFF)
+        val nextOnAccent = resolveOnAccentColor(nextAccent)
 
         if (isDark != dark) isDark = dark
         if (background != nextBg) background = nextBg

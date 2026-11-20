@@ -140,6 +140,9 @@ object CustomizationPersistence {
 
     // Typography & Density
     val KEY_TYPO_FONT_CHOICE = stringPreferencesKey("cust_typo_font_choice")
+    val KEY_TYPO_FONT_ID = stringPreferencesKey("cust_typo_font_id")
+    val KEY_TYPO_FONT_NAME = stringPreferencesKey("cust_typo_font_name")
+    val KEY_TYPO_FONT_PATH = stringPreferencesKey("cust_typo_font_path")
     val KEY_TYPO_FONT_SCALE = floatPreferencesKey("cust_typo_font_scale")
     val KEY_TYPO_TITLE_SCALE = floatPreferencesKey("cust_typo_title_scale")
     val KEY_TYPO_SUBTITLE_SCALE = floatPreferencesKey("cust_typo_subtitle_scale")
@@ -391,9 +394,13 @@ object CustomizationPersistence {
         val displayDensity = prefs[KEY_TYPO_DISPLAY_DENSITY]?.let { runCatching { DisplayDensityScale.valueOf(it) }.getOrNull() }
             ?: DisplayDensityScale.fromLegacy(legacyDensityMode)
 
+        val resolvedFontChoice = prefs[KEY_TYPO_FONT_CHOICE]?.let { runCatching { AppFontChoice.valueOf(it) }.getOrNull() }
+            ?: AppFontChoice.SOHNE_BREIT
         val typography = TypographyDensityConfig(
-            fontChoice = prefs[KEY_TYPO_FONT_CHOICE]?.let { runCatching { AppFontChoice.valueOf(it) }.getOrNull() }
-                ?: AppFontChoice.SOHNE_BREIT,
+            fontChoice = resolvedFontChoice,
+            activeFontId = prefs[KEY_TYPO_FONT_ID] ?: "",
+            activeFontName = prefs[KEY_TYPO_FONT_NAME]?.takeIf { it.isNotBlank() } ?: resolvedFontChoice.label,
+            activeFontPath = prefs[KEY_TYPO_FONT_PATH] ?: "",
             fontScale = (prefs[KEY_TYPO_FONT_SCALE] ?: 1.0f).coerceIn(0.85f, 1.25f),
             titleScale = (prefs[KEY_TYPO_TITLE_SCALE] ?: 1.0f).coerceIn(0.85f, 1.25f),
             subtitleScale = (prefs[KEY_TYPO_SUBTITLE_SCALE] ?: 1.0f).coerceIn(0.85f, 1.25f),
@@ -599,6 +606,9 @@ object CustomizationPersistence {
             }
             CustomizationCategory.TYPOGRAPHY_DENSITY -> {
                 prefs.remove(KEY_TYPO_FONT_CHOICE)
+                prefs.remove(KEY_TYPO_FONT_ID)
+                prefs.remove(KEY_TYPO_FONT_NAME)
+                prefs.remove(KEY_TYPO_FONT_PATH)
                 prefs.remove(KEY_TYPO_FONT_SCALE)
                 prefs.remove(KEY_TYPO_TITLE_SCALE)
                 prefs.remove(KEY_TYPO_SUBTITLE_SCALE)

@@ -57,7 +57,8 @@ class HomeViewModel constructor(
     private val recommendationLog: com.geekify.android.data.local.RecommendationLogRepository,
     private val languageMetadataResolver: ListeningLanguageMetadataResolver,
     private val hybridPipeline: HybridRecommendationPipeline,
-    private val engineDao: com.geekify.android.data.local.RecommendationEngineDao
+    private val engineDao: com.geekify.android.data.local.RecommendationEngineDao,
+    private val feedbackDao: com.geekify.android.data.local.RecommendationFeedbackDao? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -95,6 +96,7 @@ class HomeViewModel constructor(
         updateGreeting()
         observeAuth()
         observeTaste()
+        observeFeedbackChanges()
         observeContentSettings()
         showCachedFeed()
         loadHome()
@@ -157,6 +159,20 @@ class HomeViewModel constructor(
                 if (lastMixBuildHadNoPersonalData || System.currentTimeMillis() - lastMixBuild >= MIN_REBUILD_INTERVAL_MS) {
                     startMixBuild()
                 }
+            }
+            .launchIn(viewModelScope)
+    }
+
+    @OptIn(FlowPreview::class)
+    private fun observeFeedbackChanges() {
+        val dao = feedbackDao ?: return
+        dao.observeActiveFeedback()
+            .map { rows -> rows.joinToString("|") { "${it.targetType}:${it.targetId}:${it.action}:${it.createdAtMs}" } }
+            .distinctUntilChanged()
+            .drop(1)
+            .debounce(1_500)
+            .onEach {
+                startMixBuild(forceRefresh = true)
             }
             .launchIn(viewModelScope)
     }
@@ -485,6 +501,7 @@ class HomeViewModel constructor(
             languageOverrides = languageOverridesSnapshot,
             pauseListenHistory = settings.pauseListenHistory,
             engineDao = engineDao,
+            feedbackDao = feedbackDao,
             nowMs = nowMs
         )
 

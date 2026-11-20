@@ -65,6 +65,14 @@ data class ReleaseChangelogEntry(
 )
 
 @Immutable
+data class ReleaseTimelinePage(
+    val entries: List<ReleaseChangelogEntry>,
+    val page: Int,
+    val hasMorePages: Boolean,
+    val fromCache: Boolean = false
+)
+
+@Immutable
 data class AvailableUpdate(
     val versionName: String,
     val versionCode: Int = ReleaseParser.versionCodeFor(versionName) ?: 0,
@@ -147,7 +155,9 @@ class AppUpdateManager constructor(
         private const val OWNER = "Amal-kphilip"
         private const val REPO = "Geekify-App"
         private const val LATEST_RELEASE_URL = "https://api.github.com/repos/$OWNER/$REPO/releases/latest"
-        private const val RELEASES_LIST_URL = "https://api.github.com/repos/$OWNER/$REPO/releases?per_page=8"
+        internal const val RELEASES_PAGE_SIZE = 30
+        private fun releasesListUrl(page: Int): String =
+            "https://api.github.com/repos/$OWNER/$REPO/releases?per_page=$RELEASES_PAGE_SIZE&page=${page.coerceAtLeast(1)}"
         private const val RELEASES_HTML_BASE = "https://github.com/$OWNER/$REPO/releases"
         private const val PREFS_NAME = "geekify_app_updater_prefs"
         private const val KEY_DISMISSED_VERSION = "dismissed_version_name"
@@ -222,36 +232,93 @@ class AppUpdateManager constructor(
         }
     }.getOrNull()
 
-    private fun fetchReleaseTimeline(currentVersion: String): List<ReleaseChangelogEntry> = runCatching {
-        val cachedEtag = prefs.getString(KEY_CACHED_RELEASES_ETAG, null)
+    suspend fun fetchReleaseTimelinePage(
+        currentVersion: String,
+        page: Int = 1
+    ): ReleaseTimelinePage = withContext(Dispatchers.IO) {
+        fetchReleaseTimelinePageSync(currentVersion = currentVersion, page = page)
+    }
+
+    private fun fetchReleaseTimeline(currentVersion: String): List<ReleaseChangelogEntry> =
+        fetchReleaseTimelinePageSync(currentVersion = currentVersion, page = 1).entries
+
+    internal fun parseHasNextPage(linkHeader: String?, itemCount: Int): Boolean {
+        if (!linkHeader.isNullOrBlank()) {
+            return linkHeader.contains("rel=\"next\"", ignoreCase = true)
+        }
+        return itemCount >= RELEASES_PAGE_SIZE
+    }
+
+    private fun fetchReleaseTimelinePageSync(
+        currentVersion: String,
+        page: Int
+    ): ReleaseTimelinePage = runCatching {
+        val safePage = page.coerceAtLeast(1)
+        val etagKey = if (safePage == 1) KEY_CACHED_RELEASES_ETAG else "${KEY_CACHED_RELEASES_ETAG}_p$safePage"
+        val jsonKey = if (safePage == 1) KEY_CACHED_RELEASES_JSON else "${KEY_CACHED_RELEASES_JSON}_p$safePage"
+        val cachedEtag = prefs.getString(etagKey, null)
+
         val reqBuilder = Request.Builder()
-            .url(RELEASES_LIST_URL)
+            .url(releasesListUrl(safePage))
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", "Geekify-Android-Updater")
         if (!cachedEtag.isNullOrBlank()) {
             reqBuilder.header("If-None-Match", cachedEtag)
         }
 
+        var linkHeader: String? = null
+        var fromCache = false
         val rawJson = http.newCall(reqBuilder.build()).execute().use { res ->
+            linkHeader = res.header("Link")
             when {
-                res.code == 304 -> prefs.getString(KEY_CACHED_RELEASES_JSON, null)
+                res.code == 304 -> {
+                    fromCache = true
+                    prefs.getString(jsonKey, null)
+                }
                 res.isSuccessful -> {
                     val body = res.body.string()
                     if (body.isNotBlank()) {
                         prefs.edit()
-                            .putString(KEY_CACHED_RELEASES_ETAG, res.header("ETag"))
-                            .putString(KEY_CACHED_RELEASES_JSON, body)
+                            .putString(etagKey, res.header("ETag"))
+                            .putString(jsonKey, body)
                             .apply()
                     }
                     body
                 }
-                else -> prefs.getString(KEY_CACHED_RELEASES_JSON, null)
+                else -> {
+                    fromCache = true
+                    prefs.getString(jsonKey, null)
+                }
             }
-        } ?: return emptyList()
+        } ?: return ReleaseTimelinePage(emptyList(), safePage, hasMorePages = false, fromCache = true)
 
         val array = json.parseToJsonElement(rawJson).jsonArray
-        parseReleaseTimelineJson(array, currentVersion)
-    }.getOrDefault(emptyList())
+        val entries = parseReleaseTimelineJson(array, currentVersion)
+        val hasMore = parseHasNextPage(linkHeader, array.size)
+        ReleaseTimelinePage(
+            entries = entries,
+            page = safePage,
+            hasMorePages = hasMore,
+            fromCache = fromCache
+        )
+    }.getOrElse {
+        val safePage = page.coerceAtLeast(1)
+        val jsonKey = if (safePage == 1) KEY_CACHED_RELEASES_JSON else "${KEY_CACHED_RELEASES_JSON}_p$safePage"
+        val cached = prefs.getString(jsonKey, null)
+        if (!cached.isNullOrBlank()) {
+            val array = runCatching { json.parseToJsonElement(cached).jsonArray }.getOrNull()
+            if (array != null) {
+                val entries = parseReleaseTimelineJson(array, currentVersion)
+                return ReleaseTimelinePage(
+                    entries = entries,
+                    page = safePage,
+                    hasMorePages = array.size >= RELEASES_PAGE_SIZE,
+                    fromCache = true
+                )
+            }
+        }
+        ReleaseTimelinePage(emptyList(), safePage, hasMorePages = false, fromCache = true)
+    }
 
     /**
      * Returns an existing verified APK on disk for [update] if one was already downloaded

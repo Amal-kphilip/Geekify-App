@@ -10,6 +10,7 @@ import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -620,18 +621,53 @@ object TtmlParser {
             .replace("&#39;", "'")
 }
 
+class ProviderAuthException(
+    val provider: String,
+    val httpCode: Int
+) : IOException("$provider authentication failed (HTTP $httpCode)")
+
 /**
  * Multi-provider lyrics client supporting:
- * 1. BetterLyrics (word-synced & line-synced TTML)
- * 2. SimpMusic (video-ID richSyncLyrics & syncedLyrics)
+ * 1. SimpMusic (video-ID richSyncLyrics & syncedLyrics)
+ * 2. BetterLyrics (word-synced & line-synced TTML; guarded by auth circuit breaker on HTTP 401/403)
  * 3. LrcLib (search + exact match with metadata normalization & candidate verification)
  * 4. KuGou (keyword + duration search -> Base64 LRC download)
  * 5. YouTube Music / InnerTube (official lyrics endpoint + timed subtitle transcript fallback)
  */
-class LyricsClient(private val http: OkHttpClient) {
+class LyricsClient(
+    private val http: OkHttpClient,
+    private val nowMsProvider: () -> Long = { System.currentTimeMillis() }
+) {
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
+    }
+
+    /**
+     * Tracks providers that returned HTTP 401/403 so we do not hammer them repeatedly on every
+     * track or secondary title query. Entries expire after [AUTH_FAILURE_COOLDOWN_MS].
+     */
+    private val authBlockedUntilMs = ConcurrentHashMap<String, Long>()
+
+    companion object {
+        internal const val AUTH_FAILURE_COOLDOWN_MS = 15 * 60 * 1000L
+    }
+
+    fun isProviderAuthBlocked(provider: String): Boolean {
+        val until = authBlockedUntilMs[provider] ?: return false
+        if (nowMsProvider() >= until) {
+            authBlockedUntilMs.remove(provider, until)
+            return false
+        }
+        return true
+    }
+
+    fun markProviderAuthBlocked(provider: String) {
+        authBlockedUntilMs[provider] = nowMsProvider() + AUTH_FAILURE_COOLDOWN_MS
+    }
+
+    fun clearAuthBlocks() {
+        authBlockedUntilMs.clear()
     }
 
     data class FetchedLyrics(
@@ -677,19 +713,32 @@ class LyricsClient(private val http: OkHttpClient) {
         }
 
         val candidates = mutableListOf<ParsedLyrics>()
+        var successfulProviderChecks = 0
         var hadNetworkFailure = false
         var lastNetworkMessage: String? = null
+        var hadAuthFailure = false
+        var lastAuthMessage: String? = null
         var hadInvalidResponse = false
         var lastInvalidProvider: String? = null
 
         suspend fun runProvider(name: String, block: suspend () -> ParsedLyrics?) {
+            if (isProviderAuthBlocked(name)) {
+                hadAuthFailure = true
+                lastAuthMessage = "$name requires authentication and is temporarily skipped."
+                return
+            }
             try {
                 val res = block()
+                successfulProviderChecks++
                 if (res != null && res.lines.isNotEmpty()) {
                     candidates += res
                 }
             } catch (ce: CancellationException) {
                 throw ce
+            } catch (auth: ProviderAuthException) {
+                markProviderAuthBlocked(auth.provider)
+                hadAuthFailure = true
+                lastAuthMessage = auth.message ?: "$name authentication failed (HTTP ${auth.httpCode})"
             } catch (io: IOException) {
                 hadNetworkFailure = true
                 lastNetworkMessage = io.message ?: "Network error contacting $name"
@@ -709,13 +758,13 @@ class LyricsClient(private val http: OkHttpClient) {
             }
         }
 
-        // 2. BetterLyrics (TTML word-synced / line-synced)
+        // 2. BetterLyrics (TTML word-synced / line-synced; skips second pass immediately if 401/403)
         if (collectAllAlternatives || !hasWordSyncedCandidate()) {
             runProvider("BetterLyrics") {
-                fetchFromBetterLyrics(cleanTitle, primaryArtist.ifBlank { cleanArtist }, resolvedDurationSec, album)
-                    ?: if (coreTitle != cleanTitle) {
-                        fetchFromBetterLyrics(coreTitle, primaryArtist, resolvedDurationSec, null)
-                    } else null
+                val primary = fetchFromBetterLyrics(cleanTitle, primaryArtist.ifBlank { cleanArtist }, resolvedDurationSec, album)
+                primary ?: if (coreTitle != cleanTitle && !isProviderAuthBlocked("BetterLyrics")) {
+                    fetchFromBetterLyrics(coreTitle, primaryArtist, resolvedDurationSec, null)
+                } else null
             }
         }
 
@@ -760,9 +809,18 @@ class LyricsClient(private val http: OkHttpClient) {
             )
         }
 
+        // If at least one supported provider was reachable and genuinely checked the track
+        // without finding lyrics, report NoMatch rather than surfacing a single failed/401 provider.
+        if (successfulProviderChecks > 0) {
+            return@withContext LyricsLookupOutcome.NoMatch(cleanTitle, cleanArtist)
+        }
+
         return@withContext when {
             hadNetworkFailure -> LyricsLookupOutcome.NetworkFailure(
                 lastNetworkMessage ?: "Unable to reach lyrics providers. Check your connection and retry."
+            )
+            hadAuthFailure -> LyricsLookupOutcome.NetworkFailure(
+                lastAuthMessage ?: "Lyrics providers could not be reached. Please try again."
             )
             hadInvalidResponse -> LyricsLookupOutcome.InvalidResponse(
                 provider = lastInvalidProvider ?: "Lyrics Provider",
@@ -784,6 +842,7 @@ class LyricsClient(private val http: OkHttpClient) {
 
         http.newCall(req).execute().use { res ->
             if (res.code == 404) return null
+            if (res.code == 401 || res.code == 403) throw ProviderAuthException("SimpMusic", res.code)
             if (!res.isSuccessful) throw IOException("SimpMusic HTTP ${res.code}")
             val body = res.body.string()
             if (body.isBlank()) return null
@@ -839,6 +898,7 @@ class LyricsClient(private val http: OkHttpClient) {
 
         http.newCall(req).execute().use { res ->
             if (res.code == 404 || res.code == 400) return null
+            if (res.code == 401 || res.code == 403) throw ProviderAuthException("BetterLyrics", res.code)
             if (!res.isSuccessful) throw IOException("BetterLyrics HTTP ${res.code}")
             val body = res.body.string()
             if (body.isBlank()) return null
@@ -1079,6 +1139,7 @@ class LyricsRepository(
 
     private val negativeCache = ConcurrentHashMap<String, NegativeCacheEntry>()
     private val alternativesCache = ConcurrentHashMap<String, List<ParsedLyrics>>()
+    private val inFlightRequests = ConcurrentHashMap<String, CompletableDeferred<LyricsLookupOutcome>>()
 
     companion object {
         internal const val NEGATIVE_CACHE_TTL_MS = 45_000L
@@ -1132,46 +1193,73 @@ class LyricsRepository(
             negativeCache.remove(fingerprint)
         }
 
-        val outcome = lyricsClient.fetchOutcome(
-            title = title,
-            artist = artist,
-            durationSeconds = resolvedDuration,
-            videoId = videoId,
-            album = album,
-            collectAllAlternatives = collectAlternatives
-        )
+        val inFlightKey = "$fingerprint|$collectAlternatives"
+        if (!forceRefresh) {
+            inFlightRequests[inFlightKey]?.let { existingDeferred ->
+                return existingDeferred.await()
+            }
+        }
 
-        when (outcome) {
-            is LyricsLookupOutcome.Success -> {
-                negativeCache.remove(fingerprint)
-                val existingOffset = lyricsDao.find(videoId)?.offsetMs ?: 0L
-                val rawToSave = outcome.lyrics.rawText.ifBlank { LrcParser.toLrcString(outcome.lyrics) }
-                lyricsDao.upsert(
-                    LyricsEntity(
-                        videoId = videoId,
-                        rawLyrics = rawToSave,
-                        provider = outcome.lyrics.provider,
-                        offsetMs = existingOffset,
-                        updatedAt = now
+        val deferred = CompletableDeferred<LyricsLookupOutcome>()
+        val existing = inFlightRequests.putIfAbsent(inFlightKey, deferred)
+        if (existing != null && !forceRefresh) {
+            return existing.await()
+        }
+
+        return try {
+            val outcome = lyricsClient.fetchOutcome(
+                title = title,
+                artist = artist,
+                durationSeconds = resolvedDuration,
+                videoId = videoId,
+                album = album,
+                collectAllAlternatives = collectAlternatives
+            )
+
+            val finalOutcome = when (outcome) {
+                is LyricsLookupOutcome.Success -> {
+                    negativeCache.remove(fingerprint)
+                    val existingOffset = lyricsDao.find(videoId)?.offsetMs ?: 0L
+                    val rawToSave = outcome.lyrics.rawText.ifBlank { LrcParser.toLrcString(outcome.lyrics) }
+                    lyricsDao.upsert(
+                        LyricsEntity(
+                            videoId = videoId,
+                            rawLyrics = rawToSave,
+                            provider = outcome.lyrics.provider,
+                            offsetMs = existingOffset,
+                            updatedAt = now
+                        )
                     )
-                )
-                val withOffset = outcome.lyrics.copy(offsetMs = existingOffset)
-                val altsWithOffset = outcome.alternatives.map { it.copy(offsetMs = existingOffset) }
-                alternativesCache[videoId] = altsWithOffset
-                return LyricsLookupOutcome.Success(withOffset, altsWithOffset)
-            }
-            else -> {
-                // If we had an older unsynchronized cached entry, preserve and return it rather than wiping it
-                val existing = lyricsDao.find(videoId)
-                if (existing != null && existing.rawLyrics.isNotBlank()) {
-                    val parsed = LrcParser.parse(existing.rawLyrics, existing.provider, existing.offsetMs)
-                    return LyricsLookupOutcome.Success(parsed, listOf(parsed))
+                    val withOffset = outcome.lyrics.copy(offsetMs = existingOffset)
+                    val altsWithOffset = outcome.alternatives.map { it.copy(offsetMs = existingOffset) }
+                    alternativesCache[videoId] = altsWithOffset
+                    LyricsLookupOutcome.Success(withOffset, altsWithOffset)
                 }
-                if (outcome is LyricsLookupOutcome.NoMatch) {
-                    negativeCache[fingerprint] = NegativeCacheEntry(now, outcome)
+                else -> {
+                    // If we had an older unsynchronized cached entry, preserve and return it rather than wiping it
+                    val cachedFallback = lyricsDao.find(videoId)
+                    if (cachedFallback != null && cachedFallback.rawLyrics.isNotBlank()) {
+                        val parsed = LrcParser.parse(cachedFallback.rawLyrics, cachedFallback.provider, cachedFallback.offsetMs)
+                        LyricsLookupOutcome.Success(parsed, listOf(parsed))
+                    } else {
+                        if (outcome is LyricsLookupOutcome.NoMatch) {
+                            negativeCache[fingerprint] = NegativeCacheEntry(now, outcome)
+                        }
+                        outcome
+                    }
                 }
-                return outcome
             }
+            deferred.complete(finalOutcome)
+            finalOutcome
+        } catch (ce: CancellationException) {
+            deferred.cancel(ce)
+            throw ce
+        } catch (t: Throwable) {
+            val failure = LyricsLookupOutcome.NetworkFailure(t.message ?: "Unable to fetch lyrics.")
+            deferred.complete(failure)
+            failure
+        } finally {
+            inFlightRequests.remove(inFlightKey, deferred)
         }
     }
 

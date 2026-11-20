@@ -30,6 +30,7 @@ fun LikedScreen(
     viewModel: LibraryViewModel,
     onBack: () -> Unit,
     onPlayTrack: (Track, List<Track>) -> Unit,
+    onTrackActions: (Track) -> Unit = {},
     onShufflePlay: ((List<Track>) -> Unit)? = null
 ) {
     val liked by viewModel.liked.collectAsStateWithLifecycle()
@@ -74,7 +75,11 @@ fun LikedScreen(
                 key = { it.videoId },
                 contentType = { "track_row" }
             ) { track ->
-                TrackRow(track = track, onClick = { onPlayTrack(track, liked) })
+                TrackRow(
+                    track = track,
+                    onClick = { onPlayTrack(track, liked) },
+                    onLongClick = { onTrackActions(track) }
+                )
             }
 
             item { Spacer(Modifier.height(24.dp + LocalBottomInset.current)) }

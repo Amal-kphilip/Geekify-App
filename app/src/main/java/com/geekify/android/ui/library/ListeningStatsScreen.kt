@@ -133,7 +133,8 @@ fun ListeningStatsScreen(
         title = "Listening Stats",
         scrollState = scrollState,
         onBack = onBack,
-        bottomPadding = bottomInset + 36.dp
+        bottomPadding = bottomInset + 36.dp,
+        minimalStyle = true
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
             ListeningOverviewCard(

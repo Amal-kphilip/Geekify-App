@@ -223,9 +223,29 @@ fun HomeScreen(
             }
         }
     }
-    val visibleList = remember(showAllPlaylists, listItems) {
-        if (showAllPlaylists) listItems.take(20) else listItems.take(5)
+    val isGridLayout = homeCust.layoutMode == com.geekify.android.customization.HomeLayoutMode.COMPACT_GRID
+    val gridCols = homeCust.gridColumns.coerceIn(2, 3)
+    var seeAllPageLimit by remember(state.selectedFilter, isGridLayout, gridCols) {
+        mutableIntStateOf(if (isGridLayout) 18 else 20)
     }
+    val dedupedListItems = remember(listItems) { listItems.distinctBy { it.id } }
+    val targetVisibleCount = remember(showAllPlaylists, seeAllPageLimit, isGridLayout, gridCols, dedupedListItems.size) {
+        val requested = if (showAllPlaylists) seeAllPageLimit else if (isGridLayout) 6 else 5
+        if (isGridLayout) {
+            resolveGridVisibleCount(
+                totalAvailable = dedupedListItems.size,
+                requestedCount = requested,
+                columns = gridCols
+            )
+        } else {
+            requested.coerceAtMost(dedupedListItems.size)
+        }
+    }
+    val visibleList = remember(dedupedListItems, targetVisibleCount) {
+        dedupedListItems.take(targetVisibleCount)
+    }
+    val hasMoreSeeAllItems = showAllPlaylists && visibleList.size < dedupedListItems.size
+    val collapsedPreviewCount = if (isGridLayout) 6 else 5
     val listSectionTitle = when (state.selectedFilter) {
         "Songs" -> "Top daily songs"
         "Albums" -> "Top daily albums"
@@ -487,23 +507,28 @@ fun HomeScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             SectionTitle(listSectionTitle, modifier = Modifier.weight(1f))
-                                            if (listItems.size > 5) {
+                                            if (dedupedListItems.size > collapsedPreviewCount) {
                                                 Text(
                                                     text = if (showAllPlaylists) "Show less" else "See all",
                                                     color = TextSecondary,
                                                     fontSize = 16.sp,
-                                                    modifier = Modifier.bouncyClickable { showAllPlaylists = !showAllPlaylists }
+                                                    modifier = Modifier.bouncyClickable {
+                                                        showAllPlaylists = !showAllPlaylists
+                                                        if (!showAllPlaylists) {
+                                                            seeAllPageLimit = if (isGridLayout) 18 else 20
+                                                        }
+                                                    }
                                                 )
                                             }
                                         }
                                     }
                                 }
-                                if (homeCust.layoutMode == com.geekify.android.customization.HomeLayoutMode.COMPACT_GRID) {
-                                    val cols = homeCust.gridColumns.coerceIn(2, 3)
+                                if (isGridLayout) {
+                                    val cols = gridCols
                                     val chunked = visibleList.chunked(cols)
                                     itemsIndexed(
                                         items = chunked,
-                                        key = { rowIdx, row -> "daily_grid:$rowIdx:${row.firstOrNull()?.id}" },
+                                        key = { rowIdx, row -> "daily_grid:$rowIdx:${row.joinToString("_") { it.id }}" },
                                         contentType = { _, _ -> "daily_grid_row" }
                                     ) { _, rowItems ->
                                         Row(
@@ -518,7 +543,16 @@ fun HomeScreen(
                                                         .weight(1f)
                                                         .clip(RoundedCornerShape(homeCust.cardCornerRadiusDp.dp))
                                                         .background(InkPanel)
-                                                        .bouncyClickable { item.onClick() }
+                                                        .run {
+                                                            if (item.onLongClick != null) {
+                                                                bouncyCombinedClickable(
+                                                                    onLongClick = item.onLongClick,
+                                                                    onClick = item.onClick
+                                                                )
+                                                            } else {
+                                                                bouncyClickable(onClick = item.onClick)
+                                                            }
+                                                        }
                                                         .padding(10.dp)
                                                 ) {
                                                     Column {
@@ -562,8 +596,33 @@ fun HomeScreen(
                                                     }
                                                 }
                                             }
-                                            repeat(cols - rowItems.size) {
-                                                Spacer(Modifier.weight(1f))
+                                            // Only add spacing when the collection genuinely has no more eligible items
+                                            if (rowItems.size < cols) {
+                                                repeat(cols - rowItems.size) {
+                                                    Spacer(Modifier.weight(1f))
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (hasMoreSeeAllItems) {
+                                        item(key = "daily_grid_load_more") {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "Load more (${dedupedListItems.size - visibleList.size} remaining)",
+                                                    color = Lime,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    modifier = Modifier
+                                                        .clip(CircleShape)
+                                                        .background(InkElevated)
+                                                        .bouncyClickable { seeAllPageLimit += 12 }
+                                                        .padding(horizontal = 18.dp, vertical = 10.dp)
+                                                )
                                             }
                                         }
                                     }
@@ -579,6 +638,28 @@ fun HomeScreen(
                                             cornerRadiusDp = (homeCust.cardCornerRadiusDp - 4).coerceAtLeast(8),
                                             showMetadata = homeCust.showMetadata
                                         )
+                                    }
+                                    if (hasMoreSeeAllItems) {
+                                        item(key = "daily_list_load_more") {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "Load more (${dedupedListItems.size - visibleList.size} remaining)",
+                                                    color = Lime,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    modifier = Modifier
+                                                        .clip(CircleShape)
+                                                        .background(InkElevated)
+                                                        .bouncyClickable { seeAllPageLimit += 15 }
+                                                        .padding(horizontal = 18.dp, vertical = 10.dp)
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -856,4 +937,25 @@ private fun PlaylistRowPlayButton(item: ListRowItem) {
         size = 42.dp,
         iconSize = 18.dp
     )
+}
+
+/**
+ * Computes the number of grid items to display so that no avoidable empty slot is left in the
+ * final row of a 2-column or 3-column layout when additional eligible unique items are available.
+ * If the collection genuinely has fewer remaining items than needed to complete the final row,
+ * returns [totalAvailable] without fabricating or duplicating placeholders.
+ */
+internal fun resolveGridVisibleCount(
+    totalAvailable: Int,
+    requestedCount: Int,
+    columns: Int
+): Int {
+    if (totalAvailable <= 0) return 0
+    val safeCols = columns.coerceAtLeast(1)
+    val base = requestedCount.coerceAtLeast(0).coerceAtMost(totalAvailable)
+    if (safeCols == 1 || base == 0) return base
+    val remainder = base % safeCols
+    if (remainder == 0) return base
+    val needed = safeCols - remainder
+    return if (base + needed <= totalAvailable) base + needed else totalAvailable
 }

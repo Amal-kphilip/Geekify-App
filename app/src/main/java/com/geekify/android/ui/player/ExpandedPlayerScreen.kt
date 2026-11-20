@@ -153,6 +153,13 @@ fun ExpandedPlayerScreen(
     }
     if (track == null) return
 
+    val primaryArtistId = remember(track.artists) {
+        track.artists.firstOrNull { !it.id.isNullOrBlank() }?.id?.trim()?.takeIf { it.isNotEmpty() }
+    }
+    val resolvedAlbumId = remember(track.albumId) {
+        track.albumId?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
     val customizationViewModel: com.geekify.android.customization.CustomizationViewModel =
         org.koin.androidx.compose.koinViewModel()
     val customization = LocalCustomizationState.current
@@ -254,6 +261,14 @@ fun ExpandedPlayerScreen(
     val artColor by rememberArtColor(thumbUrl, fallback = InkElevated)
     val animatedArtColor by animateColorAsState(artColor, tween(550), label = "playerArtColor")
 
+    val isLightPlayerSurface = !ActiveThemePalette.isDark &&
+        playerCust.backgroundStyle == PlayerBackgroundStyle.SOLID_DARK &&
+        playerCust.layoutStyle != PlayerLayoutStyle.FULLSCREEN_ARTWORK
+    val playerFg = if (isLightPlayerSurface) TextPrimary else Color.White
+    val playerFgSecondary = if (isLightPlayerSurface) TextSecondary else Color.White.copy(alpha = 0.72f)
+    val playerControlBg = if (isLightPlayerSurface) InkElevated else Color.White.copy(alpha = 0.14f)
+    val playerTopBtnBg = if (isLightPlayerSurface) InkElevated else Color.White.copy(alpha = if (playerCust.layoutStyle == PlayerLayoutStyle.MINIMAL) 0.12f else 0.18f)
+
     // Dynamic accent harmonization when enabled or Content palette style is active
     val playerAccent = remember(animatedArtColor, Lime, themeCust.dynamicPlayerAccent, themeCust.paletteStyle) {
         if (themeCust.dynamicPlayerAccent || themeCust.paletteStyle == ThemePaletteStyle.CONTENT) {
@@ -263,7 +278,7 @@ fun ExpandedPlayerScreen(
             Lime
         }
     }
-    val onPlayerAccent = if (playerAccent.luminance() > 0.55f) Color(0xFF14110A) else Color.White
+    val onPlayerAccent = resolveOnAccentColor(playerAccent)
 
     // Check cellular/metered network for animated artwork power/data saving
     val isMeteredNetwork = remember(context, track.videoId, playerCust.disableAnimatedArtworkOnMobileData) {
@@ -516,12 +531,14 @@ fun ExpandedPlayerScreen(
                             contentDescription = "Collapse",
                             onClick = { if (expandedControlsInteractive()) onDismiss() },
                             size = topBtnSize,
-                            container = Color.White.copy(alpha = if (isMinimal) 0.12f else 0.18f),
-                            tint = Color.White
+                            container = playerTopBtnBg,
+                            tint = playerFg
                         )
 
                         Column(
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 14.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
@@ -530,19 +547,39 @@ fun ExpandedPlayerScreen(
                                     isMinimal -> ""
                                     else -> "Now Playing"
                                 },
-                                color = if (isExpressive) playerAccent else Color.White.copy(alpha = 0.90f),
+                                color = if (isExpressive) playerAccent else playerFg.copy(alpha = 0.90f),
                                 fontSize = if (isExpressive) 11.sp else 16.sp,
                                 fontWeight = if (isExpressive) FontWeight.Bold else FontWeight.Medium,
                                 letterSpacing = if (isExpressive) 1.4.sp else 0.sp,
-                                maxLines = 1
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center
                             )
                             if (playerCust.showAlbumMetadata && !track.album.isNullOrBlank() && !isMinimal) {
                                 Text(
                                     text = track.album,
-                                    color = Color.White.copy(alpha = 0.62f),
+                                    color = playerFgSecondary,
                                     fontSize = 11.5.sp,
                                     maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    overflow = TextOverflow.Ellipsis,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .then(
+                                            if (resolvedAlbumId != null) {
+                                                Modifier.clickable(
+                                                    onClickLabel = "Open album ${track.album}"
+                                                ) {
+                                                    if (expandedControlsInteractive()) {
+                                                        onNavigateToAlbum(resolvedAlbumId)
+                                                        onDismiss()
+                                                    }
+                                                }
+                                            } else {
+                                                Modifier
+                                            }
+                                        )
+                                        .padding(horizontal = 4.dp, vertical = 1.dp)
                                 )
                             }
                         }
@@ -553,8 +590,8 @@ fun ExpandedPlayerScreen(
                             contentDescription = "More options",
                             onClick = { if (expandedControlsInteractive()) showMoreOptions = true },
                             size = topBtnSize,
-                            container = Color.White.copy(alpha = if (isMinimal) 0.12f else 0.18f),
-                            tint = Color.White
+                            container = playerTopBtnBg,
+                            tint = playerFg
                         )
                     }
 
@@ -881,7 +918,7 @@ fun ExpandedPlayerScreen(
                                         lineHeight = if (isExpressive) 35.sp else 31.sp,
                                         fontWeight = if (isExpressive) FontWeight.Bold else FontWeight.SemiBold
                                     ),
-                                    color = Color.White,
+                                    color = playerFg,
                                     textAlign = titleAlign,
                                     speedDpPerSecond = if (isMarqueeActive) 42f else 0f
                                 )
@@ -896,6 +933,22 @@ fun ExpandedPlayerScreen(
                                         transitionState.expandedArtistBounds = coords.boundsInRoot()
                                     }
                                 }
+                                .clip(RoundedCornerShape(8.dp))
+                                .then(
+                                    if (primaryArtistId != null) {
+                                        Modifier.clickable(
+                                            onClickLabel = "Open artist ${track.artist}"
+                                        ) {
+                                            if (expandedControlsInteractive()) {
+                                                onNavigateToArtist(primaryArtistId)
+                                                onDismiss()
+                                            }
+                                        }
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                                .padding(vertical = 2.dp)
                         ) {
                             MarqueeText(
                                 text = track.artist,
@@ -905,7 +958,7 @@ fun ExpandedPlayerScreen(
                                     fontSize = if (isExpressive) 16.sp else 15.sp,
                                     fontWeight = FontWeight.Normal
                                 ),
-                                color = Color.White.copy(alpha = 0.72f),
+                                color = playerFgSecondary,
                                 textAlign = titleAlign,
                                 speedDpPerSecond = if (isMarqueeActive) 42f else 0f
                             )
@@ -1023,6 +1076,7 @@ fun ExpandedPlayerScreen(
                             seekbarCust = seekbarCust,
                             activeColor = playerAccent,
                             secondaryAccentColor = Lilac,
+                            inactiveBaseColor = playerFg,
                             pendingSeek = sharedPendingSeek,
                             onPendingSeekChange = { sharedPendingSeek = it },
                             onSeek = { if (expandedControlsInteractive()) viewModel.seek(it) },
@@ -1060,7 +1114,7 @@ fun ExpandedPlayerScreen(
                                     Icon(
                                         GeekifyIcons.Shuffle,
                                         contentDescription = "Shuffle",
-                                        tint = if (state.shuffle) playerAccent else Color.White,
+                                        tint = if (state.shuffle) playerAccent else playerFg,
                                         modifier = Modifier.size(if (playerCust.compactControls) 22.dp else 25.dp)
                                     )
                                 }
@@ -1085,8 +1139,8 @@ fun ExpandedPlayerScreen(
                                 onClick = { if (expandedControlsInteractive()) viewModel.previous() },
                                 size = skipBtnSize,
                                 iconSize = if (playerCust.compactControls) 22.dp else 24.dp,
-                                container = if (isMinimal) Color.Transparent else Color.White.copy(alpha = 0.14f),
-                                tint = Color.White
+                                container = if (isMinimal) Color.Transparent else playerControlBg,
+                                tint = playerFg
                             )
                         }
 
@@ -1199,13 +1253,13 @@ fun ExpandedPlayerScreen(
                                                 val p = transitionState.progress
                                                 alpha = (1f - p * 1.4f).coerceIn(0f, 1f)
                                             }
-                                            .background(Color.White.copy(alpha = 0.14f))
+                                            .background(playerControlBg)
                                     )
                                 }
                                 Icon(
                                     imageVector = GeekifyIcons.SkipNext,
                                     contentDescription = "Next",
-                                    tint = Color.White,
+                                    tint = playerFg,
                                     modifier = Modifier.size(if (playerCust.compactControls) 22.dp else 24.dp)
                                 )
                             }
@@ -1219,6 +1273,7 @@ fun ExpandedPlayerScreen(
                                     onClick = { if (expandedControlsInteractive()) viewModel.toggleLikeCurrent() },
                                     size = if (playerCust.compactControls) 22.dp else 25.dp,
                                     activeColor = playerAccent,
+                                    inactiveColor = playerFg.copy(alpha = 0.85f),
                                     modifier = Modifier.graphicsLayer {
                                         val p = transitionState.progress
                                         val lp = lyricsTransition.progress
@@ -1244,6 +1299,7 @@ fun ExpandedPlayerScreen(
                         onToggleLyrics = { if (expandedControlsInteractive()) lyricsTransition.open(reducedMotion) },
                         onOpenTimer = { if (expandedControlsInteractive()) showSleepTimer = true },
                         onOpenQueue = { if (expandedControlsInteractive()) onQueueClick() },
+                        onLightSurface = isLightPlayerSurface,
                         modifier = Modifier.graphicsLayer {
                             val p = transitionState.progress
                             val lp = lyricsTransition.progress
@@ -1312,7 +1368,7 @@ fun ExpandedPlayerScreen(
                             ) {
                                 Text(
                                     text = track.title,
-                                    color = Color.White,
+                                    color = playerFg,
                                     fontSize = 15.5.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
@@ -1320,7 +1376,7 @@ fun ExpandedPlayerScreen(
                                 )
                                 Text(
                                     text = track.artist,
-                                    color = Color.White.copy(alpha = 0.70f),
+                                    color = playerFgSecondary,
                                     fontSize = 12.5.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -1336,7 +1392,7 @@ fun ExpandedPlayerScreen(
                                     Icon(
                                         imageVector = GeekifyIcons.Sliders,
                                         contentDescription = "Lyrics options",
-                                        tint = Color.White,
+                                        tint = playerFg,
                                         modifier = Modifier.size(21.dp)
                                     )
                                 }
@@ -1344,7 +1400,7 @@ fun ExpandedPlayerScreen(
                                     Icon(
                                         imageVector = GeekifyIcons.Close,
                                         contentDescription = "Close lyrics",
-                                        tint = Color.White,
+                                        tint = playerFg,
                                         modifier = Modifier.size(22.dp)
                                     )
                                 }
@@ -1369,6 +1425,7 @@ fun ExpandedPlayerScreen(
                             },
                             accentOverride = playerAccent,
                             playerBackgroundStyle = playerCust.backgroundStyle,
+                            onLightSurface = isLightPlayerSurface,
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxWidth()
@@ -1448,6 +1505,7 @@ fun ExpandedPlayerScreen(
                                     onToggleLyrics = { lyricsTransition.close(reducedMotion) },
                                     onOpenTimer = { showSleepTimer = true },
                                     onOpenQueue = onQueueClick,
+                                    onLightSurface = isLightPlayerSurface,
                                     modifier = Modifier.padding(bottom = 12.dp)
                                 )
                             }
@@ -1568,15 +1626,19 @@ private fun PlayerBottomActionPill(
     onToggleLyrics: () -> Unit,
     onOpenTimer: () -> Unit,
     onOpenQueue: () -> Unit,
+    onLightSurface: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     if (!playerCust.showLyricsButton && !playerCust.showSleepTimerButton && !playerCust.showQueueButton) return
+    val pillBg = if (onLightSurface) InkElevated else Color.White.copy(alpha = 0.10f)
+    val pillBorder = if (onLightSurface) InkGlassBorder else Color.White.copy(alpha = 0.10f)
+    val inactiveFg = if (onLightSurface) TextPrimary else Color.White
     Row(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(26.dp))
-            .background(Color.White.copy(alpha = 0.10f))
-            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(26.dp))
+            .background(pillBg)
+            .border(1.dp, pillBorder, RoundedCornerShape(26.dp))
             .padding(horizontal = 8.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
@@ -1587,6 +1649,7 @@ private fun PlayerBottomActionPill(
                 label = "Lyrics",
                 active = showLyricsOverlay,
                 accent = accent,
+                inactiveColor = inactiveFg,
                 onClick = onToggleLyrics
             )
         }
@@ -1596,6 +1659,7 @@ private fun PlayerBottomActionPill(
                 label = "Timer",
                 active = hasActiveSleepTimer,
                 accent = accent,
+                inactiveColor = inactiveFg,
                 onClick = onOpenTimer
             )
         }
@@ -1605,6 +1669,7 @@ private fun PlayerBottomActionPill(
                 label = "Up Next",
                 active = false,
                 accent = accent,
+                inactiveColor = inactiveFg,
                 onClick = onOpenQueue
             )
         }
@@ -1617,6 +1682,7 @@ private fun PlayerActionPill(
     label: String,
     active: Boolean,
     accent: Color,
+    inactiveColor: Color = Color.White,
     onClick: () -> Unit
 ) {
     Row(
@@ -1631,12 +1697,12 @@ private fun PlayerActionPill(
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = if (active) accent else Color.White.copy(alpha = 0.88f),
+            tint = if (active) accent else inactiveColor.copy(alpha = 0.88f),
             modifier = Modifier.size(18.dp)
         )
         Text(
             text = label,
-            color = if (active) accent else Color.White.copy(alpha = 0.88f),
+            color = if (active) accent else inactiveColor.copy(alpha = 0.88f),
             fontSize = 12.5.sp,
             fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
             maxLines = 1,
@@ -1750,6 +1816,7 @@ private fun PlayerBackgroundLayer(
 ) {
     val baseBgColor = when (playerCust.backgroundStyle) {
         PlayerBackgroundStyle.AMOLED_PITCH -> Color.Black
+        PlayerBackgroundStyle.SOLID_DARK -> InkBackground
         else -> if (ActiveThemePalette.isDark) InkBackground else Color(0xFF12101A)
     }
 
@@ -2056,6 +2123,7 @@ private fun SeekSection(
     seekbarCust: com.geekify.android.customization.SeekbarCustomizationConfig,
     activeColor: Color,
     secondaryAccentColor: Color,
+    inactiveBaseColor: Color = Color.White,
     pendingSeek: PendingSeekPosition?,
     onPendingSeekChange: (PendingSeekPosition?) -> Unit,
     onSeek: (Long) -> Unit,
@@ -2120,7 +2188,7 @@ private fun SeekSection(
         modifier = Modifier.fillMaxWidth(),
         activeColor = activeColor,
         secondaryAccentColor = secondaryAccentColor,
-        inactiveBaseColor = Color.White,
+        inactiveBaseColor = inactiveBaseColor,
         isPlaying = wavePlaying && !isBuffering
     )
 
@@ -2135,7 +2203,7 @@ private fun SeekSection(
         if (showElapsed) {
             Text(
                 text = formatPlaybackTime(displayPositionMs),
-                color = Color.White.copy(alpha = 0.76f),
+                color = inactiveBaseColor.copy(alpha = 0.76f),
                 fontSize = labelSizeSp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.width(64.dp),
@@ -2152,7 +2220,7 @@ private fun SeekSection(
                     Icon(
                         imageVector = if (repeat == PlayerRepeatMode.ONE) GeekifyIcons.RepeatOne else GeekifyIcons.Repeat,
                         contentDescription = "Repeat",
-                        tint = if (repeat != PlayerRepeatMode.OFF) activeColor else Color.White.copy(alpha = 0.70f),
+                        tint = if (repeat != PlayerRepeatMode.OFF) activeColor else inactiveBaseColor.copy(alpha = 0.70f),
                         modifier = Modifier.size(19.dp)
                     )
                 }
@@ -2166,7 +2234,7 @@ private fun SeekSection(
                 } else {
                     formatPlaybackTime(totalDurationMs)
                 },
-                color = Color.White.copy(alpha = 0.76f),
+                color = inactiveBaseColor.copy(alpha = 0.76f),
                 fontSize = labelSizeSp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.width(64.dp),

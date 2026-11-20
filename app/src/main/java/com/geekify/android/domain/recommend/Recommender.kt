@@ -147,6 +147,37 @@ object Recommender {
     }
 
     /**
+     * Derives the "Made for you" subtitle from the actual languages of the tracks inside the mix,
+     * rather than blindly echoing the user's global preferred language setting.
+     */
+    fun resolveForYouSubtitle(
+        trackLanguages: List<String?>,
+        neutralSubtitle: String = "More music picked for you"
+    ): String {
+        if (trackLanguages.isEmpty()) return neutralSubtitle
+        val classified = trackLanguages.mapNotNull { raw ->
+            raw?.trim()?.takeIf { it.isNotEmpty() && !it.equals("Unknown", ignoreCase = true) }
+        }
+        if (classified.isEmpty()) return neutralSubtitle
+        val totalTracks = trackLanguages.size
+        if (classified.size * 2 < totalTracks) return neutralSubtitle
+
+        val counts = classified.groupingBy { it.lowercase() }.eachCount()
+        val (topKey, topCount) = counts.maxByOrNull { it.value } ?: return neutralSubtitle
+        val displayLang = classified.first { it.equals(topKey, ignoreCase = true) }
+
+        val shareOfClassified = topCount.toDouble() / classified.size.toDouble()
+        val shareOfTotal = topCount.toDouble() / totalTracks.toDouble()
+        return if ((counts.size == 1 && shareOfTotal >= 0.70) ||
+            (shareOfClassified >= 0.80 && shareOfTotal >= 0.65)
+        ) {
+            "More $displayLang music, based on what you play"
+        } else {
+            neutralSubtitle
+        }
+    }
+
+    /**
      * Multi-language taste profile derived only from meaningful user behaviour.
      *
      * Long-term taste uses explicit likes, playlist additions, and real play counts.
@@ -858,8 +889,9 @@ object Recommender {
         }
 
         if (main.size >= 8) {
-            val subtitle = preferredLanguage?.let { "More $it music, based on what you play" }
-                ?: "Built from what you play and save"
+            val subtitle = resolveForYouSubtitle(
+                main.map { resolveLanguage(it.videoId, it.title, it.artist, languageOverrides) }
+            )
             val sourcesMap = main.associate {
                 it.videoId to (if ("explore" in it.sources) "explore" else it.sources.firstOrNull().orEmpty())
             }

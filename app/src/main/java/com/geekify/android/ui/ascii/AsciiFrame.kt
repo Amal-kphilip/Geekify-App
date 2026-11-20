@@ -198,10 +198,11 @@ class AsciiFrame(
             val ga = clampF(0.055f * renderer.tuning.grid, 0f, 0.35f)
             val a = (ga * 255f).safeRoundToInt()
             val invA = 255 - a
+            val gridTarget = if (bgR + bgG + bgB > 384) 0 else 255
             val gridColor = (0xFF shl 24) or
-                (div255Fast(255 * a + bgR * invA) shl 16) or
-                (div255Fast(255 * a + bgG * invA) shl 8) or
-                div255Fast(255 * a + bgB * invA)
+                (div255Fast(gridTarget * a + bgR * invA) shl 16) or
+                (div255Fast(gridTarget * a + bgG * invA) shl 8) or
+                div255Fast(gridTarget * a + bgB * invA)
 
             // Vertical lines
             for (c in 0..cols) {

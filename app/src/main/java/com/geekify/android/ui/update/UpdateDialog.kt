@@ -30,6 +30,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -150,6 +151,7 @@ fun UpdateDialog(
     onInstall: () -> Unit,
     onRetryCheck: () -> Unit,
     onToggleChangelogVersion: (String) -> Unit,
+    onLoadMoreReleases: () -> Unit = {},
     onDismiss: (rememberSkip: Boolean) -> Unit
 ) {
     val context = LocalContext.current
@@ -207,11 +209,13 @@ fun UpdateDialog(
                 UpdateState.CHECKING -> CheckingStageContent()
                 UpdateState.UP_TO_DATE -> UpToDateStageContent(
                     uiState = uiState,
-                    onToggleChangelogVersion = onToggleChangelogVersion
+                    onToggleChangelogVersion = onToggleChangelogVersion,
+                    onLoadMoreReleases = onLoadMoreReleases
                 )
                 UpdateState.UPDATE_AVAILABLE -> UpdateAvailableStageContent(
                     uiState = uiState,
-                    onToggleChangelogVersion = onToggleChangelogVersion
+                    onToggleChangelogVersion = onToggleChangelogVersion,
+                    onLoadMoreReleases = onLoadMoreReleases
                 )
                 UpdateState.METERED_WARNING -> MeteredWarningStageContent(uiState = uiState)
                 UpdateState.DOWNLOADING -> DownloadingOrVerifyingStageContent(
@@ -226,7 +230,8 @@ fun UpdateDialog(
                 UpdateState.INSTALLING -> InstallingStageContent(uiState = uiState)
                 UpdateState.COMPLETED -> CompletedStageContent(
                     uiState = uiState,
-                    onToggleChangelogVersion = onToggleChangelogVersion
+                    onToggleChangelogVersion = onToggleChangelogVersion,
+                    onLoadMoreReleases = onLoadMoreReleases
                 )
                 UpdateState.DOWNLOAD_FAILED,
                 UpdateState.VERIFY_FAILED,
@@ -452,7 +457,8 @@ private fun CheckingStageContent() {
 @Composable
 private fun UpToDateStageContent(
     uiState: UpdateUiState,
-    onToggleChangelogVersion: (String) -> Unit
+    onToggleChangelogVersion: (String) -> Unit,
+    onLoadMoreReleases: () -> Unit
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -505,7 +511,11 @@ private fun UpToDateStageContent(
                 entries = uiState.recentChangelog,
                 expandedVersions = uiState.expandedChangelogVersions,
                 onToggleVersion = onToggleChangelogVersion,
-                maxHeightDp = 250
+                hasMore = uiState.hasMoreReleases,
+                isLoadingMore = uiState.isLoadingMoreReleases,
+                loadError = uiState.releaseHistoryError,
+                onLoadMore = onLoadMoreReleases,
+                maxHeightDp = 280
             )
         }
     }
@@ -514,7 +524,8 @@ private fun UpToDateStageContent(
 @Composable
 private fun UpdateAvailableStageContent(
     uiState: UpdateUiState,
-    onToggleChangelogVersion: (String) -> Unit
+    onToggleChangelogVersion: (String) -> Unit,
+    onLoadMoreReleases: () -> Unit
 ) {
     val update = uiState.availableUpdate ?: return
     val timeline = if (uiState.recentChangelog.isNotEmpty()) {
@@ -539,7 +550,11 @@ private fun UpdateAvailableStageContent(
             entries = timeline,
             expandedVersions = uiState.expandedChangelogVersions,
             onToggleVersion = onToggleChangelogVersion,
-            maxHeightDp = 250
+            hasMore = uiState.hasMoreReleases,
+            isLoadingMore = uiState.isLoadingMoreReleases,
+            loadError = uiState.releaseHistoryError,
+            onLoadMore = onLoadMoreReleases,
+            maxHeightDp = 280
         )
     }
 }
@@ -677,6 +692,10 @@ private fun ChangelogTimelinePanel(
     entries: List<ReleaseChangelogEntry>,
     expandedVersions: Set<String>,
     onToggleVersion: (String) -> Unit,
+    hasMore: Boolean = false,
+    isLoadingMore: Boolean = false,
+    loadError: String? = null,
+    onLoadMore: () -> Unit = {},
     maxHeightDp: Int
 ) {
     Column(
@@ -687,33 +706,83 @@ private fun ChangelogTimelinePanel(
             .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(20.dp))
             .padding(14.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.AutoAwesome,
-                    contentDescription = null,
-                    tint = Lime,
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = stringResource(R.string.update_whats_new_header),
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                    color = Lime
-                )
-            }
-            if (entries.size > 1) {
-                Text(
-                    text = "${entries.size} releases",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary
-                )
+        val headerFontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val stackHeader = maxWidth < 290.dp || headerFontScale > 1.15f
+            val releaseCountText = if (entries.size > 1) {
+                if (hasMore) "${entries.size}+ releases" else "${entries.size} releases"
+            } else null
+
+            if (stackHeader) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.AutoAwesome,
+                            contentDescription = null,
+                            tint = Lime,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.update_whats_new_header),
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                            color = Lime,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (releaseCountText != null) {
+                        Text(
+                            text = releaseCountText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.padding(start = 22.dp)
+                        )
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.AutoAwesome,
+                            contentDescription = null,
+                            tint = Lime,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.update_whats_new_header),
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                            color = Lime,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (releaseCountText != null) {
+                        Text(
+                            text = releaseCountText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
             }
         }
 
@@ -730,8 +799,7 @@ private fun ChangelogTimelinePanel(
                 items = entries,
                 key = { _, item -> item.versionName }
             ) { index, entry ->
-                val isExpanded = expandedVersions.contains(entry.versionName) ||
-                    (expandedVersions.isEmpty() && index == 0)
+                val isExpanded = expandedVersions.contains(entry.versionName)
 
                 ReleaseTimelineCard(
                     entry = entry,
@@ -739,6 +807,56 @@ private fun ChangelogTimelinePanel(
                     isLatest = index == 0,
                     onToggle = { onToggleVersion(entry.versionName) }
                 )
+            }
+
+            if (isLoadingMore || hasMore || loadError != null) {
+                item(key = "changelog_pagination_footer") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp, bottom = 2.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        when {
+                            isLoadingMore -> {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.padding(vertical = 6.dp)
+                                ) {
+                                    androidx.compose.material3.CircularProgressIndicator(
+                                        color = Lime,
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "Loading older releases…",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = TextSecondary
+                                    )
+                                }
+                            }
+                            loadError != null -> {
+                                TextButton(onClick = onLoadMore) {
+                                    Text(
+                                        text = "Couldn't load more · Retry",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        color = Lime
+                                    )
+                                }
+                            }
+                            hasMore -> {
+                                TextButton(onClick = onLoadMore) {
+                                    Text(
+                                        text = "Load older releases",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        color = Lime
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1364,7 +1482,8 @@ private fun InstallingStageContent(uiState: UpdateUiState) {
 @Composable
 private fun CompletedStageContent(
     uiState: UpdateUiState,
-    onToggleChangelogVersion: (String) -> Unit
+    onToggleChangelogVersion: (String) -> Unit,
+    onLoadMoreReleases: () -> Unit
 ) {
     var entered by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { entered = true }
@@ -1438,7 +1557,11 @@ private fun CompletedStageContent(
                 entries = uiState.recentChangelog,
                 expandedVersions = uiState.expandedChangelogVersions,
                 onToggleVersion = onToggleChangelogVersion,
-                maxHeightDp = 210
+                hasMore = uiState.hasMoreReleases,
+                isLoadingMore = uiState.isLoadingMoreReleases,
+                loadError = uiState.releaseHistoryError,
+                onLoadMore = onLoadMoreReleases,
+                maxHeightDp = 240
             )
         }
     }
@@ -1574,26 +1697,25 @@ private fun UpdateDialogFooter(
                         onClick = onRetryCheck,
                         shape = RoundedCornerShape(16.dp),
                         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
-                        contentPadding = compactButtonPadding,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp),
                         modifier = Modifier
-                            .weight(1f)
+                            .weight(1.38f)
                             .heightIn(min = 48.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Refresh,
                             contentDescription = null,
                             tint = TextPrimary,
-                            modifier = Modifier.size(17.dp)
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(Modifier.width(6.dp))
+                        Spacer(Modifier.width(5.dp))
                         Text(
                             text = stringResource(R.string.update_action_check_again),
                             color = TextPrimary,
                             fontWeight = FontWeight.SemiBold,
-                            fontSize = 14.sp,
+                            fontSize = 13.5.sp,
                             maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis
+                            softWrap = false
                         )
                     }
 
@@ -1604,18 +1726,17 @@ private fun UpdateDialogFooter(
                             containerColor = Lime,
                             contentColor = DarkBackground
                         ),
-                        contentPadding = compactButtonPadding,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp),
                         modifier = Modifier
-                            .weight(1f)
+                            .weight(0.82f)
                             .heightIn(min = 48.dp)
                     ) {
                         Text(
                             text = stringResource(R.string.update_action_done),
                             fontWeight = FontWeight.ExtraBold,
-                            fontSize = 14.sp,
+                            fontSize = 13.5.sp,
                             maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis
+                            softWrap = false
                         )
                     }
                 }

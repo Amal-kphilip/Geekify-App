@@ -487,6 +487,7 @@ fun MainScreen(
                             viewModel = libraryVm,
                             onBack = { navController.popBackStack() },
                             onPlayTrack = onTrackClick,
+                            onTrackActions = onTrackActions,
                             onShufflePlay = { playerViewModel.playShuffled(it) }
                         )
                     }
@@ -507,6 +508,7 @@ fun MainScreen(
                             viewModel = libraryVm,
                             onBack = { navController.popBackStack() },
                             onPlayTrack = onTrackClick,
+                            onTrackActions = onTrackActions,
                             onShufflePlay = { playerViewModel.playShuffled(it) }
                         )
                     }
@@ -561,7 +563,12 @@ fun MainScreen(
 
                     composable(Screen.Recents.route) {
                         val recentsVm: RecentsViewModel = koinViewModel()
-                        RecentsScreen(recentsVm, onBack = { navController.popBackStack() }, onPlay = onTrackClick)
+                        RecentsScreen(
+                            viewModel = recentsVm,
+                            onBack = { navController.popBackStack() },
+                            onPlay = onTrackClick,
+                            onTrackActions = onTrackActions
+                        )
                     }
 
                     composable(Screen.ListeningStats.route) {
@@ -581,7 +588,8 @@ fun MainScreen(
                             onPlayTrack = { track -> playerViewModel.play(track) },
                             onPlayAllOffline = { tracks ->
                                 tracks.firstOrNull()?.let { first -> playerViewModel.play(first, tracks) }
-                            }
+                            },
+                            onTrackActions = onTrackActions
                         )
                     }
 
@@ -819,6 +827,7 @@ fun MainScreen(
                 onToggleChangelogVersion = { versionName ->
                     updateViewModel.toggleChangelogReleaseExpanded(versionName)
                 },
+                onLoadMoreReleases = { updateViewModel.loadMoreReleases() },
                 onDismiss = { rememberSkip ->
                     updateViewModel.dismissDialog(rememberSkipForVersion = rememberSkip)
                 }

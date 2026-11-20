@@ -118,6 +118,7 @@ fun CollectionScreen(
                     TrackRow(
                         track = track,
                         onClick = { onPlayTrack(track, collection.tracks) },
+                        onLongClick = { onTrackActions(track) },
                         onMoreClick = { onTrackActions(track) }
                     )
                 }

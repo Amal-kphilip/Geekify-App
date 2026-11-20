@@ -231,6 +231,34 @@ data class GlassStyle(
     }
 }
 
+internal fun resolveThemeGlassTintAlpha(
+    isDarkTheme: Boolean,
+    role: GlassRole,
+    configuredTintAlpha: Float
+): Float {
+    val clamped = configuredTintAlpha.coerceIn(0f, 0.85f)
+    if (isDarkTheme) return clamped.coerceIn(0f, 0.75f)
+    // In Light Theme, default dark-mode low alphas (e.g. 0.12f) leave glass pills too transparent
+    // over light backgrounds; lift to the theme-specific frosted Light tokens while preserving
+    // explicit user opacity overrides above that floor.
+    val lightFloor = when (role) {
+        GlassRole.Navigation -> GlassTintTokens.NavPillFillOpacityLight
+        GlassRole.Floating, GlassRole.Preview -> 0.58f
+        GlassRole.Overlay, GlassRole.Panel -> GlassTintTokens.BaseSurfaceOpacityLight
+    }
+    return maxOf(clamped, lightFloor).coerceIn(0f, 0.85f)
+}
+
+internal fun resolveThemeGlassBorderColor(
+    isDarkTheme: Boolean,
+    configuredBorderArgb: Long
+): Color {
+    if (!isDarkTheme && (configuredBorderArgb and 0x00FFFFFFL) == 0x00FFFFFFL) {
+        return GlassTintTokens.BorderLight
+    }
+    return Color(configuredBorderArgb)
+}
+
 /**
  * Turns this surface into Liquid Glass using the full AGSL lens refraction & backdrop pipeline.
  *
@@ -264,14 +292,18 @@ fun Modifier.liquidGlass(
     val isDarkTheme = com.geekify.android.ui.theme.ActiveThemePalette.isDark
     val resolvedTintColor = when (glassConfig.tintMode) {
         com.geekify.android.customization.GlassTintMode.THEME ->
-            if (isDarkTheme) style.tint else Color(0xFFF6F7FC)
+            if (isDarkTheme) style.tint else GlassTintTokens.SurfaceBaseLight
         com.geekify.android.customization.GlassTintMode.ACCENT ->
             com.geekify.android.ui.theme.Lime
         com.geekify.android.customization.GlassTintMode.CUSTOM ->
             Color(glassConfig.customTintArgb)
     }
-    val resolvedBorderColor = Color(glassConfig.borderColorArgb)
-    val resolvedBorderAlpha = if (glassConfig.borderEnabled) glassConfig.borderOpacity.coerceIn(0f, 0.85f) else 0f
+    val resolvedTintAlpha = resolveThemeGlassTintAlpha(isDarkTheme, style.role, glassConfig.tintAlpha)
+    val resolvedBorderColor = resolveThemeGlassBorderColor(isDarkTheme, glassConfig.borderColorArgb)
+    val resolvedBorderAlpha = if (glassConfig.borderEnabled) {
+        if (isDarkTheme) glassConfig.borderOpacity.coerceIn(0f, 0.85f)
+        else maxOf(glassConfig.borderOpacity, 0.14f).coerceIn(0f, 0.85f)
+    } else 0f
     val resolvedBorderThicknessDp = glassConfig.borderThicknessDp.coerceIn(0.5f, 3.0f).dp
     val resolvedBrightness = glassConfig.brightness.coerceIn(-0.35f, 0.35f)
     val resolvedNoiseAlpha = glassConfig.noiseGrainAlpha.coerceIn(0f, 0.25f)
@@ -282,21 +314,24 @@ fun Modifier.liquidGlass(
         style.copy(
             blur = glassConfig.blurDp.dp,
             tint = resolvedTintColor,
-            saturation = glassConfig.saturation,
+            saturation = if (isDarkTheme) glassConfig.saturation else minOf(glassConfig.saturation, GlassTintTokens.NavBarSaturationLight),
             lensAmount = glassConfig.lensAmountDp.dp,
             lensHeight = glassConfig.lensHeightDp.dp,
             chromaticAberration = glassConfig.chromaticAberration,
             depthEffect = glassConfig.depthEffect,
-            tintAlpha = glassConfig.tintAlpha.coerceIn(0f, 0.75f),
+            tintAlpha = resolvedTintAlpha,
             rimAlpha = resolvedBorderAlpha,
+            shadowAlpha = if (isDarkTheme) style.shadowAlpha else minOf(style.shadowAlpha, 0.12f),
             shadowRadius = glassConfig.shadowElevationDp.coerceIn(0f, 24f).dp
         )
     } else {
         style.copy(
             tint = resolvedTintColor,
+            tintAlpha = if (isDarkTheme) style.tintAlpha else maxOf(style.tintAlpha, GlassTintTokens.BaseSurfaceOpacityLight),
             chromaticAberration = glassConfig.chromaticAberration,
             depthEffect = glassConfig.depthEffect,
             rimAlpha = resolvedBorderAlpha,
+            shadowAlpha = if (isDarkTheme) style.shadowAlpha else minOf(style.shadowAlpha, 0.12f),
             shadowRadius = glassConfig.shadowElevationDp.coerceIn(0f, 24f).dp
         )
     }

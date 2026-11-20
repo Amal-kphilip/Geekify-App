@@ -40,7 +40,8 @@ fun AppIconSettingsScreen(onBack: () -> Unit) {
         title = "App Icon",
         scrollState = scrollState,
         onBack = onBack,
-        bottomPadding = bottomInset + 36.dp
+        bottomPadding = bottomInset + 36.dp,
+        minimalStyle = true
     ) {
         IosSettingsSection(
             title = "Home screen icon",

@@ -144,6 +144,7 @@ fun ArtistScreen(
                         TrackRow(
                             track = song,
                             onClick = { onTrackClick(song, artist.songs) },
+                            onLongClick = { onTrackActions(song) },
                             onMoreClick = { onTrackActions(song) }
                         )
                     }

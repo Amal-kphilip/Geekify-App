@@ -45,6 +45,10 @@ data class UpdateUiState(
     val availableUpdate: AvailableUpdate? = null,
     val recentChangelog: List<ReleaseChangelogEntry> = emptyList(),
     val expandedChangelogVersions: Set<String> = emptySet(),
+    val releaseHistoryPage: Int = 1,
+    val hasMoreReleases: Boolean = false,
+    val isLoadingMoreReleases: Boolean = false,
+    val releaseHistoryError: String? = null,
     val downloadProgress: DownloadProgressSnapshot = DownloadProgressSnapshot(
         downloadedBytes = 0L,
         totalBytes = null
@@ -114,13 +118,17 @@ class UpdateSessionCoordinator constructor(
         if (completed != null) {
             markUpdateNotificationHandled(BuildConfig.VERSION_CODE, dismissed = true)
             scope.launch {
-                val recent = updateManager.fetchRecentChangelog(BuildConfig.VERSION_NAME)
+                val page1 = updateManager.fetchReleaseTimelinePage(BuildConfig.VERSION_NAME, page = 1)
                 _uiState.update { current ->
                     current.copy(
                         isDialogVisible = true,
                         state = UpdateState.COMPLETED,
                         completedUpdateInfo = completed,
-                        recentChangelog = recent,
+                        recentChangelog = page1.entries,
+                        releaseHistoryPage = page1.page,
+                        hasMoreReleases = page1.hasMorePages,
+                        isLoadingMoreReleases = false,
+                        releaseHistoryError = null,
                         expandedChangelogVersions = setOf(completed.newVersionName)
                     )
                 }
@@ -193,6 +201,10 @@ class UpdateSessionCoordinator constructor(
                         state = if (existingApk != null) UpdateState.READY_TO_INSTALL else UpdateState.UPDATE_AVAILABLE,
                         availableUpdate = update,
                         recentChangelog = update.changelogTimeline,
+                        releaseHistoryPage = 1,
+                        hasMoreReleases = update.changelogTimeline.size >= AppUpdateManager.RELEASES_PAGE_SIZE,
+                        isLoadingMoreReleases = false,
+                        releaseHistoryError = null,
                         expandedChangelogVersions = initialExpanded,
                         verifiedApkFile = existingApk,
                         verifiedSha256Hex = if (existingApk != null) update.expectedSha256 else null,
@@ -211,14 +223,18 @@ class UpdateSessionCoordinator constructor(
             } else {
                 markUpdateNotificationHandled(BuildConfig.VERSION_CODE, dismissed = true)
                 if (userInitiated) {
-                    val timeline = updateManager.fetchRecentChangelog(BuildConfig.VERSION_NAME)
-                    val firstExpanded = timeline.firstOrNull()?.versionName?.let { setOf(it) }.orEmpty()
+                    val page1 = updateManager.fetchReleaseTimelinePage(BuildConfig.VERSION_NAME, page = 1)
+                    val firstExpanded = page1.entries.firstOrNull()?.versionName?.let { setOf(it) }.orEmpty()
                     _uiState.update { current ->
                         current.copy(
                             isDialogVisible = true,
                             state = UpdateState.UP_TO_DATE,
                             availableUpdate = null,
-                            recentChangelog = timeline,
+                            recentChangelog = page1.entries,
+                            releaseHistoryPage = page1.page,
+                            hasMoreReleases = page1.hasMorePages,
+                            isLoadingMoreReleases = false,
+                            releaseHistoryError = null,
                             expandedChangelogVersions = firstExpanded,
                             errorTitle = null,
                             errorMessage = null
@@ -236,6 +252,42 @@ class UpdateSessionCoordinator constructor(
                 next.remove(versionName)
             }
             current.copy(expandedChangelogVersions = next)
+        }
+    }
+
+    fun loadMoreReleases() {
+        val snapshot = _uiState.value
+        if (snapshot.isLoadingMoreReleases || !snapshot.hasMoreReleases) return
+        val nextPage = snapshot.releaseHistoryPage + 1
+        val targetVersion = snapshot.availableUpdate?.versionName ?: BuildConfig.VERSION_NAME
+        _uiState.update { it.copy(isLoadingMoreReleases = true, releaseHistoryError = null) }
+        scope.launch {
+            val result = runCatching {
+                updateManager.fetchReleaseTimelinePage(
+                    currentVersion = targetVersion,
+                    page = nextPage
+                )
+            }
+            result.onSuccess { pageResult ->
+                _uiState.update { current ->
+                    val merged = (current.recentChangelog + pageResult.entries)
+                        .distinctBy { it.versionName }
+                    current.copy(
+                        recentChangelog = merged,
+                        releaseHistoryPage = pageResult.page,
+                        hasMoreReleases = pageResult.hasMorePages && pageResult.entries.isNotEmpty(),
+                        isLoadingMoreReleases = false,
+                        releaseHistoryError = null
+                    )
+                }
+            }.onFailure { err ->
+                _uiState.update { current ->
+                    current.copy(
+                        isLoadingMoreReleases = false,
+                        releaseHistoryError = err.message ?: "Couldn't load older releases."
+                    )
+                }
+            }
         }
     }
 
@@ -608,6 +660,10 @@ class UpdateViewModel constructor(
 
     fun toggleChangelogReleaseExpanded(versionName: String) {
         coordinator.toggleChangelogReleaseExpanded(versionName)
+    }
+
+    fun loadMoreReleases() {
+        coordinator.loadMoreReleases()
     }
 
     fun onAppResumed() {

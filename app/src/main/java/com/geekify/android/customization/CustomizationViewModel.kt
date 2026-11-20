@@ -1,6 +1,7 @@
 package com.geekify.android.customization
 
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.geekify.android.audio.AudioEffectsController
@@ -10,11 +11,33 @@ import com.geekify.android.settings.AppSettingsRepository
 import com.geekify.android.settings.AppSettingsState
 import com.geekify.android.settings.AudioQualityPreference
 import com.geekify.android.ui.navigation.FloatingTabBarInlineBehavior
+import com.geekify.android.ui.theme.FontDownloadResult
+import com.geekify.android.ui.theme.FontImportResult
+import com.geekify.android.ui.theme.GeekifyFontManager
+import com.geekify.android.ui.theme.QuickDownloadFontSpec
 import com.geekify.android.widget.GeekifyMusicWidgetProvider
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+
+sealed interface QuickFontInstallState {
+    data class Unavailable(val reason: String) : QuickFontInstallState
+    data object Available : QuickFontInstallState
+    data class Downloading(val progress: Float) : QuickFontInstallState
+    data object Installed : QuickFontInstallState
+    data class Failed(val message: String) : QuickFontInstallState
+}
+
+data class FontsManagerUiState(
+    val quickFontStates: Map<String, QuickFontInstallState> = emptyMap(),
+    val isImporting: Boolean = false,
+    val errorMessage: String? = null
+)
 
 /**
  * Centralized ViewModel coordinating Geekify's 13 personalization categories across
@@ -23,7 +46,8 @@ import kotlinx.coroutines.launch
 class CustomizationViewModel(
     private val context: Context,
     private val settingsRepository: AppSettingsRepository,
-    private val audioController: AudioEffectsController
+    private val audioController: AudioEffectsController,
+    private val httpClient: OkHttpClient
 ) : ViewModel() {
 
     val appSettings: StateFlow<AppSettingsState> = settingsRepository.state
@@ -34,6 +58,13 @@ class CustomizationViewModel(
 
     private val _toastMessage = MutableStateFlow<String?>(null)
     val toastMessage: StateFlow<String?> = _toastMessage.asStateFlow()
+
+    private val _fontsUiState = MutableStateFlow(FontsManagerUiState())
+    val fontsUiState: StateFlow<FontsManagerUiState> = _fontsUiState.asStateFlow()
+
+    init {
+        refreshQuickFontStates()
+    }
 
     fun selectCategory(category: CustomizationCategory) {
         _selectedCategory.value = category
@@ -650,7 +681,6 @@ class CustomizationViewModel(
                 showElapsedTime?.let { prefs[CustomizationPersistence.KEY_SEEKBAR_SHOW_ELAPSED] = it }
                 showRemainingTime?.let {
                     prefs[CustomizationPersistence.KEY_SEEKBAR_SHOW_REMAINING] = it
-                    prefs[CustomizationPersistence.KEY_PLAYER_SHOW_REMAINING] = it
                 }
             }
         }
@@ -834,11 +864,199 @@ class CustomizationViewModel(
     }
 
     // ---- 9. Typography & Density ----
+    fun refreshQuickFontStates() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val map = GeekifyFontManager.quickDownloadCatalog.associate { spec ->
+                val state: QuickFontInstallState = when {
+                    spec.isBundled -> QuickFontInstallState.Installed
+                    !spec.isDownloadable -> QuickFontInstallState.Unavailable(
+                        spec.unavailableReason ?: "Unavailable"
+                    )
+                    GeekifyFontManager.isDownloadInProgress(spec.id) -> QuickFontInstallState.Downloading(0f)
+                    GeekifyFontManager.isQuickFontInstalled(context, spec) -> QuickFontInstallState.Installed
+                    else -> QuickFontInstallState.Available
+                }
+                spec.id to state
+            }
+            _fontsUiState.update { current ->
+                // Preserve any active Downloading progress if already running
+                val merged = map.toMutableMap()
+                current.quickFontStates.forEach { (id, prev) ->
+                    if (prev is QuickFontInstallState.Downloading && GeekifyFontManager.isDownloadInProgress(id)) {
+                        merged[id] = prev
+                    }
+                }
+                current.copy(quickFontStates = merged)
+            }
+        }
+    }
+
+    fun clearFontError() {
+        _fontsUiState.update { it.copy(errorMessage = null) }
+    }
+
     fun setFontChoice(choice: AppFontChoice) {
+        selectBuiltInFont(choice)
+    }
+
+    fun selectBuiltInFont(choice: AppFontChoice) {
         viewModelScope.launch {
             settingsRepository.editCustomization {
                 it[CustomizationPersistence.KEY_TYPO_FONT_CHOICE] = choice.name
+                it.remove(CustomizationPersistence.KEY_TYPO_FONT_ID)
+                it[CustomizationPersistence.KEY_TYPO_FONT_NAME] = choice.label
+                it.remove(CustomizationPersistence.KEY_TYPO_FONT_PATH)
             }
+            _toastMessage.value = "Font set to ${choice.label}"
+        }
+    }
+
+    fun importFontFile(uri: Uri) {
+        if (_fontsUiState.value.isImporting) return
+        viewModelScope.launch {
+            _fontsUiState.update { it.copy(isImporting = true, errorMessage = null) }
+            val previousConfig = appSettings.value.customization.typography
+            when (val result = GeekifyFontManager.importFontFromUri(context, uri)) {
+                is FontImportResult.Success -> {
+                    settingsRepository.editCustomization {
+                        it[CustomizationPersistence.KEY_TYPO_FONT_CHOICE] = AppFontChoice.IMPORTED.name
+                        it[CustomizationPersistence.KEY_TYPO_FONT_ID] = result.fontId
+                        it[CustomizationPersistence.KEY_TYPO_FONT_NAME] = result.displayName
+                        it[CustomizationPersistence.KEY_TYPO_FONT_PATH] = result.filePath
+                    }
+                    // Clean up previous imported file if it was replaced by a different file
+                    if (previousConfig.fontChoice == AppFontChoice.IMPORTED &&
+                        previousConfig.activeFontPath.isNotBlank() &&
+                        previousConfig.activeFontPath != result.filePath
+                    ) {
+                        withContext(Dispatchers.IO) {
+                            GeekifyFontManager.deleteImportedFontSafely(context, previousConfig.activeFontPath)
+                        }
+                    }
+                    _fontsUiState.update { it.copy(isImporting = false, errorMessage = null) }
+                    _toastMessage.value = "Applied imported font: ${result.displayName}"
+                }
+                is FontImportResult.Error -> {
+                    _fontsUiState.update { it.copy(isImporting = false, errorMessage = result.message) }
+                }
+            }
+        }
+    }
+
+    fun onQuickFontClicked(spec: QuickDownloadFontSpec) {
+        if (spec.isBundled) {
+            viewModelScope.launch {
+                settingsRepository.editCustomization {
+                    it[CustomizationPersistence.KEY_TYPO_FONT_CHOICE] = AppFontChoice.DOWNLOADED.name
+                    it[CustomizationPersistence.KEY_TYPO_FONT_ID] = spec.id
+                    it[CustomizationPersistence.KEY_TYPO_FONT_NAME] = spec.displayName
+                    it.remove(CustomizationPersistence.KEY_TYPO_FONT_PATH)
+                }
+                _fontsUiState.update { ui ->
+                    ui.copy(
+                        quickFontStates = ui.quickFontStates + (spec.id to QuickFontInstallState.Installed),
+                        errorMessage = null
+                    )
+                }
+                _toastMessage.value = "Applied ${spec.displayName}"
+            }
+            return
+        }
+        if (!spec.isDownloadable) return
+        val currentState = _fontsUiState.value.quickFontStates[spec.id]
+        if (currentState is QuickFontInstallState.Downloading) return
+
+        viewModelScope.launch {
+            val alreadyInstalled = withContext(Dispatchers.IO) {
+                GeekifyFontManager.isQuickFontInstalled(context, spec)
+            }
+            if (alreadyInstalled) {
+                val filePath = GeekifyFontManager.getQuickFontRegularFile(context, spec).absolutePath
+                settingsRepository.editCustomization {
+                    it[CustomizationPersistence.KEY_TYPO_FONT_CHOICE] = AppFontChoice.DOWNLOADED.name
+                    it[CustomizationPersistence.KEY_TYPO_FONT_ID] = spec.id
+                    it[CustomizationPersistence.KEY_TYPO_FONT_NAME] = spec.displayName
+                    it[CustomizationPersistence.KEY_TYPO_FONT_PATH] = filePath
+                }
+                _fontsUiState.update { ui ->
+                    ui.copy(
+                        quickFontStates = ui.quickFontStates + (spec.id to QuickFontInstallState.Installed),
+                        errorMessage = null
+                    )
+                }
+                _toastMessage.value = "Applied ${spec.displayName}"
+                return@launch
+            }
+
+            _fontsUiState.update { ui ->
+                ui.copy(
+                    quickFontStates = ui.quickFontStates + (spec.id to QuickFontInstallState.Downloading(0f)),
+                    errorMessage = null
+                )
+            }
+
+            when (
+                val result = GeekifyFontManager.downloadQuickFont(
+                    context = context,
+                    spec = spec,
+                    httpClient = httpClient,
+                    onProgress = { progress ->
+                        _fontsUiState.update { ui ->
+                            ui.copy(
+                                quickFontStates = ui.quickFontStates +
+                                    (spec.id to QuickFontInstallState.Downloading(progress))
+                            )
+                        }
+                    }
+                )
+            ) {
+                is FontDownloadResult.Success -> {
+                    settingsRepository.editCustomization {
+                        it[CustomizationPersistence.KEY_TYPO_FONT_CHOICE] = AppFontChoice.DOWNLOADED.name
+                        it[CustomizationPersistence.KEY_TYPO_FONT_ID] = result.fontId
+                        it[CustomizationPersistence.KEY_TYPO_FONT_NAME] = result.displayName
+                        it[CustomizationPersistence.KEY_TYPO_FONT_PATH] = result.filePath
+                    }
+                    _fontsUiState.update { ui ->
+                        ui.copy(
+                            quickFontStates = ui.quickFontStates + (spec.id to QuickFontInstallState.Installed),
+                            errorMessage = null
+                        )
+                    }
+                    _toastMessage.value = "Downloaded and applied ${result.displayName}"
+                }
+                is FontDownloadResult.Error -> {
+                    _fontsUiState.update { ui ->
+                        ui.copy(
+                            quickFontStates = ui.quickFontStates + (spec.id to QuickFontInstallState.Failed(result.message)),
+                            errorMessage = result.message
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Restores Android's system default font and removes the active imported font file
+     * without disturbing Text Scale, Display Density, or Landscape Scaling preferences.
+     */
+    fun resetFontToSystem() {
+        viewModelScope.launch {
+            val previous = appSettings.value.customization.typography
+            settingsRepository.editCustomization {
+                it[CustomizationPersistence.KEY_TYPO_FONT_CHOICE] = AppFontChoice.SYSTEM_DEFAULT.name
+                it.remove(CustomizationPersistence.KEY_TYPO_FONT_ID)
+                it[CustomizationPersistence.KEY_TYPO_FONT_NAME] = AppFontChoice.SYSTEM_DEFAULT.label
+                it.remove(CustomizationPersistence.KEY_TYPO_FONT_PATH)
+            }
+            if (previous.fontChoice == AppFontChoice.IMPORTED && previous.activeFontPath.isNotBlank()) {
+                withContext(Dispatchers.IO) {
+                    GeekifyFontManager.deleteImportedFontSafely(context, previous.activeFontPath)
+                }
+            }
+            _fontsUiState.update { it.copy(errorMessage = null) }
+            _toastMessage.value = "Reset to system default font"
         }
     }
 
@@ -1089,7 +1307,7 @@ class CustomizationViewModel(
             settingsRepository.resetAllCustomization()
             audioController.update { AudioSettings() }
             GeekifyMusicWidgetProvider.refreshAll(context)
-            _toastMessage.value = "Restored all personalization settings to Geekify defaults"
+            _toastMessage.value = "Restored all appearance settings to Geekify defaults"
         }
     }
 }

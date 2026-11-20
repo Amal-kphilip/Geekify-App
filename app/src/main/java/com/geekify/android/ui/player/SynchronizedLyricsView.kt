@@ -14,12 +14,16 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -62,6 +66,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
@@ -139,7 +144,8 @@ fun SynchronizedLyricsView(
     onDismissOptionsSheet: () -> Unit = {},
     onSetShowTranslation: ((Boolean) -> Unit)? = null,
     accentOverride: Color? = null,
-    playerBackgroundStyle: PlayerBackgroundStyle = LocalCustomizationState.current.player.backgroundStyle
+    playerBackgroundStyle: PlayerBackgroundStyle = LocalCustomizationState.current.player.backgroundStyle,
+    onLightSurface: Boolean = false
 ) {
     val lyricsRepository: LyricsRepository = koinInject()
     val httpClient: OkHttpClient = koinInject()
@@ -358,12 +364,13 @@ fun SynchronizedLyricsView(
     }
 
     val resolvedAccent = accentOverride ?: Lime
+    val baseFg = if (onLightSurface) TextPrimary else Color.White
     val activeColor = when {
-        config.useNeutralColor -> Color.White
+        config.useNeutralColor -> baseFg
         config.activeColorFollowsAccent -> resolvedAccent
-        else -> Color.White
+        else -> baseFg
     }
-    val inactiveBaseColor = Color.White
+    val inactiveBaseColor = baseFg
 
     val effectiveAnimStyle = if (reducedMotion) LyricsAnimationStyle.NONE else config.animationStyle
     val usePlusLighter = config.plusLighterBlend && playerBackgroundStyle == PlayerBackgroundStyle.LIQUID_GLASS
@@ -449,42 +456,53 @@ fun SynchronizedLyricsView(
             currentParsed == null || lines.isEmpty() -> {
                 val (headline, detail) = when (val o = outcome) {
                     is LyricsLookupOutcome.NetworkFailure ->
-                        "Lyrics Provider Connection Failed" to o.message
+                        "Couldn't Reach Lyrics Providers" to o.message
                     is LyricsLookupOutcome.InvalidResponse ->
                         "Invalid Provider Response" to o.message
                     is LyricsLookupOutcome.NoMatch ->
-                        "No Lyrics Found" to "Could not find lyrics for \"${track.title}\" by ${track.artist}."
+                        "No Lyrics Found" to "Lyrics aren't available for this track yet."
                     else ->
-                        "Lyrics Unavailable" to "No lyrics were returned for this track."
+                        "No Lyrics Found" to "Lyrics aren't available for this track yet."
                 }
+                val retryLabelColor = if (resolvedAccent.luminance() > 0.55f) OnAccent else Color.White
                 Column(
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .padding(horizontal = 28.dp),
+                        .padding(horizontal = 32.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Icon(
-                        imageVector = GeekifyIcons.Lyrics,
-                        contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.45f),
-                        modifier = Modifier.size(44.dp)
-                    )
-                    Spacer(Modifier.height(14.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color.White.copy(alpha = 0.08f))
+                            .border(0.8.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(20.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = GeekifyIcons.Lyrics,
+                            contentDescription = null,
+                            tint = resolvedAccent.copy(alpha = 0.85f),
+                            modifier = Modifier.size(30.dp)
+                        )
+                    }
+                    Spacer(Modifier.height(16.dp))
                     Text(
                         text = headline,
                         color = Color.White,
-                        fontSize = 18.sp,
+                        fontSize = 18.5.sp,
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
                         text = detail,
-                        color = Color.White.copy(alpha = 0.68f),
+                        color = Color.White.copy(alpha = 0.70f),
                         fontSize = 13.5.sp,
+                        lineHeight = 19.sp,
                         textAlign = TextAlign.Center
                     )
-                    Spacer(Modifier.height(18.dp))
+                    Spacer(Modifier.height(20.dp))
                     Box(
                         modifier = Modifier
                             .clip(CircleShape)
@@ -493,8 +511,8 @@ fun SynchronizedLyricsView(
                             .padding(horizontal = 22.dp, vertical = 10.dp)
                     ) {
                         Text(
-                            text = "Retry Lookup",
-                            color = OnAccent,
+                            text = "Retry",
+                            color = retryLabelColor,
                             fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -1160,49 +1178,135 @@ fun LiveLyricsPreviewCard(
             .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Preview controls bar (independent Play/Pause & Replay)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "${config.animationStyle.label} · ${formatPlaybackTime(previewPositionMs)} / ${formatPlaybackTime(PREVIEW_DURATION_MS)}",
-                color = Color.White.copy(alpha = 0.72f),
-                fontFamily = AppFont,
-                fontSize = 11.5.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.14f))
-                        .clickable { previewPositionMs = 0L }
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
+        // Width-aware responsive preview controls header (independent Play/Pause & Replay)
+        val previewTimelineText = "${config.animationStyle.label} · ${formatPlaybackTime(previewPositionMs)} / ${formatPlaybackTime(PREVIEW_DURATION_MS)}"
+        val currentFontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val useCompactTwoRow = maxWidth < 340.dp || currentFontScale > 1.25f
+
+            if (useCompactTwoRow) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "Replay",
-                        color = Color.White,
+                        text = previewTimelineText,
+                        color = Color.White.copy(alpha = 0.78f),
                         fontFamily = AppFont,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth()
                     )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 42.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.14f))
+                                .clickable { previewPositionMs = 0L }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Replay",
+                                color = Color.White,
+                                fontFamily = AppFont,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 42.dp)
+                                .clip(CircleShape)
+                                .background(accentColor.copy(alpha = 0.22f))
+                                .clickable { previewPlaying = !previewPlaying }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (previewPlaying) "Pause" else "Play",
+                                color = accentColor,
+                                fontFamily = AppFont,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
                 }
-                Box(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(accentColor.copy(alpha = 0.22f))
-                        .clickable { previewPlaying = !previewPlaying }
-                        .padding(horizontal = 11.dp, vertical = 4.dp)
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        text = if (previewPlaying) "Pause" else "Play",
-                        color = accentColor,
+                        text = previewTimelineText,
+                        color = Color.White.copy(alpha = 0.78f),
                         fontFamily = AppFont,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
                     )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .widthIn(min = 72.dp)
+                                .heightIn(min = 40.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.14f))
+                                .clickable { previewPositionMs = 0L }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Replay",
+                                color = Color.White,
+                                fontFamily = AppFont,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .widthIn(min = 72.dp)
+                                .heightIn(min = 40.dp)
+                                .clip(CircleShape)
+                                .background(accentColor.copy(alpha = 0.22f))
+                                .clickable { previewPlaying = !previewPlaying }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (previewPlaying) "Pause" else "Play",
+                                color = accentColor,
+                                fontFamily = AppFont,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
                 }
             }
         }

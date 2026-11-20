@@ -123,6 +123,14 @@ object SettingsVisuals {
 }
 
 val IosCardShape = RoundedCornerShape(SettingsDesignTokens.CardCornerRadius)
+val MinimalSettingsCardShape = RoundedCornerShape(22.dp)
+
+/**
+ * Opt-in CompositionLocal enabling Geekify's minimal Settings design language across
+ * Settings subpages, Personalization Studio, Audio Settings, About, Health, Listening Stats,
+ * Fonts Manager, and App Icon screens while keeping unrelated Account/Profile screens unchanged.
+ */
+val LocalMinimalSettingsStyle = compositionLocalOf { false }
 val IosIconTileShape = RoundedCornerShape(SettingsDesignTokens.IconContainerCornerRadius)
 
 /**
@@ -138,9 +146,11 @@ fun IosSettingsPageScaffold(
     showBackButton: Boolean = true,
     maxContentWidth: Dp = 720.dp,
     bottomPadding: Dp = 32.dp,
+    minimalStyle: Boolean = false,
     floatingBottomBar: (@Composable BoxScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    CompositionLocalProvider(LocalMinimalSettingsStyle provides minimalStyle) {
     val density = LocalDensity.current
     val globalBottomInset = LocalBottomInset.current
     val effectiveBottomPadding = maxOf(bottomPadding, globalBottomInset + 40.dp)
@@ -267,6 +277,7 @@ fun IosSettingsPageScaffold(
             floatingBottomBar()
         }
     }
+    }
 }
 
 /**
@@ -279,38 +290,57 @@ fun IosSettingsSection(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val minimal = LocalMinimalSettingsStyle.current
+    val cardShape = if (minimal) MinimalSettingsCardShape else IosCardShape
+
     Column(modifier = modifier.fillMaxWidth()) {
         if (!title.isNullOrBlank()) {
-            Row(
-                modifier = Modifier.padding(start = 4.dp, end = 12.dp, bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .width(3.dp)
-                        .height(14.dp)
-                        .clip(CircleShape)
-                        .background(Lime)
-                )
-                Spacer(Modifier.width(9.dp))
+            if (minimal) {
                 Text(
                     text = title,
-                    color = IosPalette.label,
+                    color = IosPalette.secondaryLabel,
                     fontFamily = AppFont,
-                    fontSize = 14.5.sp,
-                    lineHeight = 19.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = (-0.1).sp
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.1.sp,
+                    modifier = Modifier.padding(start = 6.dp, end = 12.dp, bottom = 9.dp)
                 )
+            } else {
+                Row(
+                    modifier = Modifier.padding(start = 4.dp, end = 12.dp, bottom = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(3.dp)
+                            .height(14.dp)
+                            .clip(CircleShape)
+                            .background(Lime)
+                    )
+                    Spacer(Modifier.width(9.dp))
+                    Text(
+                        text = title,
+                        color = IosPalette.label,
+                        fontFamily = AppFont,
+                        fontSize = 14.5.sp,
+                        lineHeight = 19.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = (-0.1).sp
+                    )
+                }
             }
         }
         Surface(
             color = SettingsVisuals.card,
-            shape = IosCardShape,
-            shadowElevation = if (ActiveThemePalette.isDark) 0.dp else 1.5.dp,
+            shape = cardShape,
+            shadowElevation = if (minimal || ActiveThemePalette.isDark) 0.dp else 1.5.dp,
             modifier = Modifier
                 .fillMaxWidth()
-                .border(0.75.dp, SettingsVisuals.cardBorder, IosCardShape)
+                .then(
+                    if (minimal) Modifier
+                    else Modifier.border(0.75.dp, SettingsVisuals.cardBorder, cardShape)
+                )
         ) {
             Column(modifier = Modifier.fillMaxWidth(), content = content)
         }
@@ -329,19 +359,22 @@ fun IosSettingsSection(
 }
 
 /**
- * Hairline separator aligned with the text column after the 42.dp icon tile.
+ * Hairline separator aligned with the text column after the leading icon.
  */
 @Composable
 fun IosSettingsDivider(insetStart: Dp = SettingsDesignTokens.DividerInsetWithIcon) {
+    val minimal = LocalMinimalSettingsStyle.current
+    val resolvedInset = if (minimal && insetStart == SettingsDesignTokens.DividerInsetWithIcon) 60.dp else insetStart
     HorizontalDivider(
-        modifier = Modifier.padding(start = insetStart),
+        modifier = Modifier.padding(start = resolvedInset),
         thickness = 0.6.dp,
-        color = SettingsVisuals.divider
+        color = SettingsVisuals.divider.copy(alpha = if (minimal) 0.55f else 1f)
     )
 }
 
 /**
- * Consistent rounded 42.dp settings icon tile with 13.dp corner radius and crisp 20.dp glyph.
+ * Consistent leading settings icon: minimal monochrome glyph in [LocalMinimalSettingsStyle],
+ * or rounded 42.dp icon tile outside minimal settings surfaces.
  */
 @Composable
 fun IosIconBadge(
@@ -349,19 +382,33 @@ fun IosIconBadge(
     tint: Color,
     modifier: Modifier = Modifier
 ) {
-    Box(
-        modifier = modifier
-            .size(SettingsDesignTokens.IconContainerSize)
-            .clip(IosIconTileShape)
-            .background(tint),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = Color.White,
-            modifier = Modifier.size(SettingsDesignTokens.IconGlyphSize)
-        )
+    if (LocalMinimalSettingsStyle.current) {
+        Box(
+            modifier = modifier.size(28.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (tint == IosPalette.systemRed) IosPalette.systemRed else IosPalette.label.copy(alpha = 0.86f),
+                modifier = Modifier.size(21.dp)
+            )
+        }
+    } else {
+        Box(
+            modifier = modifier
+                .size(SettingsDesignTokens.IconContainerSize)
+                .clip(IosIconTileShape)
+                .background(tint),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(SettingsDesignTokens.IconGlyphSize)
+            )
+        }
     }
 }
 
