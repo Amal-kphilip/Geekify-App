@@ -41,7 +41,7 @@ coroutines = "1.11.0"
 serializationJson = "1.13.0"
 
 # Firebase
-firebaseBom = "33.7.0"
+firebaseBom = "35.2.0"
 
 # Logging
 timber = "5.0.1"
