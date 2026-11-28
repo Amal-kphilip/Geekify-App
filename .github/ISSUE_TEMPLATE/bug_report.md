@@ -28,4 +28,4 @@ What did you expect to happen?
 
 ## Screenshots or logs
 
-Attach screenshots, screen recordings, or the Health screen message when helpful. Do not include credentials or private tokens.
+Attach screenshots, screen recordings, or the Health screen message when helpful. Do not attach tokens, keystores, `google-services.json`, or logs containing account data.

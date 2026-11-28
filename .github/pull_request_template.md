@@ -15,5 +15,6 @@ Add before/after visuals for UI changes.
 ## Checklist
 
 - [ ] This PR is focused and does not include unrelated changes.
+- [ ] No secrets, keystores, or `google-services.json` committed.
 - [ ] I did not add credentials, keys, downloaded media, or generated build files.
 - [ ] I updated documentation or tests where appropriate.

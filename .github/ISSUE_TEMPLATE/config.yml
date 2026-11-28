@@ -3,3 +3,6 @@ contact_links:
   - name: Questions and ideas
     url: https://github.com/Amal-kphilip/Geekify-App/discussions
     about: Use Discussions for general questions or early product ideas.
+  - name: Security vulnerability
+    url: https://github.com/Amal-kphilip/Geekify-App/security/advisories/new
+    about: Report security vulnerabilities privately instead of opening a public issue.

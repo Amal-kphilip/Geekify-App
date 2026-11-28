@@ -10,6 +10,7 @@
 [![License](https://img.shields.io/github/license/Amal-kphilip/Geekify-App?style=for-the-badge&labelColor=0d1117)](https://github.com/Amal-kphilip/Geekify-App/blob/main/LICENSE)
 [![Download APK](https://img.shields.io/badge/Download-APK-0d1117?style=for-the-badge&logo=android&logoColor=white)](https://github.com/Amal-kphilip/Geekify-App/releases/latest/download/Geekify-latest.apk)
 [![Total Downloads](https://img.shields.io/github/downloads/Amal-kphilip/Geekify-App/total?style=for-the-badge&labelColor=0d1117)](https://github.com/Amal-kphilip/Geekify-App/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/Amal-kphilip/Geekify-App/ci.yml?branch=main&style=for-the-badge&label=CI&labelColor=0d1117)](https://github.com/Amal-kphilip/Geekify-App/actions/workflows/ci.yml)
 
 <br/>
 
@@ -189,6 +190,8 @@ Contributions are welcome—bug fixes, accessibility improvements, test coverage
 4. Open a pull request with a clear description and screenshots (for UI updates).
 
 *Please do not commit credentials, keystores, `google-services.json`, or generated build files.*
+
+📖 [CONTRIBUTING.md](CONTRIBUTING.md) · 🔒 [SECURITY.md](SECURITY.md) · 🤝 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
 ---
 

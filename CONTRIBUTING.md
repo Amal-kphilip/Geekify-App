@@ -88,3 +88,9 @@ If a release requires manually curated release notes instead of automated genera
 - Prefer small composables and ViewModel methods with clear responsibilities.
 - Keep network and disk work off the main thread.
 - Preserve the app's dark UI design system and accessible content descriptions.
+
+## Community, security, and releases
+
+- **Code of Conduct:** Please follow our [Code of Conduct](CODE_OF_CONDUCT.md) in all interactions.
+- **Security:** Report vulnerabilities privately via [SECURITY.md](SECURITY.md) rather than public issues.
+- **Releases:** Releases are cut from version tags (`v*`) by the maintainer.
