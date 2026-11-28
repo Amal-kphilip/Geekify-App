@@ -1,8 +1,10 @@
 package com.geekify.android
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
@@ -68,6 +70,7 @@ class MainActivity : ComponentActivity() {
         triggerUpdateCheck = intent?.getBooleanExtra(GeekifyNotifier.EXTRA_TRIGGER_UPDATE_CHECK, false) == true
         intent?.removeExtra(GeekifyNotifier.EXTRA_ROUTE)
         intent?.removeExtra(GeekifyNotifier.EXTRA_TRIGGER_UPDATE_CHECK)
+        handleReleaseUrlExtra(intent)
         if (BuildConfig.DEBUG) {
             intent?.getStringExtra("ascii_calibrate")?.let { mode ->
                 com.geekify.android.ui.ascii.AsciiCalibration.activePath = if (mode == "off") null else mode
@@ -118,8 +121,23 @@ class MainActivity : ComponentActivity() {
         triggerUpdateCheck = intent.getBooleanExtra(GeekifyNotifier.EXTRA_TRIGGER_UPDATE_CHECK, false)
         intent.removeExtra(GeekifyNotifier.EXTRA_ROUTE)
         intent.removeExtra(GeekifyNotifier.EXTRA_TRIGGER_UPDATE_CHECK)
+        handleReleaseUrlExtra(intent)
         processDebugExtras(intent)
         setIntent(intent)
+    }
+
+    internal fun handleReleaseUrlExtra(intent: Intent?): Boolean {
+        val rawUrl = intent?.getStringExtra(GeekifyNotifier.EXTRA_OPEN_RELEASE_URL)
+        intent?.removeExtra(GeekifyNotifier.EXTRA_OPEN_RELEASE_URL)
+        if (rawUrl.isNullOrBlank()) return false
+        val uri = runCatching { Uri.parse(rawUrl) }.getOrNull() ?: return false
+        if (!uri.scheme.equals("https", ignoreCase = true) || uri.host.isNullOrBlank()) return false
+        return try {
+            startActivity(Intent(Intent.ACTION_VIEW, uri))
+            true
+        } catch (_: ActivityNotFoundException) {
+            false
+        }
     }
 
     private fun processDebugExtras(intent: Intent?) {
