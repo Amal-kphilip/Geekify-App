@@ -22,7 +22,7 @@ wavySlider = "2.2.0"
 haze = "1.7.3"
 
 # DI (Koin - replaces Hilt completely)
-koin = "4.1.0"
+koin = "4.2.2"
 
 # Media3 / ExoPlayer
 media3 = "1.10.0"
