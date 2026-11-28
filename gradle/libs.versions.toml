@@ -19,7 +19,7 @@ googleid = "1.2.1"
 # Compose
 composeBom = "2026.09.00"
 wavySlider = "2.2.0"
-haze = "1.7.0"
+haze = "1.7.3"
 
 # DI (Koin - replaces Hilt completely)
 koin = "4.1.0"
