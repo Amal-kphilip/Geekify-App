@@ -6,7 +6,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -24,6 +23,7 @@ class GeekifyNotifier constructor(private val context: Context) {
         const val EXTRA_VERSION_CODE = "version_code"
         const val EXTRA_ROUTE = "geekify_route"
         const val EXTRA_TRIGGER_UPDATE_CHECK = "trigger_update_check"
+        const val EXTRA_OPEN_RELEASE_URL = "open_release_url"
     }
 
     private val nm get() = NotificationManagerCompat.from(context)
@@ -47,7 +47,10 @@ class GeekifyNotifier constructor(private val context: Context) {
         if (!canPost(NotificationChannels.UPDATES)) return false
         val openRelease = PendingIntent.getActivity(
             context, 10,
-            Intent(Intent.ACTION_VIEW, Uri.parse(info.pageUrl)),
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_OPEN_RELEASE_URL, info.pageUrl)
+            },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val dismiss = dismissIntent(info.versionCode, requestCode = 11)
