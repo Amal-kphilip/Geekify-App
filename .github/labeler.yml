@@ -1,0 +1,33 @@
+app:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "app/**"
+
+innertube:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "innertube/**"
+
+backend:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "backend/**"
+
+docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "*.md"
+          - "release-notes/**"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "gradle/**"
+          - "**/build.gradle.kts"
+          - "backend/requirements.txt"
