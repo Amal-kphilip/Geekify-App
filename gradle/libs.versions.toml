@@ -48,7 +48,7 @@ timber = "5.0.1"
 
 # Testing
 junit = "4.13.2"
-robolectric = "4.14.1"
+robolectric = "4.18.1"
 
 [libraries]
 # AndroidX Core & Lifecycle
