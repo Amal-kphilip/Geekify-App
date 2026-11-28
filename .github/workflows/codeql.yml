@@ -24,7 +24,7 @@ jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     strategy:
       fail-fast: false
@@ -35,18 +35,71 @@ jobs:
           - language: actions
             build-mode: none
           - language: java-kotlin
-            build-mode: none
+            build-mode: manual
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      # ── java-kotlin manual build prerequisites ──────────────────────────────
+      - name: Set up JDK 21
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Gradle
+        if: matrix.language == 'java-kotlin'
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Restore Firebase configuration (placeholder)
+        if: matrix.language == 'java-kotlin'
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        shell: bash
+        run: |
+          if [[ -n "$GOOGLE_SERVICES_JSON_BASE64" ]]; then
+            echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > app/google-services.json
+          else
+            echo "::warning::GOOGLE_SERVICES_JSON_BASE64 secret is not set — using placeholder google-services.json."
+            cat > app/google-services.json <<'JSON'
+          {
+            "project_info": {
+              "project_id": "geekify-40226",
+              "project_number": "000000000000",
+              "firebase_url": "",
+              "storage_bucket": ""
+            },
+            "client": [{
+              "client_info": {
+                "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
+                "android_client_info": { "package_name": "com.geekify.android" }
+              },
+              "oauth_client": [],
+              "api_key": [{ "current_key": "" }],
+              "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+            }],
+            "configuration_version": "1"
+          }
+          JSON
+          fi
+      # ── CodeQL init (all languages) ─────────────────────────────────────────
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
 
+      # ── java-kotlin manual build ────────────────────────────────────────────
+      - name: Build (java-kotlin)
+        if: matrix.language == 'java-kotlin'
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew :innertube:assembleDebug :app:assembleDebug -x lint --no-daemon --no-build-cache
+
+      # ── CodeQL analyze (all languages) ──────────────────────────────────────
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
         with:
