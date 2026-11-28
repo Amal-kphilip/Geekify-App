@@ -29,6 +29,9 @@ updates:
       firebase:
         patterns:
           - "com.google.firebase.*"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
     # NOTE ON JITPACK & INNERTUBEX:
     # Dependencies in Geekify are declared inline in build.gradle.kts files (no version catalog).
@@ -53,3 +56,23 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+    groups:
+      python-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
