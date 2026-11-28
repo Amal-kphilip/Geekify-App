@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
 import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -24,6 +25,26 @@ class GeekifyNotifier constructor(private val context: Context) {
         const val EXTRA_VERSION_CODE = "version_code"
         const val EXTRA_ROUTE = "geekify_route"
         const val EXTRA_TRIGGER_UPDATE_CHECK = "trigger_update_check"
+
+        /**
+         * Returns the package name of the user's default browser, or null if one cannot be
+         * determined. Used to make ACTION_VIEW PendingIntents explicit (package-scoped) so that
+         * the wrapped intent is not implicit, satisfying the Android security requirement for
+         * PendingIntents passed to external processes such as the notification system.
+         */
+        internal fun resolveDefaultBrowserPackage(context: Context): String? {
+            val probe = Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com"))
+            val ri: ResolveInfo? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.resolveActivity(
+                    probe,
+                    PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong())
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.resolveActivity(probe, PackageManager.MATCH_DEFAULT_ONLY)
+            }
+            return ri?.activityInfo?.packageName
+        }
     }
 
     private val nm get() = NotificationManagerCompat.from(context)
@@ -47,7 +68,12 @@ class GeekifyNotifier constructor(private val context: Context) {
         if (!canPost(NotificationChannels.UPDATES)) return false
         val openRelease = PendingIntent.getActivity(
             context, 10,
-            Intent(Intent.ACTION_VIEW, Uri.parse(info.pageUrl)),
+            // Explicit: resolve the default browser package so the PendingIntent wraps an
+            // explicit intent (package-scoped). FLAG_IMMUTABLE prevents mutation by any
+            // process that receives the PendingIntent, which is the notification system.
+            Intent(Intent.ACTION_VIEW, Uri.parse(info.pageUrl)).apply {
+                resolveDefaultBrowserPackage(context)?.let { setPackage(it) }
+            },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val dismiss = dismissIntent(info.versionCode, requestCode = 11)
